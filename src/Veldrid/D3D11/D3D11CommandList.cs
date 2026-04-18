@@ -5,9 +5,11 @@ using System.Runtime.CompilerServices;
 using Vortice;
 using Vortice.Direct3D11;
 using Vortice.Mathematics;
+using System.Runtime.Versioning;
 
 namespace Veldrid.D3D11
 {
+    [SupportedOSPlatform("windows")]
     internal class D3D11CommandList : CommandList
     {
         public ID3D11CommandList DeviceCommandList => commandList;

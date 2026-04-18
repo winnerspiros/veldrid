@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Threading;
 using Microsoft.Win32.SafeHandles;
 using SharpGen.Runtime;
@@ -10,6 +11,7 @@ using Vortice.DXGI;
 
 namespace Veldrid.D3D11
 {
+    [SupportedOSPlatform("windows")]
     internal class D3D11Swapchain : Swapchain
     {
         public override Framebuffer Framebuffer => framebuffer;

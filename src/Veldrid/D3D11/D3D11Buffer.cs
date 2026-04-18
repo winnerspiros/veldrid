@@ -4,9 +4,11 @@ using System.Threading;
 using Vortice.Direct3D;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
+using System.Runtime.Versioning;
 
 namespace Veldrid.D3D11
 {
+    [SupportedOSPlatform("windows")]
     internal class D3D11Buffer : DeviceBuffer
     {
         public override uint SizeInBytes { get; }

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Threading;
 using Veldrid.D3D11;
 using Veldrid.MTL;
@@ -1114,6 +1115,8 @@ namespace Veldrid
         /// </summary>
         /// <param name="options">Describes several common properties of the GraphicsDevice.</param>
         /// <returns>A new <see cref="GraphicsDevice" /> using the Direct3D 11 API.</returns>
+        [SupportedOSPlatform("windows")]
+
         public static GraphicsDevice CreateD3D11(GraphicsDeviceOptions options)
         {
             return new D3D11GraphicsDevice(options, new D3D11DeviceOptions(), null);
@@ -1125,6 +1128,8 @@ namespace Veldrid
         /// <param name="options">Describes several common properties of the GraphicsDevice.</param>
         /// <param name="swapchainDescription">A description of the main Swapchain to create.</param>
         /// <returns>A new <see cref="GraphicsDevice" /> using the Direct3D 11 API.</returns>
+        [SupportedOSPlatform("windows")]
+
         public static GraphicsDevice CreateD3D11(GraphicsDeviceOptions options, SwapchainDescription swapchainDescription)
         {
             return new D3D11GraphicsDevice(options, new D3D11DeviceOptions(), swapchainDescription);
@@ -1136,6 +1141,8 @@ namespace Veldrid
         /// <param name="options">Describes several common properties of the GraphicsDevice.</param>
         /// <param name="d3d11Options">The Direct3D11-specific options used to create the device.</param>
         /// <returns>A new <see cref="GraphicsDevice" /> using the Direct3D 11 API.</returns>
+        [SupportedOSPlatform("windows")]
+
         public static GraphicsDevice CreateD3D11(GraphicsDeviceOptions options, D3D11DeviceOptions d3d11Options)
         {
             return new D3D11GraphicsDevice(options, d3d11Options, null);
@@ -1148,6 +1155,8 @@ namespace Veldrid
         /// <param name="d3d11Options">The Direct3D11-specific options used to create the device.</param>
         /// <param name="swapchainDescription">A description of the main Swapchain to create.</param>
         /// <returns>A new <see cref="GraphicsDevice" /> using the Direct3D 11 API.</returns>
+        [SupportedOSPlatform("windows")]
+
         public static GraphicsDevice CreateD3D11(GraphicsDeviceOptions options, D3D11DeviceOptions d3d11Options, SwapchainDescription swapchainDescription)
         {
             return new D3D11GraphicsDevice(options, d3d11Options, swapchainDescription);
@@ -1161,6 +1170,8 @@ namespace Veldrid
         /// <param name="width">The initial width of the window.</param>
         /// <param name="height">The initial height of the window.</param>
         /// <returns>A new <see cref="GraphicsDevice" /> using the Direct3D 11 API.</returns>
+        [SupportedOSPlatform("windows")]
+
         public static GraphicsDevice CreateD3D11(GraphicsDeviceOptions options, IntPtr hwnd, uint width, uint height)
         {
             var swapchainDescription = new SwapchainDescription(
@@ -1187,6 +1198,8 @@ namespace Veldrid
         /// <param name="renderHeight">The renderable height of the swapchain panel.</param>
         /// <param name="logicalDpi">The logical DPI of the swapchain panel.</param>
         /// <returns></returns>
+        [SupportedOSPlatform("windows")]
+
         public static GraphicsDevice CreateD3D11(
             GraphicsDeviceOptions options,
             object swapChainPanel,

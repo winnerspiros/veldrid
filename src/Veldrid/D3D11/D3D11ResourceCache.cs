@@ -3,9 +3,11 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using Vortice.Direct3D11;
+using System.Runtime.Versioning;
 
 namespace Veldrid.D3D11
 {
+    [SupportedOSPlatform("windows")]
     internal class D3D11ResourceCache : IDisposable
     {
         private readonly ID3D11Device device;

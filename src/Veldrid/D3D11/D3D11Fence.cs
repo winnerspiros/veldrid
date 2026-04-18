@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Threading;
+using System.Runtime.Versioning;
 
 namespace Veldrid.D3D11
 {
+    [SupportedOSPlatform("windows")]
     internal class D3D11Fence : Fence
     {
         public ManualResetEvent ResetEvent { get; }

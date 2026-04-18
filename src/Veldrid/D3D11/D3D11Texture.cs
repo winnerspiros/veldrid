@@ -2,9 +2,11 @@
 using System.Diagnostics;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
+using System.Runtime.Versioning;
 
 namespace Veldrid.D3D11
 {
+    [SupportedOSPlatform("windows")]
     internal class D3D11Texture : Texture
     {
         public override uint Width { get; }

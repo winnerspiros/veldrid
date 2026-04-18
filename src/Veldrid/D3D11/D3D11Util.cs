@@ -1,8 +1,10 @@
 ﻿using Vortice.Direct3D;
 using Vortice.Direct3D11;
+using System.Runtime.Versioning;
 
 namespace Veldrid.D3D11
 {
+    [SupportedOSPlatform("windows")]
     internal static class D3D11Util
     {
         public static int ComputeSubresource(uint mipLevel, uint mipLevelCount, uint arrayLayer)

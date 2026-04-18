@@ -1,5 +1,6 @@
 ﻿#if !EXCLUDE_D3D11_BACKEND
 using System;
+using System.Runtime.Versioning;
 using Veldrid.D3D11;
 using Vortice.Direct3D;
 
@@ -10,6 +11,7 @@ namespace Veldrid
     ///     useful for interoperating with native components which interface directly with Direct3D 11.
     ///     Can only be used on <see cref="GraphicsBackend.Direct3D11" />.
     /// </summary>
+    [SupportedOSPlatform("windows")]
     public class BackendInfoD3D11
     {
         /// <summary>

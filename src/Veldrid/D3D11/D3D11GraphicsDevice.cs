@@ -14,9 +14,11 @@ using Feature = Vortice.Direct3D11.Feature;
 using MapFlags = Vortice.Direct3D11.MapFlags;
 using VorticeDXGI = Vortice.DXGI.DXGI;
 using VorticeD3D11 = Vortice.Direct3D11.D3D11;
+using System.Runtime.Versioning;
 
 namespace Veldrid.D3D11
 {
+    [SupportedOSPlatform("windows")]
     internal class D3D11GraphicsDevice : GraphicsDevice
     {
         public override string DeviceName { get; }
