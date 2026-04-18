@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using Vulkan;
 using static Veldrid.Vk.VulkanUtil;
 using static Vulkan.VulkanNative;
@@ -77,8 +78,8 @@ namespace Veldrid.Vk
         public override ResourceFactory ResourceFactory { get; }
         private static readonly FixedUtf8String s_name = "Veldrid-VkGraphicsDevice";
         private static readonly Lazy<bool> s_is_supported = new Lazy<bool>(checkIsSupported, true);
-        private readonly object graphicsCommandPoolLock = new object();
-        private readonly object graphicsQueueLock = new object();
+        private readonly Lock graphicsCommandPoolLock = new Lock();
+        private readonly Lock graphicsQueueLock = new Lock();
         private readonly ConcurrentDictionary<VkFormat, VkFilter> filters = new ConcurrentDictionary<VkFormat, VkFilter>();
         private readonly BackendInfoVulkan vulkanInfo;
 
@@ -88,7 +89,7 @@ namespace Veldrid.Vk
         private const uint min_staging_buffer_size = 64;
         private const uint max_staging_buffer_size = 512;
 
-        private readonly object stagingResourcesLock = new object();
+        private readonly Lock stagingResourcesLock = new Lock();
         private readonly List<VkTexture> availableStagingTextures = new List<VkTexture>();
         private readonly List<VkBuffer> availableStagingBuffers = new List<VkBuffer>();
 
@@ -101,7 +102,7 @@ namespace Veldrid.Vk
         private readonly Dictionary<VkCommandBuffer, SharedCommandPool> submittedSharedCommandPools
             = new Dictionary<VkCommandBuffer, SharedCommandPool>();
 
-        private readonly object submittedFencesLock = new object();
+        private readonly Lock submittedFencesLock = new Lock();
         private readonly ConcurrentQueue<Vulkan.VkFence> availableSubmissionFences = new ConcurrentQueue<Vulkan.VkFence>();
         private readonly List<FenceSubmissionInfo> submittedFences = new List<FenceSubmissionInfo>();
         private readonly VkSwapchain mainSwapchain;
@@ -206,8 +207,7 @@ namespace Veldrid.Vk
             var debugCallbackCi = VkDebugReportCallbackCreateInfoEXT.New();
             debugCallbackCi.flags = flags;
             debugCallbackCi.pfnCallback = debugFunctionPtr;
-            IntPtr createFnPtr;
-            using (FixedUtf8String debugExtFnName = "vkCreateDebugReportCallbackEXT") createFnPtr = vkGetInstanceProcAddr(instance, debugExtFnName);
+            IntPtr createFnPtr = getInstanceProcAddr("vkCreateDebugReportCallbackEXT"u8);
 
             if (createFnPtr == IntPtr.Zero) return;
 
@@ -507,8 +507,7 @@ namespace Veldrid.Vk
             if (debugCallbackFunc != null)
             {
                 debugCallbackFunc = null;
-                FixedUtf8String debugExtFnName = "vkDestroyDebugReportCallbackEXT";
-                IntPtr destroyFuncPtr = vkGetInstanceProcAddr(instance, debugExtFnName);
+                IntPtr destroyFuncPtr = getInstanceProcAddr("vkDestroyDebugReportCallbackEXT"u8);
                 var destroyDel
                     = Marshal.GetDelegateForFunctionPointer<VkDestroyDebugReportCallbackExtD>(destroyFuncPtr);
                 destroyDel(instance, debugCallbackHandle, null);
@@ -894,14 +893,14 @@ namespace Veldrid.Vk
             var result = vkCreateInstance(ref instanceCi, null, out instance);
             CheckResult(result);
 
-            if (HasSurfaceExtension(CommonStrings.VkExtMetalSurfaceExtensionName)) CreateMetalSurfaceExt = getInstanceProcAddr<VkCreateMetalSurfaceExtT>("vkCreateMetalSurfaceEXT");
+            if (HasSurfaceExtension(CommonStrings.VkExtMetalSurfaceExtensionName)) CreateMetalSurfaceExt = getInstanceProcAddr<VkCreateMetalSurfaceExtT>("vkCreateMetalSurfaceEXT"u8);
 
             if (debug && debugReportExtensionAvailable) EnableDebugCallback();
 
             if (hasDeviceProperties2)
             {
-                getPhysicalDeviceProperties2 = getInstanceProcAddr<VkGetPhysicalDeviceProperties2T>("vkGetPhysicalDeviceProperties2")
-                                               ?? getInstanceProcAddr<VkGetPhysicalDeviceProperties2T>("vkGetPhysicalDeviceProperties2KHR");
+                getPhysicalDeviceProperties2 = getInstanceProcAddr<VkGetPhysicalDeviceProperties2T>("vkGetPhysicalDeviceProperties2"u8)
+                                               ?? getInstanceProcAddr<VkGetPhysicalDeviceProperties2T>("vkGetPhysicalDeviceProperties2KHR"u8);
             }
 
             foreach (var tempStr in tempStrings) tempStr.Dispose();
@@ -1096,13 +1095,13 @@ namespace Veldrid.Vk
             if (debugMarkerEnabled)
             {
                 setObjectNameDelegate = Marshal.GetDelegateForFunctionPointer<VkDebugMarkerSetObjectNameExtT>(
-                    getInstanceProcAddr("vkDebugMarkerSetObjectNameEXT"));
+                    getInstanceProcAddr("vkDebugMarkerSetObjectNameEXT"u8));
                 MarkerBegin = Marshal.GetDelegateForFunctionPointer<VkCmdDebugMarkerBeginExtT>(
-                    getInstanceProcAddr("vkCmdDebugMarkerBeginEXT"));
+                    getInstanceProcAddr("vkCmdDebugMarkerBeginEXT"u8));
                 MarkerEnd = Marshal.GetDelegateForFunctionPointer<VkCmdDebugMarkerEndExtT>(
-                    getInstanceProcAddr("vkCmdDebugMarkerEndEXT"));
+                    getInstanceProcAddr("vkCmdDebugMarkerEndEXT"u8));
                 MarkerInsert = Marshal.GetDelegateForFunctionPointer<VkCmdDebugMarkerInsertExtT>(
-                    getInstanceProcAddr("vkCmdDebugMarkerInsertEXT"));
+                    getInstanceProcAddr("vkCmdDebugMarkerInsertEXT"u8));
             }
 
             if (hasDedicatedAllocation && hasMemReqs2)
@@ -1110,15 +1109,15 @@ namespace Veldrid.Vk
                 // On Vulkan 1.1+ the core entry points are available directly.
                 if (DeviceApiVersion.IsAtLeast(1, 1))
                 {
-                    GetBufferMemoryRequirements2 = getDeviceProcAddr<VkGetBufferMemoryRequirements2T>("vkGetBufferMemoryRequirements2");
-                    GetImageMemoryRequirements2 = getDeviceProcAddr<VkGetImageMemoryRequirements2T>("vkGetImageMemoryRequirements2");
+                    GetBufferMemoryRequirements2 = getDeviceProcAddr<VkGetBufferMemoryRequirements2T>("vkGetBufferMemoryRequirements2"u8);
+                    GetImageMemoryRequirements2 = getDeviceProcAddr<VkGetImageMemoryRequirements2T>("vkGetImageMemoryRequirements2"u8);
                 }
                 else
                 {
-                    GetBufferMemoryRequirements2 = getDeviceProcAddr<VkGetBufferMemoryRequirements2T>("vkGetBufferMemoryRequirements2")
-                                                   ?? getDeviceProcAddr<VkGetBufferMemoryRequirements2T>("vkGetBufferMemoryRequirements2KHR");
-                    GetImageMemoryRequirements2 = getDeviceProcAddr<VkGetImageMemoryRequirements2T>("vkGetImageMemoryRequirements2")
-                                                  ?? getDeviceProcAddr<VkGetImageMemoryRequirements2T>("vkGetImageMemoryRequirements2KHR");
+                    GetBufferMemoryRequirements2 = getDeviceProcAddr<VkGetBufferMemoryRequirements2T>("vkGetBufferMemoryRequirements2"u8)
+                                                   ?? getDeviceProcAddr<VkGetBufferMemoryRequirements2T>("vkGetBufferMemoryRequirements2KHR"u8);
+                    GetImageMemoryRequirements2 = getDeviceProcAddr<VkGetImageMemoryRequirements2T>("vkGetImageMemoryRequirements2"u8)
+                                                  ?? getDeviceProcAddr<VkGetImageMemoryRequirements2T>("vkGetImageMemoryRequirements2KHR"u8);
                 }
             }
 
@@ -1143,6 +1142,21 @@ namespace Veldrid.Vk
             }
         }
 
+        // UTF-8 literal overloads: zero runtime encoding cost; 'u8' string literals are null-terminated.
+        private IntPtr getInstanceProcAddr(ReadOnlySpan<byte> nameUtf8)
+        {
+            fixed (byte* utf8Ptr = nameUtf8)
+                return vkGetInstanceProcAddr(instance, utf8Ptr);
+        }
+
+        private T getInstanceProcAddr<T>(ReadOnlySpan<byte> nameUtf8)
+        {
+            IntPtr funcPtr = getInstanceProcAddr(nameUtf8);
+            if (funcPtr != IntPtr.Zero) return Marshal.GetDelegateForFunctionPointer<T>(funcPtr);
+
+            return default;
+        }
+
         private IntPtr getInstanceProcAddr(string name)
         {
             int byteCount = Encoding.UTF8.GetByteCount(name);
@@ -1157,6 +1171,21 @@ namespace Veldrid.Vk
         private T getInstanceProcAddr<T>(string name)
         {
             IntPtr funcPtr = getInstanceProcAddr(name);
+            if (funcPtr != IntPtr.Zero) return Marshal.GetDelegateForFunctionPointer<T>(funcPtr);
+
+            return default;
+        }
+
+        // UTF-8 literal overloads: zero runtime encoding cost; 'u8' string literals are null-terminated.
+        private IntPtr getDeviceProcAddr(ReadOnlySpan<byte> nameUtf8)
+        {
+            fixed (byte* utf8Ptr = nameUtf8)
+                return vkGetDeviceProcAddr(device, utf8Ptr);
+        }
+
+        private T getDeviceProcAddr<T>(ReadOnlySpan<byte> nameUtf8)
+        {
+            IntPtr funcPtr = getDeviceProcAddr(nameUtf8);
             if (funcPtr != IntPtr.Zero) return Marshal.GetDelegateForFunctionPointer<T>(funcPtr);
 
             return default;
@@ -1322,18 +1351,31 @@ namespace Veldrid.Vk
             uint imageIndex = vkSc.ImageIndex;
             presentInfo.pImageIndices = &imageIndex;
 
-            object presentLock = vkSc.PresentQueueIndex == GraphicsQueueIndex ? graphicsQueueLock : vkSc;
-
-            lock (presentLock)
+            if (vkSc.PresentQueueIndex == GraphicsQueueIndex)
             {
-                vkQueuePresentKHR(vkSc.PresentQueue, ref presentInfo);
-
-                if (vkSc.AcquireNextImage(device, VkSemaphore.Null, vkSc.ImageAvailableFence))
+                lock (graphicsQueueLock)
                 {
-                    var fence = vkSc.ImageAvailableFence;
-                    vkWaitForFences(device, 1, ref fence, true, ulong.MaxValue);
-                    vkResetFences(device, 1, ref fence);
+                    vkQueuePresentKHR(vkSc.PresentQueue, ref presentInfo);
+                    acquireAndWaitNextImage(vkSc);
                 }
+            }
+            else
+            {
+                lock (vkSc)
+                {
+                    vkQueuePresentKHR(vkSc.PresentQueue, ref presentInfo);
+                    acquireAndWaitNextImage(vkSc);
+                }
+            }
+        }
+
+        private void acquireAndWaitNextImage(VkSwapchain vkSc)
+        {
+            if (vkSc.AcquireNextImage(device, VkSemaphore.Null, vkSc.ImageAvailableFence))
+            {
+                var fence = vkSc.ImageAvailableFence;
+                vkWaitForFences(device, 1, ref fence, true, ulong.MaxValue);
+                vkResetFences(device, 1, ref fence);
             }
         }
 

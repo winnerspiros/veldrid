@@ -12,7 +12,7 @@
         /// <summary>
         ///     Wraps a raw Vulkan-packed version uint (e.g. from physicalDeviceProperties.apiVersion).
         /// </summary>
-        public static VkVersion FromPacked(uint packed) => new VkVersion { value = packed };
+        public static VkVersion FromPacked(uint packed) => new VkVersion(packed);
 
         public uint Major => value >> 22;
 

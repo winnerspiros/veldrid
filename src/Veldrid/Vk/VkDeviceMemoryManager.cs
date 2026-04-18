@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading;
 using Vulkan;
 using static Vulkan.VulkanNative;
 using static Veldrid.Vk.VulkanUtil;
@@ -13,7 +14,7 @@ namespace Veldrid.Vk
         private const ulong min_dedicated_allocation_size_non_dynamic = 1024 * 1024 * 64;
         private readonly VkDevice device;
         private readonly ulong bufferImageGranularity;
-        private readonly object @lock = new object();
+        private readonly Lock @lock = new Lock();
         private readonly Dictionary<uint, ChunkAllocatorSet> allocatorsByMemoryTypeUnmapped = new Dictionary<uint, ChunkAllocatorSet>();
         private readonly Dictionary<uint, ChunkAllocatorSet> allocatorsByMemoryType = new Dictionary<uint, ChunkAllocatorSet>();
 

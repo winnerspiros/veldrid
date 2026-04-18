@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Linq;
 using Vulkan;
 using static Vulkan.VulkanNative;
 using static Veldrid.Vk.VulkanUtil;
@@ -219,14 +218,14 @@ namespace Veldrid.Vk
 
             if (syncToVBlank)
             {
-                if (presentModes.Contains(VkPresentModeKHR.FifoRelaxedKHR))
+                if (Array.IndexOf(presentModes, VkPresentModeKHR.FifoRelaxedKHR) >= 0)
                     presentMode = VkPresentModeKHR.FifoRelaxedKHR;
             }
-            else if (presentModes.Contains(VkPresentModeKHR.MailboxKHR))
+            else if (Array.IndexOf(presentModes, VkPresentModeKHR.MailboxKHR) >= 0)
                 presentMode = VkPresentModeKHR.MailboxKHR;
-            else if (allowTearing && presentModes.Contains(VkPresentModeKHR.ImmediateKHR))
+            else if (allowTearing && Array.IndexOf(presentModes, VkPresentModeKHR.ImmediateKHR) >= 0)
                 presentMode = VkPresentModeKHR.ImmediateKHR;
-            else if (presentModes.Contains(VkPresentModeKHR.ImmediateKHR))
+            else if (Array.IndexOf(presentModes, VkPresentModeKHR.ImmediateKHR) >= 0)
                 presentMode = VkPresentModeKHR.ImmediateKHR;
 
             uint maxImageCount = surfaceCapabilities.maxImageCount == 0 ? uint.MaxValue : surfaceCapabilities.maxImageCount;

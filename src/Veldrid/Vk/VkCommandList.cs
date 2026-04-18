@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
+using System.Threading;
 using Vulkan;
 using static Vulkan.VulkanNative;
 using static Veldrid.Vk.VulkanUtil;
@@ -31,10 +32,10 @@ namespace Veldrid.Vk
         private readonly VkGraphicsDevice gd;
         private readonly List<VkTexture> preDrawSampledImages = new List<VkTexture>();
 
-        private readonly object commandBufferListLock = new object();
+        private readonly Lock commandBufferListLock = new Lock();
         private readonly Queue<VkCommandBuffer> availableCommandBuffers = new Queue<VkCommandBuffer>();
         private readonly List<VkCommandBuffer> submittedCommandBuffers = new List<VkCommandBuffer>();
-        private readonly object stagingLock = new object();
+        private readonly Lock stagingLock = new Lock();
         private readonly Dictionary<VkCommandBuffer, StagingResourceInfo> submittedStagingInfos = new Dictionary<VkCommandBuffer, StagingResourceInfo>();
         private readonly List<StagingResourceInfo> availableStagingInfos = new List<StagingResourceInfo>();
         private readonly List<VkBuffer> availableStagingBuffers = new List<VkBuffer>();
