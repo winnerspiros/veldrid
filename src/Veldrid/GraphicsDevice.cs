@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Threading;
 using Veldrid.D3D11;
 using Veldrid.MTL;
 using Veldrid.OpenGL;
@@ -147,7 +148,7 @@ namespace Veldrid
         /// </summary>
         public Sampler LinearSampler { get; private set; }
 
-        private readonly object deferredDisposalLock = new object();
+        private readonly Lock deferredDisposalLock = new Lock();
         private readonly List<IDisposable> disposables = new List<IDisposable>();
         private Sampler aniso4XSampler;
 

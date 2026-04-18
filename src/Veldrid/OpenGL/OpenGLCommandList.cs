@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading;
 using Veldrid.OpenGL.NoAllocEntryList;
 
 namespace Veldrid.OpenGL
@@ -15,7 +16,7 @@ namespace Veldrid.OpenGL
 
         internal OpenGLGraphicsDevice Device { get; }
 
-        private readonly object @lock = new object();
+        private readonly Lock @lock = new Lock();
         private readonly List<IOpenGLCommandEntryList> availableLists = new List<IOpenGLCommandEntryList>();
         private readonly List<IOpenGLCommandEntryList> submittedLists = new List<IOpenGLCommandEntryList>();
         private bool disposed;

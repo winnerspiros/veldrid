@@ -47,15 +47,15 @@ namespace Veldrid.MTL
         private readonly MtlSwapchain mainSwapchain;
         private readonly bool[] supportedSampleCounts;
 
-        private readonly object submittedCommandsLock = new object();
+        private readonly Lock submittedCommandsLock = new Lock();
         private readonly CommandBufferUsageList<MtlCommandList> submittedCLs = new CommandBufferUsageList<MtlCommandList>();
 
-        private readonly object resetEventsLock = new object();
+        private readonly Lock resetEventsLock = new Lock();
         private readonly List<ManualResetEvent[]> resetEvents = new List<ManualResetEvent[]>();
 
         private const string unaligned_buffer_copy_pipeline_mac_os_name = "MTL_UnalignedBufferCopy_macOS";
         private const string unaligned_buffer_copy_pipelinei_os_name = "MTL_UnalignedBufferCopy_iOS";
-        private readonly object unalignedBufferCopyPipelineLock = new object();
+        private readonly Lock unalignedBufferCopyPipelineLock = new Lock();
         private readonly IntPtr libSystem;
 
         // ReSharper disable once PrivateFieldCanBeConvertedToLocalVariable

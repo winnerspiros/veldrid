@@ -88,7 +88,7 @@ namespace Veldrid.D3D11
         private readonly SwapchainDescription description;
         private readonly PixelFormat? depthFormat;
 
-        private readonly object referencedCLsLock = new object();
+        private readonly Lock referencedCLsLock = new Lock();
 
         private readonly bool canTear;
         private readonly bool canCreateFrameLatencyWaitableObject;

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading;
 using Vortice.Direct3D;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
@@ -30,7 +31,7 @@ namespace Veldrid.D3D11
         }
 
         private readonly ID3D11Device device;
-        private readonly object accessViewLock = new object();
+        private readonly Lock accessViewLock = new Lock();
 
         private readonly Dictionary<OffsetSizePair, ID3D11ShaderResourceView> srvs
             = new Dictionary<OffsetSizePair, ID3D11ShaderResourceView>();
