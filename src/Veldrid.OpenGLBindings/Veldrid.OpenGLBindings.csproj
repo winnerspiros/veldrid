@@ -10,7 +10,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>ppy.Veldrid.OpenGLBindings</AssemblyName>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <LangVersion>latest</LangVersion>
+    <LangVersion>14.0</LangVersion>
   </PropertyGroup>
 
   <PropertyGroup>
