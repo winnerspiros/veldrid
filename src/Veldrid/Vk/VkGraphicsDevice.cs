@@ -69,6 +69,11 @@ namespace Veldrid.Vk
 
         public VkCreateMetalSurfaceExtT CreateMetalSurfaceExt { get; private set; }
 
+        /// <summary>
+        ///     The Vulkan API version supported by the selected physical device.
+        /// </summary>
+        internal VkVersion DeviceApiVersion { get; private set; }
+
         public override ResourceFactory ResourceFactory { get; }
         private static readonly FixedUtf8String s_name = "Veldrid-VkGraphicsDevice";
         private static readonly Lazy<bool> s_is_supported = new Lazy<bool>(checkIsSupported, true);
@@ -667,6 +672,14 @@ namespace Veldrid.Vk
         {
             lock (submittedFencesLock)
             {
+                if (submittedFences.Count == 0)
+                    return;
+
+                // Quick-check the oldest fence first; if it's not ready, none after it will be.
+                var oldestFence = submittedFences[0].Fence;
+                if (vkWaitForFences(device, 1, ref oldestFence, true, 0) != VkResult.Success)
+                    return;
+
                 for (int i = 0; i < submittedFences.Count; i++)
                 {
                     var fsi = submittedFences[i];
@@ -758,9 +771,29 @@ namespace Veldrid.Vk
             var availableInstanceExtensions = new HashSet<string>(GetInstanceExtensions());
 
             var instanceCi = VkInstanceCreateInfo.New();
+
+            // Query the highest supported Vulkan instance version.
+            // vkEnumerateInstanceVersion is a Vulkan 1.1 function; if absent we fall back to 1.0.
+            uint instanceApiVersion = new VkVersion(1, 0, 0);
+
+            fixed (byte* fnName = "vkEnumerateInstanceVersion\0"u8)
+            {
+                IntPtr fnPtr = vkGetInstanceProcAddr(new VkInstance(), fnName);
+
+                if (fnPtr != IntPtr.Zero)
+                {
+                    var enumerateInstanceVersion =
+                        Marshal.GetDelegateForFunctionPointer<VkEnumerateInstanceVersionT>(fnPtr);
+
+                    uint supportedVersion;
+                    if (enumerateInstanceVersion(&supportedVersion) == VkResult.Success)
+                        instanceApiVersion = supportedVersion;
+                }
+            }
+
             var applicationInfo = new VkApplicationInfo
             {
-                apiVersion = new VkVersion(1, 0, 0),
+                apiVersion = instanceApiVersion,
                 applicationVersion = new VkVersion(1, 0, 0),
                 engineVersion = new VkVersion(1, 0, 0),
                 pApplicationName = s_name,
@@ -907,14 +940,33 @@ namespace Veldrid.Vk
 
             var physicalDevices = new VkPhysicalDevice[deviceCount];
             vkEnumeratePhysicalDevices(instance, ref deviceCount, ref physicalDevices[0]);
-            // Just use the first one.
+
+            // Prefer discrete GPU over integrated/virtual/CPU, falling back to the first device.
             PhysicalDevice = physicalDevices[0];
+
+            for (int i = 0; i < physicalDevices.Length; i++)
+            {
+                vkGetPhysicalDeviceProperties(physicalDevices[i], out var props);
+
+                if (props.deviceType == VkPhysicalDeviceType.DiscreteGpu)
+                {
+                    PhysicalDevice = physicalDevices[i];
+                    break;
+                }
+
+                if (props.deviceType == VkPhysicalDeviceType.IntegratedGpu && physicalDevices[0] != physicalDevices[i])
+                {
+                    // Prefer integrated over anything worse, but keep looking for discrete.
+                    PhysicalDevice = physicalDevices[i];
+                }
+            }
 
             vkGetPhysicalDeviceProperties(PhysicalDevice, out physicalDeviceProperties);
             fixed (byte* utf8NamePtr = physicalDeviceProperties.deviceName) deviceName = Encoding.UTF8.GetString(utf8NamePtr, (int)MaxPhysicalDeviceNameSize).TrimEnd('\0');
 
+            DeviceApiVersion = VkVersion.FromPacked(physicalDeviceProperties.apiVersion);
             vendorName = "id:" + physicalDeviceProperties.vendorID.ToString("x8");
-            apiVersion = GraphicsApiVersion.Unknown;
+            apiVersion = new GraphicsApiVersion((int)DeviceApiVersion.Major, (int)DeviceApiVersion.Minor, 0, (int)DeviceApiVersion.Patch);
             DriverInfo = "version:" + physicalDeviceProperties.driverVersion.ToString("x8");
 
             vkGetPhysicalDeviceFeatures(PhysicalDevice, out physicalDeviceFeatures);
@@ -949,11 +1001,15 @@ namespace Veldrid.Vk
 
             var requiredInstanceExtensions = new HashSet<string>(options.DeviceExtensions ?? Array.Empty<string>());
 
-            bool hasMemReqs2 = false;
-            bool hasDedicatedAllocation = false;
-            bool hasDriverProperties = false;
+            bool hasMemReqs2 = DeviceApiVersion.IsAtLeast(1, 1);
+            bool hasDedicatedAllocation = DeviceApiVersion.IsAtLeast(1, 1);
+            bool hasDriverProperties = DeviceApiVersion.IsAtLeast(1, 2);
             IntPtr[] activeExtensions = new IntPtr[props.Length];
             uint activeExtensionCount = 0;
+
+            // On Vulkan 1.1+, VK_KHR_maintenance1 is core.
+            if (preferStandardClipY && DeviceApiVersion.IsAtLeast(1, 1))
+                standardClipYDirection = true;
 
             fixed (VkExtensionProperties* properties = props)
             {
@@ -974,6 +1030,7 @@ namespace Veldrid.Vk
                     }
                     else if (preferStandardClipY && extensionName == "VK_KHR_maintenance1")
                     {
+                        // On 1.1+ this is core, but enabling the extension is harmless and some drivers still list it.
                         activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
                         requiredInstanceExtensions.Remove(extensionName);
                         standardClipYDirection = true;
@@ -1050,10 +1107,19 @@ namespace Veldrid.Vk
 
             if (hasDedicatedAllocation && hasMemReqs2)
             {
-                GetBufferMemoryRequirements2 = getDeviceProcAddr<VkGetBufferMemoryRequirements2T>("vkGetBufferMemoryRequirements2")
-                                               ?? getDeviceProcAddr<VkGetBufferMemoryRequirements2T>("vkGetBufferMemoryRequirements2KHR");
-                GetImageMemoryRequirements2 = getDeviceProcAddr<VkGetImageMemoryRequirements2T>("vkGetImageMemoryRequirements2")
-                                              ?? getDeviceProcAddr<VkGetImageMemoryRequirements2T>("vkGetImageMemoryRequirements2KHR");
+                // On Vulkan 1.1+ the core entry points are available directly.
+                if (DeviceApiVersion.IsAtLeast(1, 1))
+                {
+                    GetBufferMemoryRequirements2 = getDeviceProcAddr<VkGetBufferMemoryRequirements2T>("vkGetBufferMemoryRequirements2");
+                    GetImageMemoryRequirements2 = getDeviceProcAddr<VkGetImageMemoryRequirements2T>("vkGetImageMemoryRequirements2");
+                }
+                else
+                {
+                    GetBufferMemoryRequirements2 = getDeviceProcAddr<VkGetBufferMemoryRequirements2T>("vkGetBufferMemoryRequirements2")
+                                                   ?? getDeviceProcAddr<VkGetBufferMemoryRequirements2T>("vkGetBufferMemoryRequirements2KHR");
+                    GetImageMemoryRequirements2 = getDeviceProcAddr<VkGetImageMemoryRequirements2T>("vkGetImageMemoryRequirements2")
+                                                  ?? getDeviceProcAddr<VkGetImageMemoryRequirements2T>("vkGetImageMemoryRequirements2KHR");
+                }
             }
 
             if (getPhysicalDeviceProperties2 != null && hasDriverProperties)
@@ -1499,6 +1565,8 @@ namespace Veldrid.Vk
     internal unsafe delegate void VkGetImageMemoryRequirements2T(VkDevice device, VkImageMemoryRequirementsInfo2KHR* pInfo, VkMemoryRequirements2KHR* pMemoryRequirements);
 
     internal unsafe delegate void VkGetPhysicalDeviceProperties2T(VkPhysicalDevice physicalDevice, void* properties);
+
+    internal unsafe delegate VkResult VkEnumerateInstanceVersionT(uint* pApiVersion);
 
     // VK_EXT_metal_surface
 

@@ -266,9 +266,7 @@ namespace Veldrid.Vk
             vkCmdPipelineBarrier(
                 CommandBuffer,
                 VkPipelineStageFlags.Transfer, needToProtectUniform
-                    ? VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.ComputeShader |
-                      VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.GeometryShader |
-                      VkPipelineStageFlags.TessellationControlShader | VkPipelineStageFlags.TessellationEvaluationShader
+                    ? VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.FragmentShader
                     : VkPipelineStageFlags.VertexInput,
                 VkDependencyFlags.None,
                 1, ref barrier,
@@ -941,10 +939,28 @@ namespace Veldrid.Vk
 
             // Place a barrier between RenderPasses, so that color / depth outputs
             // can be read in subsequent passes.
+            //
+            // On Vulkan 1.3+ devices use granular stage masks instead of the catch-all
+            // BottomOfPipe → TopOfPipe, which causes full tile flushes on mobile GPUs.
+            VkPipelineStageFlags srcStage;
+            VkPipelineStageFlags dstStage;
+
+            if (gd.DeviceApiVersion.IsAtLeast(1, 3))
+            {
+                srcStage = VkPipelineStageFlags.ColorAttachmentOutput | VkPipelineStageFlags.LateFragmentTests;
+                dstStage = VkPipelineStageFlags.ColorAttachmentOutput | VkPipelineStageFlags.EarlyFragmentTests
+                           | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexInput;
+            }
+            else
+            {
+                srcStage = VkPipelineStageFlags.BottomOfPipe;
+                dstStage = VkPipelineStageFlags.TopOfPipe;
+            }
+
             vkCmdPipelineBarrier(
                 CommandBuffer,
-                VkPipelineStageFlags.BottomOfPipe,
-                VkPipelineStageFlags.TopOfPipe,
+                srcStage,
+                dstStage,
                 VkDependencyFlags.None,
                 0,
                 null,

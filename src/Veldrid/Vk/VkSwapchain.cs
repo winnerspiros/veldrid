@@ -222,10 +222,10 @@ namespace Veldrid.Vk
                 if (presentModes.Contains(VkPresentModeKHR.FifoRelaxedKHR))
                     presentMode = VkPresentModeKHR.FifoRelaxedKHR;
             }
-            else if (allowTearing && presentModes.Contains(VkPresentModeKHR.ImmediateKHR))
-                presentMode = VkPresentModeKHR.ImmediateKHR;
             else if (presentModes.Contains(VkPresentModeKHR.MailboxKHR))
                 presentMode = VkPresentModeKHR.MailboxKHR;
+            else if (allowTearing && presentModes.Contains(VkPresentModeKHR.ImmediateKHR))
+                presentMode = VkPresentModeKHR.ImmediateKHR;
             else if (presentModes.Contains(VkPresentModeKHR.ImmediateKHR))
                 presentMode = VkPresentModeKHR.ImmediateKHR;
 
@@ -258,7 +258,7 @@ namespace Veldrid.Vk
                 swapchainCi.queueFamilyIndexCount = 0;
             }
 
-            swapchainCi.preTransform = VkSurfaceTransformFlagsKHR.IdentityKHR;
+            swapchainCi.preTransform = surfaceCapabilities.currentTransform;
             swapchainCi.compositeAlpha = VkCompositeAlphaFlagsKHR.OpaqueKHR;
             swapchainCi.clipped = true;
 
