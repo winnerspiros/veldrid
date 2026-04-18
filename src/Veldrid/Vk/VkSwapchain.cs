@@ -221,12 +221,12 @@ namespace Veldrid.Vk
                 if (Array.IndexOf(presentModes, VkPresentModeKHR.FifoRelaxedKHR) >= 0)
                     presentMode = VkPresentModeKHR.FifoRelaxedKHR;
             }
-            else if (Array.IndexOf(presentModes, VkPresentModeKHR.MailboxKHR) >= 0)
-                presentMode = VkPresentModeKHR.MailboxKHR;
             else if (allowTearing && Array.IndexOf(presentModes, VkPresentModeKHR.ImmediateKHR) >= 0)
-                presentMode = VkPresentModeKHR.ImmediateKHR;
+                presentMode = VkPresentModeKHR.ImmediateKHR; // Lowest latency; tearing is acceptable.
+            else if (Array.IndexOf(presentModes, VkPresentModeKHR.MailboxKHR) >= 0)
+                presentMode = VkPresentModeKHR.MailboxKHR; // Low latency without tearing.
             else if (Array.IndexOf(presentModes, VkPresentModeKHR.ImmediateKHR) >= 0)
-                presentMode = VkPresentModeKHR.ImmediateKHR;
+                presentMode = VkPresentModeKHR.ImmediateKHR; // Fallback: lower latency than FIFO.
 
             uint maxImageCount = surfaceCapabilities.maxImageCount == 0 ? uint.MaxValue : surfaceCapabilities.maxImageCount;
             uint imageCount = Math.Min(maxImageCount, surfaceCapabilities.minImageCount + 1);

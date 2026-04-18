@@ -675,8 +675,9 @@ namespace Veldrid.Vk
                     return;
 
                 // Quick-check the oldest fence first; if it's not ready, none after it will be.
-                var oldestFence = submittedFences[0].Fence;
-                if (vkWaitForFences(device, 1, ref oldestFence, true, 0) != VkResult.Success)
+                // vkGetFenceStatus is a non-blocking status query and is cheaper than vkWaitForFences(timeout=0)
+                // on drivers that treat the wait path differently.
+                if (vkGetFenceStatus(device, submittedFences[0].Fence) != VkResult.Success)
                     return;
 
                 for (int i = 0; i < submittedFences.Count; i++)
