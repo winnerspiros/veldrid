@@ -1,9 +1,11 @@
 ﻿using System;
 using Vortice.Direct3D11;
 using Vortice.Mathematics;
+using System.Runtime.Versioning;
 
 namespace Veldrid.D3D11
 {
+    [SupportedOSPlatform("windows")]
     internal class D3D11Sampler : Sampler
     {
         public ID3D11SamplerState DeviceSampler { get; }

@@ -1,8 +1,10 @@
 ﻿using System;
 using Vortice.Direct3D11;
+using System.Runtime.Versioning;
 
 namespace Veldrid.D3D11
 {
+    [SupportedOSPlatform("windows")]
     internal class D3D11ResourceFactory : ResourceFactory, IDisposable
     {
         public override GraphicsBackend BackendType => GraphicsBackend.Direct3D11;

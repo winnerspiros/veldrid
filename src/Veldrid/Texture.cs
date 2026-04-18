@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Threading;
 
 namespace Veldrid
 {
@@ -67,7 +68,7 @@ namespace Veldrid
         /// </summary>
         public abstract string Name { get; set; }
 
-        private readonly object fullTextureViewLock = new object();
+        private readonly Lock fullTextureViewLock = new Lock();
         private TextureView fullTextureView;
 
         #region Disposal

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading;
 using Veldrid.MetalBindings;
 
 namespace Veldrid.MTL
@@ -16,7 +17,7 @@ namespace Veldrid.MTL
 
         private readonly List<MtlBuffer> availableStagingBuffers = new List<MtlBuffer>();
         private readonly CommandBufferUsageList<MtlBuffer> submittedStagingBuffers = new CommandBufferUsageList<MtlBuffer>();
-        private readonly object submittedCommandsLock = new object();
+        private readonly Lock submittedCommandsLock = new Lock();
         private readonly CommandBufferUsageList<MtlFence> completionFences = new CommandBufferUsageList<MtlFence>();
 
         private readonly Dictionary<UIntPtr, DeviceBufferRange> boundVertexBuffers = new Dictionary<UIntPtr, DeviceBufferRange>();

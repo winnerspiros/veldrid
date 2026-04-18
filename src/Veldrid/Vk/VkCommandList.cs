@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
+using System.Threading;
 using Vulkan;
 using static Vulkan.VulkanNative;
 using static Veldrid.Vk.VulkanUtil;
@@ -31,10 +32,10 @@ namespace Veldrid.Vk
         private readonly VkGraphicsDevice gd;
         private readonly List<VkTexture> preDrawSampledImages = new List<VkTexture>();
 
-        private readonly object commandBufferListLock = new object();
+        private readonly Lock commandBufferListLock = new Lock();
         private readonly Queue<VkCommandBuffer> availableCommandBuffers = new Queue<VkCommandBuffer>();
         private readonly List<VkCommandBuffer> submittedCommandBuffers = new List<VkCommandBuffer>();
-        private readonly object stagingLock = new object();
+        private readonly Lock stagingLock = new Lock();
         private readonly Dictionary<VkCommandBuffer, StagingResourceInfo> submittedStagingInfos = new Dictionary<VkCommandBuffer, StagingResourceInfo>();
         private readonly List<StagingResourceInfo> availableStagingInfos = new List<StagingResourceInfo>();
         private readonly List<VkBuffer> availableStagingBuffers = new List<VkBuffer>();
@@ -266,9 +267,7 @@ namespace Veldrid.Vk
             vkCmdPipelineBarrier(
                 CommandBuffer,
                 VkPipelineStageFlags.Transfer, needToProtectUniform
-                    ? VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.ComputeShader |
-                      VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.GeometryShader |
-                      VkPipelineStageFlags.TessellationControlShader | VkPipelineStageFlags.TessellationEvaluationShader
+                    ? VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.FragmentShader
                     : VkPipelineStageFlags.VertexInput,
                 VkDependencyFlags.None,
                 1, ref barrier,
@@ -941,10 +940,28 @@ namespace Veldrid.Vk
 
             // Place a barrier between RenderPasses, so that color / depth outputs
             // can be read in subsequent passes.
+            //
+            // On Vulkan 1.3+ devices use granular stage masks instead of the catch-all
+            // BottomOfPipe → TopOfPipe, which causes full tile flushes on mobile GPUs.
+            VkPipelineStageFlags srcStage;
+            VkPipelineStageFlags dstStage;
+
+            if (gd.DeviceApiVersion.IsAtLeast(1, 3))
+            {
+                srcStage = VkPipelineStageFlags.ColorAttachmentOutput | VkPipelineStageFlags.LateFragmentTests;
+                dstStage = VkPipelineStageFlags.ColorAttachmentOutput | VkPipelineStageFlags.EarlyFragmentTests
+                           | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexInput;
+            }
+            else
+            {
+                srcStage = VkPipelineStageFlags.BottomOfPipe;
+                dstStage = VkPipelineStageFlags.TopOfPipe;
+            }
+
             vkCmdPipelineBarrier(
                 CommandBuffer,
-                VkPipelineStageFlags.BottomOfPipe,
-                VkPipelineStageFlags.TopOfPipe,
+                srcStage,
+                dstStage,
                 VkDependencyFlags.None,
                 0,
                 null,

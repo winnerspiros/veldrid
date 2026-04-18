@@ -3,9 +3,11 @@ using System.Text;
 using Vortice.D3DCompiler;
 using Vortice.Direct3D;
 using Vortice.Direct3D11;
+using System.Runtime.Versioning;
 
 namespace Veldrid.D3D11
 {
+    [SupportedOSPlatform("windows")]
     internal class D3D11Shader : Shader
     {
         public ID3D11DeviceChild DeviceShader { get; }

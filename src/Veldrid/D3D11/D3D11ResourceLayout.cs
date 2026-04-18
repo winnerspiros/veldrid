@@ -1,5 +1,8 @@
-﻿namespace Veldrid.D3D11
+﻿using System.Runtime.Versioning;
+
+namespace Veldrid.D3D11
 {
+    [SupportedOSPlatform("windows")]
     internal class D3D11ResourceLayout : ResourceLayout
     {
         public int UniformBufferCount { get; }
@@ -91,6 +94,8 @@
         {
             return bindingInfosByVdIndex[index].DynamicBuffer;
         }
+
+        [SupportedOSPlatform("windows")]
 
         internal struct ResourceBindingInfo
         {

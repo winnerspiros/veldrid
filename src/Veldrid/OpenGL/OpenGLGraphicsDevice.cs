@@ -64,19 +64,19 @@ namespace Veldrid.OpenGL
         private readonly ConcurrentQueue<IOpenGLDeferredResource> resourcesToDispose
             = new ConcurrentQueue<IOpenGLDeferredResource>();
 
-        private readonly object commandListDisposalLock = new object();
+        private readonly Lock commandListDisposalLock = new Lock();
 
         private readonly Dictionary<OpenGLCommandList, int> submittedCommandListCounts
             = new Dictionary<OpenGLCommandList, int>();
 
         private readonly HashSet<OpenGLCommandList> commandListsToDispose = new HashSet<OpenGLCommandList>();
 
-        private readonly object mappedResourceLock = new object();
+        private readonly Lock mappedResourceLock = new Lock();
 
         private readonly Dictionary<MappedResourceCacheKey, MappedResourceInfoWithStaging> mappedResources
             = new Dictionary<MappedResourceCacheKey, MappedResourceInfoWithStaging>();
 
-        private readonly object resetEventsLock = new object();
+        private readonly Lock resetEventsLock = new Lock();
         private readonly List<ManualResetEvent[]> resetEvents = new List<ManualResetEvent[]>();
 
         private static readonly uint update_texture_args_size = (uint)Unsafe.SizeOf<UpdateTextureArgs>();
@@ -1065,7 +1065,7 @@ namespace Veldrid.OpenGL
             private readonly Action<IntPtr> makeCurrent;
             private readonly IntPtr context;
             private readonly List<Exception> exceptions = new List<Exception>();
-            private readonly object exceptionsLock = new object();
+            private readonly Lock exceptionsLock = new Lock();
             private bool terminated;
 
             public ExecutionThread(

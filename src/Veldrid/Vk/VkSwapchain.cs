@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Linq;
 using Vulkan;
 using static Vulkan.VulkanNative;
 using static Veldrid.Vk.VulkanUtil;
@@ -219,15 +218,15 @@ namespace Veldrid.Vk
 
             if (syncToVBlank)
             {
-                if (presentModes.Contains(VkPresentModeKHR.FifoRelaxedKHR))
+                if (Array.IndexOf(presentModes, VkPresentModeKHR.FifoRelaxedKHR) >= 0)
                     presentMode = VkPresentModeKHR.FifoRelaxedKHR;
             }
-            else if (allowTearing && presentModes.Contains(VkPresentModeKHR.ImmediateKHR))
-                presentMode = VkPresentModeKHR.ImmediateKHR;
-            else if (presentModes.Contains(VkPresentModeKHR.MailboxKHR))
-                presentMode = VkPresentModeKHR.MailboxKHR;
-            else if (presentModes.Contains(VkPresentModeKHR.ImmediateKHR))
-                presentMode = VkPresentModeKHR.ImmediateKHR;
+            else if (allowTearing && Array.IndexOf(presentModes, VkPresentModeKHR.ImmediateKHR) >= 0)
+                presentMode = VkPresentModeKHR.ImmediateKHR; // Lowest latency; tearing is acceptable.
+            else if (Array.IndexOf(presentModes, VkPresentModeKHR.MailboxKHR) >= 0)
+                presentMode = VkPresentModeKHR.MailboxKHR; // Low latency without tearing.
+            else if (Array.IndexOf(presentModes, VkPresentModeKHR.ImmediateKHR) >= 0)
+                presentMode = VkPresentModeKHR.ImmediateKHR; // Fallback: lower latency than FIFO.
 
             uint maxImageCount = surfaceCapabilities.maxImageCount == 0 ? uint.MaxValue : surfaceCapabilities.maxImageCount;
             uint imageCount = Math.Min(maxImageCount, surfaceCapabilities.minImageCount + 1);
@@ -258,7 +257,7 @@ namespace Veldrid.Vk
                 swapchainCi.queueFamilyIndexCount = 0;
             }
 
-            swapchainCi.preTransform = VkSurfaceTransformFlagsKHR.IdentityKHR;
+            swapchainCi.preTransform = surfaceCapabilities.currentTransform;
             swapchainCi.compositeAlpha = VkCompositeAlphaFlagsKHR.OpaqueKHR;
             swapchainCi.clipped = true;
 

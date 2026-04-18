@@ -14,9 +14,11 @@ using Feature = Vortice.Direct3D11.Feature;
 using MapFlags = Vortice.Direct3D11.MapFlags;
 using VorticeDXGI = Vortice.DXGI.DXGI;
 using VorticeD3D11 = Vortice.Direct3D11.D3D11;
+using System.Runtime.Versioning;
 
 namespace Veldrid.D3D11
 {
+    [SupportedOSPlatform("windows")]
     internal class D3D11GraphicsDevice : GraphicsDevice
     {
         public override string DeviceName { get; }
@@ -64,18 +66,18 @@ namespace Veldrid.D3D11
         private readonly D3D11Swapchain mainSwapchain;
         private readonly bool supportsConcurrentResources;
         private readonly bool supportsCommandLists;
-        private readonly object immediateContextLock = new object();
+        private readonly Lock immediateContextLock = new Lock();
         private readonly BackendInfoD3D11 d3d11Info;
 
-        private readonly object mappedResourceLock = new object();
+        private readonly Lock mappedResourceLock = new Lock();
 
         private readonly Dictionary<MappedResourceCacheKey, MappedResourceInfo> mappedResources
             = new Dictionary<MappedResourceCacheKey, MappedResourceInfo>();
 
-        private readonly object stagingResourcesLock = new object();
+        private readonly Lock stagingResourcesLock = new Lock();
         private readonly List<D3D11Buffer> availableStagingBuffers = new List<D3D11Buffer>();
 
-        private readonly object resetEventsLock = new object();
+        private readonly Lock resetEventsLock = new Lock();
         private readonly List<ManualResetEvent[]> resetEvents = new List<ManualResetEvent[]>();
 
         public D3D11GraphicsDevice(GraphicsDeviceOptions options, D3D11DeviceOptions d3D11DeviceOptions, SwapchainDescription? swapchainDesc)

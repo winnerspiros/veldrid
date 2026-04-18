@@ -1,9 +1,11 @@
 ﻿using System.Diagnostics;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
+using System.Runtime.Versioning;
 
 namespace Veldrid.D3D11
 {
+    [SupportedOSPlatform("windows")]
     internal static class D3D11Formats
     {
         internal static Format ToDxgiFormat(PixelFormat format, bool depthFormat)

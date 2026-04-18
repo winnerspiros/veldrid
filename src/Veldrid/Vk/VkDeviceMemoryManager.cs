@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading;
 using Vulkan;
 using static Vulkan.VulkanNative;
 using static Veldrid.Vk.VulkanUtil;
@@ -9,11 +10,11 @@ namespace Veldrid.Vk
 {
     internal unsafe class VkDeviceMemoryManager : IDisposable
     {
-        private const ulong min_dedicated_allocation_size_dynamic = 1024 * 1024 * 64;
-        private const ulong min_dedicated_allocation_size_non_dynamic = 1024 * 1024 * 256;
+        private const ulong min_dedicated_allocation_size_dynamic = 1024 * 1024 * 16;
+        private const ulong min_dedicated_allocation_size_non_dynamic = 1024 * 1024 * 64;
         private readonly VkDevice device;
         private readonly ulong bufferImageGranularity;
-        private readonly object @lock = new object();
+        private readonly Lock @lock = new Lock();
         private readonly Dictionary<uint, ChunkAllocatorSet> allocatorsByMemoryTypeUnmapped = new Dictionary<uint, ChunkAllocatorSet>();
         private readonly Dictionary<uint, ChunkAllocatorSet> allocatorsByMemoryType = new Dictionary<uint, ChunkAllocatorSet>();
 
@@ -238,8 +239,8 @@ namespace Veldrid.Vk
         private class ChunkAllocator : IDisposable
         {
             public VkDeviceMemory Memory => memory;
-            private const ulong persistent_mapped_chunk_size = 1024 * 1024 * 64;
-            private const ulong unmapped_chunk_size = 1024 * 1024 * 256;
+            private const ulong persistent_mapped_chunk_size = 1024 * 1024 * 16;
+            private const ulong unmapped_chunk_size = 1024 * 1024 * 64;
             private readonly VkDevice device;
             private readonly uint memoryTypeIndex;
             private readonly List<VkMemoryBlock> freeBlocks = new List<VkMemoryBlock>();

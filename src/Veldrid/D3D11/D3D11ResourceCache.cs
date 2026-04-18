@@ -3,13 +3,15 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using Vortice.Direct3D11;
+using System.Runtime.Versioning;
 
 namespace Veldrid.D3D11
 {
+    [SupportedOSPlatform("windows")]
     internal class D3D11ResourceCache : IDisposable
     {
         private readonly ID3D11Device device;
-        private readonly object @lock = new object();
+        private readonly Lock @lock = new Lock();
 
         private readonly Dictionary<BlendStateDescription, ID3D11BlendState> blendStates
             = new Dictionary<BlendStateDescription, ID3D11BlendState>();
@@ -66,7 +68,7 @@ namespace Veldrid.D3D11
 
         private ID3D11BlendState getBlendState(ref BlendStateDescription description)
         {
-            Debug.Assert(Monitor.IsEntered(@lock));
+            Debug.Assert(@lock.IsHeldByCurrentThread);
 
             if (!blendStates.TryGetValue(description, out var blendState))
             {
@@ -105,7 +107,7 @@ namespace Veldrid.D3D11
 
         private ID3D11DepthStencilState getDepthStencilState(ref DepthStencilStateDescription description)
         {
-            Debug.Assert(Monitor.IsEntered(@lock));
+            Debug.Assert(@lock.IsHeldByCurrentThread);
 
             if (!depthStencilStates.TryGetValue(description, out var dss))
             {
@@ -147,7 +149,7 @@ namespace Veldrid.D3D11
 
         private ID3D11RasterizerState getRasterizerState(ref RasterizerStateDescription description, bool multisample)
         {
-            Debug.Assert(Monitor.IsEntered(@lock));
+            Debug.Assert(@lock.IsHeldByCurrentThread);
             var key = new D3D11RasterizerStateCacheKey(description, multisample);
 
             if (!rasterizerStates.TryGetValue(key, out var rasterizerState))
@@ -176,7 +178,7 @@ namespace Veldrid.D3D11
 
         private ID3D11InputLayout getInputLayout(VertexLayoutDescription[] vertexLayouts, byte[] vsBytecode)
         {
-            Debug.Assert(Monitor.IsEntered(@lock));
+            Debug.Assert(@lock.IsHeldByCurrentThread);
 
             if (vsBytecode == null || vertexLayouts == null || vertexLayouts.Length == 0) return null;
 

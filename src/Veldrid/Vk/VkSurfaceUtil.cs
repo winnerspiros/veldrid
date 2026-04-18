@@ -125,11 +125,24 @@ namespace Veldrid.Vk
         {
             IntPtr aNativeWindow = AndroidRuntime.ANativeWindow_fromSurface(androidSource.JniEnv, androidSource.Surface);
 
-            var androidSurfaceCi = VkAndroidSurfaceCreateInfoKHR.New();
-            androidSurfaceCi.window = (ANativeWindow*)aNativeWindow;
-            var result = vkCreateAndroidSurfaceKHR(instance, ref androidSurfaceCi, null, out var surface);
-            CheckResult(result);
-            return surface;
+            try
+            {
+                // Pre-configure buffer geometry to reduce driver overhead during swapchain creation.
+                // Passing 0 for width/height lets the native window decide, while format 1 = WINDOW_FORMAT_RGBA_8888.
+                AndroidRuntime.ANativeWindow_setBuffersGeometry(aNativeWindow, 0, 0, 1);
+
+                var androidSurfaceCi = VkAndroidSurfaceCreateInfoKHR.New();
+                androidSurfaceCi.window = (ANativeWindow*)aNativeWindow;
+                var result = vkCreateAndroidSurfaceKHR(instance, ref androidSurfaceCi, null, out var surface);
+                CheckResult(result);
+                return surface;
+            }
+            finally
+            {
+                // ANativeWindow_fromSurface increments the reference count; release it now that
+                // the Vulkan surface has taken its own reference.
+                AndroidRuntime.ANativeWindow_release(aNativeWindow);
+            }
         }
 
         private static VkSurfaceKHR createNSWindowSurface(VkGraphicsDevice gd, VkInstance instance, NSWindowSwapchainSource nsWindowSource, bool hasExtMetalSurface)
