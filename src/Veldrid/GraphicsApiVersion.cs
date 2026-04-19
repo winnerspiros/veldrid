@@ -1,16 +1,47 @@
 ﻿namespace Veldrid
 {
+    /// <summary>
+    ///     Represents a graphics API version with major, minor, subminor, and patch components.
+    /// </summary>
     public readonly struct GraphicsApiVersion
     {
+        /// <summary>
+        ///     Gets an unknown (zeroed) version.
+        /// </summary>
         public static GraphicsApiVersion Unknown => default;
 
+        /// <summary>
+        ///     Gets the major version component.
+        /// </summary>
         public int Major { get; }
+
+        /// <summary>
+        ///     Gets the minor version component.
+        /// </summary>
         public int Minor { get; }
+
+        /// <summary>
+        ///     Gets the subminor version component.
+        /// </summary>
         public int Subminor { get; }
+
+        /// <summary>
+        ///     Gets the patch version component.
+        /// </summary>
         public int Patch { get; }
 
+        /// <summary>
+        ///     Gets a value indicating whether this version is known (non-default).
+        /// </summary>
         public bool IsKnown => Major != 0 && Minor != 0 && Subminor != 0 && Patch != 0;
 
+        /// <summary>
+        ///     Creates a new <see cref="GraphicsApiVersion" /> with the given components.
+        /// </summary>
+        /// <param name="major">The major version component.</param>
+        /// <param name="minor">The minor version component.</param>
+        /// <param name="subminor">The subminor version component.</param>
+        /// <param name="patch">The patch version component.</param>
         public GraphicsApiVersion(int major, int minor, int subminor, int patch)
         {
             Major = major;
@@ -19,6 +50,7 @@
             Patch = patch;
         }
 
+        /// <inheritdoc />
         public override string ToString()
         {
             return $"{Major}.{Minor}.{Subminor}.{Patch}";

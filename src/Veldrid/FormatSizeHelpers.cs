@@ -2,6 +2,9 @@
 
 namespace Veldrid
 {
+    /// <summary>
+    ///     Provides helper methods for computing pixel format sizes.
+    /// </summary>
     public static class FormatSizeHelpers
     {
         /// <summary>

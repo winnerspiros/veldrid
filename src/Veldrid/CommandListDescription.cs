@@ -7,6 +7,7 @@ namespace Veldrid
     /// </summary>
     public struct CommandListDescription : IEquatable<CommandListDescription>
     {
+        /// <inheritdoc />
         public bool Equals(CommandListDescription other) => true;
     }
 }

@@ -1,11 +1,23 @@
 name: Veldrid CI build
 
+# CI triggers:
+#   - Every push to any branch (catches issues early on feature branches)
+#   - Every pull request (gate merges)
+#   - Tag creation (triggers NuGet publish + GitHub Release)
+#
+# Platform coverage:
+#   The library targets net10.0 — a single cross-platform binary.
+#   Backend-specific code paths are validated by each platform's CI:
+#   - Windows:  D3D11, D3D12, Vulkan, OpenGL compilation
+#   - Linux:    Vulkan, OpenGL, OpenGL ES compilation (covers Android backends)
+#   - macOS:    Metal compilation (covers iOS backends)
+#   iOS and Android use the same compiled binary at runtime.
+
 on:
   create: # when tags are created
   push:
-    branches: [ master ]
+    branches: [ '**' ]
   pull_request:
-    branches: [ master ]
 
 permissions:
   contents: read
@@ -17,7 +29,7 @@ jobs:
       contents: write
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
       with:
         fetch-depth: 0
     - name: Setup .NET
@@ -27,7 +39,7 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore src
     - name: Build
-      run: dotnet build --no-restore src -c Release
+      run: dotnet build --no-restore src -c Release -p:TreatWarningsAsErrors=true
     - name: Build Packages
       run: dotnet pack src -c Release
     - name: Publish tagged release to nuget.org
@@ -44,7 +56,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
       with:
         fetch-depth: 0
     - name: Setup .NET
@@ -54,13 +66,15 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore src
     - name: Build
-      run: dotnet build --no-restore src -c Release
+      run: dotnet build --no-restore src -c Release -p:TreatWarningsAsErrors=true
+    - name: Verify NuGet Packages
+      run: dotnet pack --no-build src -c Release
 
   build_macos:
     runs-on: macos-latest
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
       with:
         fetch-depth: 0
     - name: Setup .NET
@@ -70,4 +84,6 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore src
     - name: Build
-      run: dotnet build --no-restore src -c Release
+      run: dotnet build --no-restore src -c Release -p:TreatWarningsAsErrors=true
+    - name: Verify NuGet Packages
+      run: dotnet pack --no-build src -c Release
