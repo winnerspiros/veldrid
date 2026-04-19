@@ -31,6 +31,10 @@ As of April 2024, this repository no longer tracks and is incompatible with the 
 - Vulkan backend: `VK_EXT_descriptor_indexing` detection (core in Vulkan 1.2) — enables future bindless descriptor patterns
 - Vulkan backend: `stackalloc` for descriptor sets and dynamic offsets in hot paths
 - Vulkan backend: UTF-8 `u8` string literals for all proc address lookups (zero runtime encoding)
+- **Vulkan memory allocator** — block split on allocation now updates in-place instead of RemoveAt+Insert, eliminating O(n) array shifts in the memory allocation hot path
+- **D3D12 command list** — redundant state tracking for scissor rects and blend factors; skips GPU calls when state is unchanged (matching Vulkan backend's proven pattern)
+- **D3D12 staging buffer pool** — swap-remove O(1) instead of RemoveAt O(n) for staging buffer reuse
+- **D3D11 resource binding** — merged four sequential base-offset accumulation loops into a single pass per resource set activation, improving cache locality and reducing per-draw overhead
 - D3D11 backend: pre-allocated arrays for vertex strides/offsets in draw calls, deferred context command recording
 - Target framework upgraded to `net10.0` with `LangVersion 14.0`
 

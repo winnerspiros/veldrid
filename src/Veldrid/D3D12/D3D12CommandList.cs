@@ -38,6 +38,12 @@ namespace Veldrid.D3D12
         private bool disposed;
         private string name;
 
+        // Cached state to skip redundant GPU calls on hot paths.
+        private RawRect cachedScissorRect;
+        private bool hasScissorRect;
+        private Color4 cachedBlendFactor;
+        private bool hasBlendFactor;
+
         public D3D12CommandList(D3D12GraphicsDevice gd, ref CommandListDescription description)
             : base(ref description, gd.Features, 256u, 16u)
         {
@@ -63,6 +69,13 @@ namespace Veldrid.D3D12
         {
             currentAllocator = gd.CommandAllocatorPool.GetAllocator(gd.FrameFence.CompletedValue);
             commandList.Reset(currentAllocator);
+
+            // Reset cached state — command list state is undefined after Reset.
+            hasScissorRect = false;
+            hasBlendFactor = false;
+            currentGraphicsPipeline = null;
+            currentComputePipeline = null;
+            currentFramebuffer = null;
         }
 
         public override void End()
@@ -77,7 +90,20 @@ namespace Veldrid.D3D12
 
         public override void SetScissorRect(uint index, uint x, uint y, uint width, uint height)
         {
-            commandList.RSSetScissorRect(new RawRect((int)x, (int)y, (int)(x + width), (int)(y + height)));
+            var rect = new RawRect((int)x, (int)y, (int)(x + width), (int)(y + height));
+
+            if (hasScissorRect
+                && cachedScissorRect.Left == rect.Left
+                && cachedScissorRect.Top == rect.Top
+                && cachedScissorRect.Right == rect.Right
+                && cachedScissorRect.Bottom == rect.Bottom)
+            {
+                return;
+            }
+
+            cachedScissorRect = rect;
+            hasScissorRect = true;
+            commandList.RSSetScissorRect(rect);
         }
 
         public override void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ)
@@ -112,11 +138,24 @@ namespace Veldrid.D3D12
                 commandList.SetGraphicsRootSignature(d3d12Pipeline.RootSignature);
                 commandList.IASetPrimitiveTopology(d3d12Pipeline.PrimitiveTopology);
                 commandList.OMSetStencilRef(d3d12Pipeline.StencilReference);
-                commandList.OMSetBlendFactor(new Color4(
+
+                var blendFactor = new Color4(
                     d3d12Pipeline.BlendFactor[0],
                     d3d12Pipeline.BlendFactor[1],
                     d3d12Pipeline.BlendFactor[2],
-                    d3d12Pipeline.BlendFactor[3]));
+                    d3d12Pipeline.BlendFactor[3]);
+
+                if (!hasBlendFactor
+                    || cachedBlendFactor.R != blendFactor.R
+                    || cachedBlendFactor.G != blendFactor.G
+                    || cachedBlendFactor.B != blendFactor.B
+                    || cachedBlendFactor.A != blendFactor.A)
+                {
+                    cachedBlendFactor = blendFactor;
+                    hasBlendFactor = true;
+                    commandList.OMSetBlendFactor(blendFactor);
+                }
+
                 currentGraphicsPipeline = d3d12Pipeline;
             }
         }

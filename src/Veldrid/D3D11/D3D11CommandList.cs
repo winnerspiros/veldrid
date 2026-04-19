@@ -426,10 +426,7 @@ namespace Veldrid.D3D11
         {
             var d3d11Rs = Util.AssertSubtype<ResourceSet, D3D11ResourceSet>(brsi.Set);
 
-            int cbBase = getConstantBufferBase(slot, graphics);
-            int uaBase = getUnorderedAccessBase(slot, graphics);
-            int textureBase = getTextureBase(slot, graphics);
-            int samplerBase = getSamplerBase(slot, graphics);
+            getResourceSlotBases(slot, graphics, out int cbBase, out int uaBase, out int textureBase, out int samplerBase);
 
             var layout = d3d11Rs.Layout;
             var resources = d3d11Rs.Resources;
@@ -557,6 +554,29 @@ namespace Veldrid.D3D11
 
                 btis.Clear();
                 poolBoundTextureList(btis);
+            }
+        }
+
+        /// <summary>
+        /// Computes all four resource slot bases in a single loop instead of four separate loops.
+        /// Each loop was iterating the same layouts array — this merges them for cache efficiency.
+        /// </summary>
+        private void getResourceSlotBases(uint slot, bool graphics,
+            out int cbBase, out int uaBase, out int textureBase, out int samplerBase)
+        {
+            var layouts = graphics ? graphicsPipeline.ResourceLayouts : computePipeline.ResourceLayouts;
+            cbBase = 0;
+            uaBase = 0;
+            textureBase = 0;
+            samplerBase = 0;
+
+            for (int i = 0; i < slot; i++)
+            {
+                Debug.Assert(layouts[i] != null);
+                cbBase += layouts[i].UniformBufferCount;
+                uaBase += layouts[i].StorageBufferCount;
+                textureBase += layouts[i].TextureCount;
+                samplerBase += layouts[i].SamplerCount;
             }
         }
 
@@ -756,7 +776,7 @@ namespace Veldrid.D3D11
                 return ret;
             }
 
-            return new List<BoundTextureInfo>();
+            return new List<BoundTextureInfo>(4);
         }
 
         private void bindStorageBufferView(D3D11BufferRange range, int slot, ShaderStages stages)

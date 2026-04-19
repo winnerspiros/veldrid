@@ -676,7 +676,14 @@ namespace Veldrid.D3D12
                         && availableStagingBuffers[i].Usage == usage)
                     {
                         var buffer = availableStagingBuffers[i];
-                        availableStagingBuffers.RemoveAt(i);
+
+                        // Swap-remove: O(1) instead of O(n) RemoveAt.
+                        int lastIndex = availableStagingBuffers.Count - 1;
+
+                        if (i < lastIndex)
+                            availableStagingBuffers[i] = availableStagingBuffers[lastIndex];
+
+                        availableStagingBuffers.RemoveAt(lastIndex);
                         return buffer;
                     }
                 }
