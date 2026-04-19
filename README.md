@@ -35,6 +35,8 @@ As of April 2024, this repository no longer tracks and is incompatible with the 
 - **D3D12 command list** — redundant state tracking for scissor rects and blend factors; skips GPU calls when state is unchanged (matching Vulkan backend's proven pattern)
 - **D3D12 staging buffer pool** — swap-remove O(1) instead of RemoveAt O(n) for staging buffer reuse
 - **D3D11 resource binding** — merged four sequential base-offset accumulation loops into a single pass per resource set activation, improving cache locality and reducing per-draw overhead
+- **OpenGL/ES pipeline state caching** — skips all blend, depth, stencil, rasterizer, and shader program GL calls when the same pipeline is re-activated (eliminates 30–50 redundant GL calls per draw in typical scenes)
+- **OpenGL/ES resource set clear** — only clears used resource set slots instead of the full array on every draw call
 - D3D11 backend: pre-allocated arrays for vertex strides/offsets in draw calls, deferred context command recording
 - Target framework upgraded to `net10.0` with `LangVersion 14.0`
 
