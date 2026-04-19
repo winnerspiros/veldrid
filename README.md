@@ -32,6 +32,16 @@ As of April 2024, this repository no longer tracks and is incompatible with the 
 - D3D11 backend: pre-allocated arrays for vertex strides/offsets in draw calls, deferred context command recording
 - Target framework upgraded to `net10.0` with `LangVersion 14.0`
 
+### Bug Fixes from Upstream Issues & PRs
+- **Vulkan: Remove `[Conditional("DEBUG")]` from `VulkanUtil.CheckResult`** — was silently swallowing Vulkan errors in release builds, causing untraceable segfaults ([ppy#61](https://github.com/ppy/veldrid/issues/61))
+- **Vulkan: Fix depth texture copy** — `CopyTexture` between depth/stencil textures was using `VkImageAspectFlags.Color` instead of `Depth|Stencil`, causing validation errors or silent failures ([veldrid#462](https://github.com/veldrid/veldrid/pull/462))
+- **`DisposeWhenIdle` now flushes on `SubmitCommands`** — previously resources passed to `DisposeWhenIdle` were only disposed when `WaitForIdle` was called, causing memory leaks in apps that never call `WaitForIdle` ([veldrid#476](https://github.com/veldrid/veldrid/issues/476))
+- **Metal: Fix depth test when disabled** — `DepthComparison` forced to `Always` when `DepthTestEnabled` is false, preventing fragments from being incorrectly rejected ([ppy#75](https://github.com/ppy/veldrid/pull/75))
+- **OpenGL: Fix `ClearDepthStencil` mask mutation** — was leaving stencil mask and depth write in incorrect state after clear, preventing `SetPipeline` from restoring them ([veldrid#481](https://github.com/veldrid/veldrid/pull/481))
+- **Vulkan: Fix `CommandBufferCompleted` race condition** — `submittedCommandBuffers.Add` in `End()` now protected by the same lock as `CommandBufferCompleted` ([veldrid#495](https://github.com/veldrid/veldrid/pull/495))
+- **D3D11: FlipDiscard swapchain** — uses modern flip model on DXGI 1.4+, reducing frame latency ([veldrid#484](https://github.com/veldrid/veldrid/pull/484), [veldrid#515](https://github.com/veldrid/veldrid/issues/515))
+- **GLES: Stencil buffer init + 64-bit eglGetDisplay** — GLES now properly initializes stencil buffers and uses `IntPtr` for `eglGetDisplay` on 64-bit targets ([ppy#71](https://github.com/ppy/veldrid/pull/71))
+
 ### CI / Build
 - CI workflow updated to .NET 10 SDK
 - Multi-platform CI: Windows, Linux, and macOS build verification

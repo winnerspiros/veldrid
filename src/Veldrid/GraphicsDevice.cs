@@ -236,6 +236,7 @@ namespace Veldrid
         public void SubmitCommands(CommandList commandList)
         {
             SubmitCommandsCore(commandList, null);
+            flushDeferredDisposals();
         }
 
         /// <summary>
@@ -255,6 +256,7 @@ namespace Veldrid
         public void SubmitCommands(CommandList commandList, Fence fence)
         {
             SubmitCommandsCore(commandList, fence);
+            flushDeferredDisposals();
         }
 
         /// <summary>
