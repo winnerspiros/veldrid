@@ -34,13 +34,28 @@ As of April 2024, this repository no longer tracks and is incompatible with the 
 - D3D11 backend: pre-allocated arrays for vertex strides/offsets in draw calls, deferred context command recording
 - Target framework upgraded to `net10.0` with `LangVersion 14.0`
 
+### Variable Rate Shading (VRS)
+- Cross-backend per-draw shading rate control via `CommandList.SetShadingRate(ShadingRate)`
+- **D3D12**: Uses `ID3D12GraphicsCommandList5.RSSetShadingRate` (requires Options6, Tier 1+)
+- **Vulkan**: Uses `VK_KHR_fragment_shading_rate` / `vkCmdSetFragmentShadingRateKHR`
+- Rates from 1×1 (default) through 4×4 (sixteenth-rate) — reduce fragment shader workload for non-critical regions
+- Feature detection: `GraphicsDeviceFeatures.VariableRateShading`
+
+### Mesh Shader Dispatch
+- Cross-backend mesh shader dispatch via `CommandList.DispatchMesh(groupCountX, groupCountY, groupCountZ)`
+- **D3D12**: Uses `ID3D12GraphicsCommandList6.DispatchMesh` (requires Options7, Tier 1+)
+- **Vulkan**: Uses `VK_EXT_mesh_shader` / `vkCmdDrawMeshTasksEXT`
+- New shader stages: `ShaderStages.Task` (amplification) and `ShaderStages.Mesh`
+- Feature detection: `GraphicsDeviceFeatures.MeshShader`
+
 ### GPU Hardware Capability Detection
 - **D3D12 Enhanced Barriers** (Options12) — detected at device creation, exposed via `BackendInfoD3D12.SupportsEnhancedBarriers`
 - **D3D12 Mesh Shaders** (Options7) — `BackendInfoD3D12.SupportsMeshShaders`
 - **D3D12 Variable Rate Shading** (Options6) — `BackendInfoD3D12.SupportsVariableRateShading`
 - **D3D12 DXR Raytracing** (Options5) — `BackendInfoD3D12.SupportsRaytracing`
 - **Vulkan Descriptor Indexing** — `VkGraphicsDevice.HasDescriptorIndexing` (bindless descriptors)
-- These are detection-only flags today — they enable consumers to query hardware capabilities and make informed decisions
+- **Vulkan Fragment Shading Rate** — `BackendInfoVulkan.HasFragmentShadingRate`
+- **Vulkan Mesh Shaders** — `BackendInfoVulkan.HasMeshShader`
 
 ### Bug Fixes from Upstream Issues & PRs
 - **Vulkan: Remove `[Conditional("DEBUG")]` from `VulkanUtil.CheckResult`** — was silently swallowing Vulkan errors in release builds, causing untraceable segfaults ([ppy#61](https://github.com/ppy/veldrid/issues/61))
