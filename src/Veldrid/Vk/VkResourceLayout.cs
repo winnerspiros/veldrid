@@ -12,6 +12,12 @@ namespace Veldrid.Vk
         public DescriptorResourceCounts DescriptorResourceCounts { get; }
         public new int DynamicBufferCount { get; }
 
+        /// <summary>
+        ///     Whether this layout was created with the push descriptor flag.
+        ///     Sets using this layout bypass pool allocation and use vkCmdPushDescriptorSetKHR.
+        /// </summary>
+        public bool IsPushDescriptorLayout { get; }
+
         public override bool IsDisposed => disposed;
 
         public override string Name
@@ -97,6 +103,16 @@ namespace Veldrid.Vk
                 storageBufferCount,
                 storageBufferDynamicCount,
                 storageImageCount);
+
+            // Use push descriptor layout when the extension is available, there are no
+            // dynamic bindings, and the descriptor count fits within the device limit.
+            if (gd.HasPushDescriptors
+                && DynamicBufferCount == 0
+                && elements.Length <= gd.MaxPushDescriptors)
+            {
+                IsPushDescriptorLayout = true;
+                dslCi.flags = VkDescriptorSetLayoutCreateFlags.PushDescriptorKHR;
+            }
 
             dslCi.bindingCount = (uint)elements.Length;
             dslCi.pBindings = bindings;

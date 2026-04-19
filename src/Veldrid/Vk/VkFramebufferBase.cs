@@ -16,6 +16,18 @@ namespace Veldrid.Vk
         public abstract VkRenderPass RenderPassClear { get; }
         public abstract uint AttachmentCount { get; }
 
+        /// <summary>
+        ///     Color attachment image views for dynamic rendering. May return an empty list
+        ///     if the framebuffer does not expose individual views.
+        /// </summary>
+        public abstract IReadOnlyList<VkImageView> ColorAttachmentViews { get; }
+
+        /// <summary>
+        ///     Depth attachment image view for dynamic rendering. Returns <see cref="VkImageView.Null"/>
+        ///     when no depth target is present.
+        /// </summary>
+        public abstract VkImageView DepthAttachmentView { get; }
+
         protected VkFramebufferBase(
             FramebufferAttachmentDescription? depthTexture,
             IReadOnlyList<FramebufferAttachmentDescription> colorTextures)

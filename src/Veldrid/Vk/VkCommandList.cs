@@ -60,6 +60,10 @@ namespace Veldrid.Vk
 
         private bool newFramebuffer; // Render pass cycle state
 
+        // Sentinel value used in activeRenderPass to indicate that dynamic rendering
+        // (vkCmdBeginRendering) is active rather than a traditional VkRenderPass.
+        private static readonly VkRenderPass dynamicRenderingSentinel = new VkRenderPass(ulong.MaxValue);
+
         // Compute State
         private VkPipeline currentComputePipeline;
         private BoundResourceSetInfo[] currentComputeResourceSets = Array.Empty<BoundResourceSetInfo>();
@@ -761,33 +765,88 @@ namespace Veldrid.Vk
 
             for (uint currentSlot = 0; currentSlot < resourceSetCount; currentSlot++)
             {
-                bool batchEnded = !resourceSetsChanged[currentSlot] || currentSlot == resourceSetCount - 1;
-
                 if (resourceSetsChanged[currentSlot])
                 {
                     resourceSetsChanged[currentSlot] = false;
                     var vkSet = Util.AssertSubtype<ResourceSet, VkResourceSet>(resourceSets[currentSlot].Set);
-                    descriptorSets[currentBatchCount] = vkSet.DescriptorSet;
-                    currentBatchCount += 1;
-
-                    ref var curSetOffsets = ref resourceSets[currentSlot].Offsets;
-
-                    for (uint i = 0; i < curSetOffsets.Count; i++)
-                    {
-                        dynamicOffsets[currentBatchDynamicOffsetCount] = curSetOffsets.Get(i);
-                        currentBatchDynamicOffsetCount += 1;
-                    }
 
                     // Increment ref count on first use of a set.
                     currentStagingInfo.Resources.Add(vkSet.RefCount);
                     for (int i = 0; i < vkSet.RefCounts.Count; i++) currentStagingInfo.Resources.Add(vkSet.RefCounts[i]);
-                }
 
-                if (batchEnded)
+                    if (vkSet.IsPushDescriptor)
+                    {
+                        // Flush any pending traditional batch before the push.
+                        if (currentBatchCount != 0)
+                        {
+                            vkCmdBindDescriptorSets(
+                                CommandBuffer,
+                                bindPoint,
+                                pipelineLayout,
+                                currentBatchFirstSet,
+                                currentBatchCount,
+                                descriptorSets,
+                                currentBatchDynamicOffsetCount,
+                                dynamicOffsets);
+                            currentBatchCount = 0;
+                            currentBatchDynamicOffsetCount = 0;
+                        }
+
+                        // Push descriptors directly into the command buffer.
+                        pushDescriptorSet(vkSet, bindPoint, pipelineLayout, currentSlot);
+                        currentBatchFirstSet = currentSlot + 1;
+                    }
+                    else
+                    {
+                        // Traditional bind path.
+                        descriptorSets[currentBatchCount] = vkSet.DescriptorSet;
+                        currentBatchCount += 1;
+
+                        ref var curSetOffsets = ref resourceSets[currentSlot].Offsets;
+
+                        for (uint i = 0; i < curSetOffsets.Count; i++)
+                        {
+                            dynamicOffsets[currentBatchDynamicOffsetCount] = curSetOffsets.Get(i);
+                            currentBatchDynamicOffsetCount += 1;
+                        }
+
+                        bool batchEnded = currentSlot == resourceSetCount - 1;
+
+                        // Check if next slot breaks the batch (unchanged or push descriptor).
+                        if (!batchEnded && currentSlot + 1 < resourceSetCount)
+                        {
+                            if (!resourceSetsChanged[currentSlot + 1])
+                                batchEnded = true;
+                            else
+                            {
+                                var nextSet = Util.AssertSubtype<ResourceSet, VkResourceSet>(resourceSets[currentSlot + 1].Set);
+                                if (nextSet.IsPushDescriptor)
+                                    batchEnded = true;
+                            }
+                        }
+
+                        if (batchEnded && currentBatchCount != 0)
+                        {
+                            vkCmdBindDescriptorSets(
+                                CommandBuffer,
+                                bindPoint,
+                                pipelineLayout,
+                                currentBatchFirstSet,
+                                currentBatchCount,
+                                descriptorSets,
+                                currentBatchDynamicOffsetCount,
+                                dynamicOffsets);
+                            currentBatchCount = 0;
+                            currentBatchDynamicOffsetCount = 0;
+                            currentBatchFirstSet = currentSlot + 1;
+                        }
+                    }
+                }
+                else
                 {
+                    // Unchanged slot breaks the batch.
                     if (currentBatchCount != 0)
                     {
-                        // Flush current batch.
                         vkCmdBindDescriptorSets(
                             CommandBuffer,
                             bindPoint,
@@ -797,11 +856,70 @@ namespace Veldrid.Vk
                             descriptorSets,
                             currentBatchDynamicOffsetCount,
                             dynamicOffsets);
+                        currentBatchCount = 0;
+                        currentBatchDynamicOffsetCount = 0;
                     }
 
-                    currentBatchCount = 0;
                     currentBatchFirstSet = currentSlot + 1;
                 }
+            }
+
+            // Flush any remaining batch.
+            if (currentBatchCount != 0)
+            {
+                vkCmdBindDescriptorSets(
+                    CommandBuffer,
+                    bindPoint,
+                    pipelineLayout,
+                    currentBatchFirstSet,
+                    currentBatchCount,
+                    descriptorSets,
+                    currentBatchDynamicOffsetCount,
+                    dynamicOffsets);
+            }
+        }
+
+        private void pushDescriptorSet(
+            VkResourceSet vkSet,
+            VkPipelineBindPoint bindPoint,
+            VkPipelineLayout pipelineLayout,
+            uint setIndex)
+        {
+            var writes = vkSet.PushWrites;
+            var bufferInfos = vkSet.PushBufferInfos;
+            var imageInfos = vkSet.PushImageInfos;
+            uint writeCount = (uint)writes.Length;
+
+            fixed (VkWriteDescriptorSet* writesPtr = writes)
+            fixed (VkDescriptorBufferInfo* bufInfosPtr = bufferInfos)
+            fixed (VkDescriptorImageInfo* imgInfosPtr = imageInfos)
+            {
+                // Fix up the info pointers — they were not set during VkResourceSet
+                // construction because the arrays were not yet pinned.
+                for (int w = 0; w < writeCount; w++)
+                {
+                    var type = writesPtr[w].descriptorType;
+
+                    if (type == VkDescriptorType.UniformBuffer || type == VkDescriptorType.UniformBufferDynamic
+                        || type == VkDescriptorType.StorageBuffer || type == VkDescriptorType.StorageBufferDynamic)
+                    {
+                        writesPtr[w].pBufferInfo = &bufInfosPtr[w];
+                        writesPtr[w].pImageInfo = null;
+                    }
+                    else
+                    {
+                        writesPtr[w].pImageInfo = &imgInfosPtr[w];
+                        writesPtr[w].pBufferInfo = null;
+                    }
+                }
+
+                vkCmdPushDescriptorSetKHR(
+                    CommandBuffer,
+                    bindPoint,
+                    pipelineLayout,
+                    setIndex,
+                    writeCount,
+                    writesPtr);
             }
         }
 
@@ -856,6 +974,13 @@ namespace Veldrid.Vk
             Debug.Assert(activeRenderPass == VkRenderPass.Null);
             Debug.Assert(currentFramebuffer != null);
             currentFramebufferEverActive = true;
+
+            // Use dynamic rendering when available — eliminates VkRenderPass/VkFramebuffer overhead.
+            if (gd.HasDynamicRendering)
+            {
+                beginCurrentDynamicRendering();
+                return;
+            }
 
             uint attachmentCount = currentFramebuffer.AttachmentCount;
             bool haveAnyAttachments = currentFramebuffer.ColorTargets.Count > 0 || currentFramebuffer.DepthTarget != null;
@@ -931,10 +1056,97 @@ namespace Veldrid.Vk
             newFramebuffer = false;
         }
 
+        private void beginCurrentDynamicRendering()
+        {
+            int colorCount = currentFramebuffer.ColorTargets.Count;
+            var colorViews = currentFramebuffer.ColorAttachmentViews;
+            var colorAttachments = stackalloc VkRenderingAttachmentInfo[colorCount > 0 ? colorCount : 1];
+
+            bool haveAllClearValues = depthClearValue.HasValue || currentFramebuffer.DepthTarget == null;
+
+            for (int i = 0; i < colorCount; i++)
+            {
+                colorAttachments[i] = VkRenderingAttachmentInfo.New();
+                colorAttachments[i].imageView = colorViews[i];
+                colorAttachments[i].imageLayout = VkImageLayout.ColorAttachmentOptimal;
+                colorAttachments[i].resolveMode = VkResolveModeFlagBits.None;
+                colorAttachments[i].storeOp = VkAttachmentStoreOp.Store;
+
+                if (validColorClearValues[i])
+                {
+                    colorAttachments[i].loadOp = VkAttachmentLoadOp.Clear;
+                    colorAttachments[i].clearValue = clearValues[i];
+                    validColorClearValues[i] = false;
+                }
+                else
+                {
+                    colorAttachments[i].loadOp = newFramebuffer ? VkAttachmentLoadOp.DontCare : VkAttachmentLoadOp.Load;
+                }
+
+                if (!validColorClearValues[i] && !newFramebuffer)
+                    haveAllClearValues = false;
+            }
+
+            var renderingInfo = VkRenderingInfo.New();
+            renderingInfo.renderArea = new VkRect2D(currentFramebuffer.RenderableWidth, currentFramebuffer.RenderableHeight);
+            renderingInfo.layerCount = 1;
+            renderingInfo.colorAttachmentCount = (uint)colorCount;
+            renderingInfo.pColorAttachments = colorCount > 0 ? colorAttachments : null;
+
+            VkRenderingAttachmentInfo depthAttachment;
+
+            if (currentFramebuffer.DepthTarget != null)
+            {
+                depthAttachment = VkRenderingAttachmentInfo.New();
+                depthAttachment.imageView = currentFramebuffer.DepthAttachmentView;
+                depthAttachment.imageLayout = VkImageLayout.DepthStencilAttachmentOptimal;
+                depthAttachment.resolveMode = VkResolveModeFlagBits.None;
+                depthAttachment.storeOp = VkAttachmentStoreOp.Store;
+
+                if (depthClearValue.HasValue)
+                {
+                    depthAttachment.loadOp = VkAttachmentLoadOp.Clear;
+                    depthAttachment.clearValue = depthClearValue.Value;
+                    depthClearValue = null;
+                }
+                else
+                {
+                    depthAttachment.loadOp = newFramebuffer ? VkAttachmentLoadOp.DontCare : VkAttachmentLoadOp.Load;
+                }
+
+                renderingInfo.pDepthAttachment = &depthAttachment;
+
+                // If the format has stencil, share the depth attachment for stencil too.
+                if (currentFramebuffer.DepthTarget != null
+                    && FormatHelpers.IsStencilFormat(currentFramebuffer.DepthTarget.Value.Target.Format))
+                {
+                    renderingInfo.pStencilAttachment = &depthAttachment;
+                }
+            }
+
+            gd.CmdBeginRendering(CommandBuffer, &renderingInfo);
+
+            // Use a sentinel render pass value to indicate dynamic rendering is active.
+            // Any non-null value signals "inside a render pass" to ensureRenderPassActive / ensureNoRenderPass.
+            activeRenderPass = dynamicRenderingSentinel;
+            newFramebuffer = false;
+        }
+
         private void endCurrentRenderPass()
         {
             Debug.Assert(activeRenderPass != VkRenderPass.Null);
-            vkCmdEndRenderPass(CommandBuffer);
+
+            if (activeRenderPass == dynamicRenderingSentinel)
+            {
+                // Dynamic rendering path.
+                gd.CmdEndRendering(CommandBuffer);
+            }
+            else
+            {
+                // Traditional render pass path.
+                vkCmdEndRenderPass(CommandBuffer);
+            }
+
             currentFramebuffer.TransitionToIntermediateLayout(CommandBuffer);
             activeRenderPass = VkRenderPass.Null;
 

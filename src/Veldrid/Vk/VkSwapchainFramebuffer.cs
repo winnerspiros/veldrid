@@ -14,6 +14,12 @@ namespace Veldrid.Vk
         public override VkRenderPass RenderPassNoClearLoad => scFramebuffers[0].RenderPassNoClearLoad;
         public override VkRenderPass RenderPassClear => scFramebuffers[0].RenderPassClear;
 
+        public override IReadOnlyList<VkImageView> ColorAttachmentViews =>
+            scFramebuffers != null ? scFramebuffers[(int)ImageIndex].ColorAttachmentViews : Array.Empty<VkImageView>();
+
+        public override VkImageView DepthAttachmentView =>
+            scFramebuffers != null ? scFramebuffers[(int)ImageIndex].DepthAttachmentView : VkImageView.Null;
+
         public override IReadOnlyList<FramebufferAttachment> ColorTargets => scColorTextures[(int)ImageIndex];
 
         public override FramebufferAttachment? DepthTarget => depthAttachment;

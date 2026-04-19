@@ -262,89 +262,120 @@ namespace Veldrid.Vk
             vkCreatePipelineLayout(this.gd.Device, ref pipelineLayoutCi, null, out pipelineLayout);
             pipelineCi.layout = pipelineLayout;
 
-            // Create fake RenderPass for compatibility.
-
-            var renderPassCi = VkRenderPassCreateInfo.New();
             var outputDesc = description.Outputs;
-            var attachments = new StackList<VkAttachmentDescription, Size512Bytes>();
 
-            // TODO: A huge portion of this next part is duplicated in VkFramebuffer.cs.
-
-            var colorAttachmentDescs = new StackList<VkAttachmentDescription>();
-            var colorAttachmentRefs = new StackList<VkAttachmentReference>();
-
-            for (uint i = 0; i < outputDesc.ColorAttachments.Length; i++)
+            if (this.gd.HasDynamicRendering)
             {
-                colorAttachmentDescs[i].format = VkFormats.VdToVkPixelFormat(outputDesc.ColorAttachments[i].Format);
-                colorAttachmentDescs[i].samples = vkSampleCount;
-                colorAttachmentDescs[i].loadOp = VkAttachmentLoadOp.DontCare;
-                colorAttachmentDescs[i].storeOp = VkAttachmentStoreOp.Store;
-                colorAttachmentDescs[i].stencilLoadOp = VkAttachmentLoadOp.DontCare;
-                colorAttachmentDescs[i].stencilStoreOp = VkAttachmentStoreOp.DontCare;
-                colorAttachmentDescs[i].initialLayout = VkImageLayout.Undefined;
-                colorAttachmentDescs[i].finalLayout = VkImageLayout.ShaderReadOnlyOptimal;
-                attachments.Add(colorAttachmentDescs[i]);
+                // Dynamic rendering path: chain VkPipelineRenderingCreateInfo, no VkRenderPass needed.
+                var colorFormats = stackalloc VkFormat[outputDesc.ColorAttachments.Length];
 
-                colorAttachmentRefs[i].attachment = i;
-                colorAttachmentRefs[i].layout = VkImageLayout.ColorAttachmentOptimal;
+                for (int i = 0; i < outputDesc.ColorAttachments.Length; i++)
+                    colorFormats[i] = VkFormats.VdToVkPixelFormat(outputDesc.ColorAttachments[i].Format);
+
+                var pipelineRenderingCi = VkPipelineRenderingCreateInfo.New();
+                pipelineRenderingCi.colorAttachmentCount = (uint)outputDesc.ColorAttachments.Length;
+                pipelineRenderingCi.pColorAttachmentFormats = colorFormats;
+
+                if (outputDesc.DepthAttachment is OutputAttachmentDescription depthAttachmentDR)
+                {
+                    var depthVkFormat = VkFormats.VdToVkPixelFormat(depthAttachmentDR.Format, true);
+                    pipelineRenderingCi.depthAttachmentFormat = depthVkFormat;
+
+                    if (FormatHelpers.IsStencilFormat(depthAttachmentDR.Format))
+                        pipelineRenderingCi.stencilAttachmentFormat = depthVkFormat;
+                }
+
+                pipelineRenderingCi.pNext = pipelineCi.pNext;
+                pipelineCi.pNext = &pipelineRenderingCi;
+                pipelineCi.renderPass = VkRenderPass.Null;
+
+                var result = vkCreateGraphicsPipelines(this.gd.Device, VkPipelineCache.Null, 1, ref pipelineCi, null, out devicePipeline);
+                CheckResult(result);
             }
-
-            var depthAttachmentDesc = new VkAttachmentDescription();
-            var depthAttachmentRef = new VkAttachmentReference();
-
-            if (outputDesc.DepthAttachment is OutputAttachmentDescription depthAttachment)
+            else
             {
-                var depthFormat = depthAttachment.Format;
-                bool hasStencil = FormatHelpers.IsStencilFormat(depthFormat);
-                depthAttachmentDesc.format = VkFormats.VdToVkPixelFormat(depthAttachment.Format, true);
-                depthAttachmentDesc.samples = vkSampleCount;
-                depthAttachmentDesc.loadOp = VkAttachmentLoadOp.DontCare;
-                depthAttachmentDesc.storeOp = VkAttachmentStoreOp.Store;
-                depthAttachmentDesc.stencilLoadOp = VkAttachmentLoadOp.DontCare;
-                depthAttachmentDesc.stencilStoreOp = hasStencil ? VkAttachmentStoreOp.Store : VkAttachmentStoreOp.DontCare;
-                depthAttachmentDesc.initialLayout = VkImageLayout.Undefined;
-                depthAttachmentDesc.finalLayout = VkImageLayout.DepthStencilAttachmentOptimal;
+                // Traditional path: create a fake VkRenderPass for pipeline compatibility.
+                var renderPassCi = VkRenderPassCreateInfo.New();
+                var attachments = new StackList<VkAttachmentDescription, Size512Bytes>();
 
-                depthAttachmentRef.attachment = (uint)outputDesc.ColorAttachments.Length;
-                depthAttachmentRef.layout = VkImageLayout.DepthStencilAttachmentOptimal;
+                // TODO: A huge portion of this next part is duplicated in VkFramebuffer.cs.
+
+                var colorAttachmentDescs = new StackList<VkAttachmentDescription>();
+                var colorAttachmentRefs = new StackList<VkAttachmentReference>();
+
+                for (uint i = 0; i < outputDesc.ColorAttachments.Length; i++)
+                {
+                    colorAttachmentDescs[i].format = VkFormats.VdToVkPixelFormat(outputDesc.ColorAttachments[i].Format);
+                    colorAttachmentDescs[i].samples = vkSampleCount;
+                    colorAttachmentDescs[i].loadOp = VkAttachmentLoadOp.DontCare;
+                    colorAttachmentDescs[i].storeOp = VkAttachmentStoreOp.Store;
+                    colorAttachmentDescs[i].stencilLoadOp = VkAttachmentLoadOp.DontCare;
+                    colorAttachmentDescs[i].stencilStoreOp = VkAttachmentStoreOp.DontCare;
+                    colorAttachmentDescs[i].initialLayout = VkImageLayout.Undefined;
+                    colorAttachmentDescs[i].finalLayout = VkImageLayout.ShaderReadOnlyOptimal;
+                    attachments.Add(colorAttachmentDescs[i]);
+
+                    colorAttachmentRefs[i].attachment = i;
+                    colorAttachmentRefs[i].layout = VkImageLayout.ColorAttachmentOptimal;
+                }
+
+                var depthAttachmentDesc = new VkAttachmentDescription();
+                var depthAttachmentRef = new VkAttachmentReference();
+
+                if (outputDesc.DepthAttachment is OutputAttachmentDescription depthAttachment)
+                {
+                    var depthFormat = depthAttachment.Format;
+                    bool hasStencil = FormatHelpers.IsStencilFormat(depthFormat);
+                    depthAttachmentDesc.format = VkFormats.VdToVkPixelFormat(depthAttachment.Format, true);
+                    depthAttachmentDesc.samples = vkSampleCount;
+                    depthAttachmentDesc.loadOp = VkAttachmentLoadOp.DontCare;
+                    depthAttachmentDesc.storeOp = VkAttachmentStoreOp.Store;
+                    depthAttachmentDesc.stencilLoadOp = VkAttachmentLoadOp.DontCare;
+                    depthAttachmentDesc.stencilStoreOp = hasStencil ? VkAttachmentStoreOp.Store : VkAttachmentStoreOp.DontCare;
+                    depthAttachmentDesc.initialLayout = VkImageLayout.Undefined;
+                    depthAttachmentDesc.finalLayout = VkImageLayout.DepthStencilAttachmentOptimal;
+
+                    depthAttachmentRef.attachment = (uint)outputDesc.ColorAttachments.Length;
+                    depthAttachmentRef.layout = VkImageLayout.DepthStencilAttachmentOptimal;
+                }
+
+                var subpass = new VkSubpassDescription
+                {
+                    pipelineBindPoint = VkPipelineBindPoint.Graphics,
+                    colorAttachmentCount = (uint)outputDesc.ColorAttachments.Length,
+                    pColorAttachments = (VkAttachmentReference*)colorAttachmentRefs.Data
+                };
+                for (int i = 0; i < colorAttachmentDescs.Count; i++) attachments.Add(colorAttachmentDescs[i]);
+
+                if (outputDesc.DepthAttachment != null)
+                {
+                    subpass.pDepthStencilAttachment = &depthAttachmentRef;
+                    attachments.Add(depthAttachmentDesc);
+                }
+
+                var subpassDependency = new VkSubpassDependency
+                {
+                    srcSubpass = SubpassExternal,
+                    srcStageMask = VkPipelineStageFlags.ColorAttachmentOutput,
+                    dstStageMask = VkPipelineStageFlags.ColorAttachmentOutput,
+                    dstAccessMask = VkAccessFlags.ColorAttachmentRead | VkAccessFlags.ColorAttachmentWrite
+                };
+
+                renderPassCi.attachmentCount = attachments.Count;
+                renderPassCi.pAttachments = (VkAttachmentDescription*)attachments.Data;
+                renderPassCi.subpassCount = 1;
+                renderPassCi.pSubpasses = &subpass;
+                renderPassCi.dependencyCount = 1;
+                renderPassCi.pDependencies = &subpassDependency;
+
+                var creationResult = vkCreateRenderPass(this.gd.Device, ref renderPassCi, null, out renderPass);
+                CheckResult(creationResult);
+
+                pipelineCi.renderPass = renderPass;
+
+                var result = vkCreateGraphicsPipelines(this.gd.Device, VkPipelineCache.Null, 1, ref pipelineCi, null, out devicePipeline);
+                CheckResult(result);
             }
-
-            var subpass = new VkSubpassDescription
-            {
-                pipelineBindPoint = VkPipelineBindPoint.Graphics,
-                colorAttachmentCount = (uint)outputDesc.ColorAttachments.Length,
-                pColorAttachments = (VkAttachmentReference*)colorAttachmentRefs.Data
-            };
-            for (int i = 0; i < colorAttachmentDescs.Count; i++) attachments.Add(colorAttachmentDescs[i]);
-
-            if (outputDesc.DepthAttachment != null)
-            {
-                subpass.pDepthStencilAttachment = &depthAttachmentRef;
-                attachments.Add(depthAttachmentDesc);
-            }
-
-            var subpassDependency = new VkSubpassDependency
-            {
-                srcSubpass = SubpassExternal,
-                srcStageMask = VkPipelineStageFlags.ColorAttachmentOutput,
-                dstStageMask = VkPipelineStageFlags.ColorAttachmentOutput,
-                dstAccessMask = VkAccessFlags.ColorAttachmentRead | VkAccessFlags.ColorAttachmentWrite
-            };
-
-            renderPassCi.attachmentCount = attachments.Count;
-            renderPassCi.pAttachments = (VkAttachmentDescription*)attachments.Data;
-            renderPassCi.subpassCount = 1;
-            renderPassCi.pSubpasses = &subpass;
-            renderPassCi.dependencyCount = 1;
-            renderPassCi.pDependencies = &subpassDependency;
-
-            var creationResult = vkCreateRenderPass(this.gd.Device, ref renderPassCi, null, out renderPass);
-            CheckResult(creationResult);
-
-            pipelineCi.renderPass = renderPass;
-
-            var result = vkCreateGraphicsPipelines(this.gd.Device, VkPipelineCache.Null, 1, ref pipelineCi, null, out devicePipeline);
-            CheckResult(result);
 
             ResourceSetCount = (uint)description.ResourceLayouts.Length;
             DynamicOffsetsCount = 0;

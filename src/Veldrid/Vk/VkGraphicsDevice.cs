@@ -70,6 +70,23 @@ namespace Veldrid.Vk
 
         public VkCreateMetalSurfaceExtT CreateMetalSurfaceExt { get; private set; }
 
+        // VK_KHR_push_descriptor
+        public bool HasPushDescriptors { get; private set; }
+        public uint MaxPushDescriptors { get; private set; }
+
+        // VK_KHR_dynamic_rendering
+        public bool HasDynamicRendering { get; private set; }
+        public VkCmdBeginRenderingT CmdBeginRendering { get; private set; }
+        public VkCmdEndRenderingT CmdEndRendering { get; private set; }
+
+        // VK_EXT_memory_budget
+        public bool HasMemoryBudget { get; private set; }
+
+        // VK_EXT_host_image_copy
+        public bool HasHostImageCopy { get; private set; }
+        public VkCopyMemoryToImageExtT CopyMemoryToImageExt { get; private set; }
+        public VkTransitionImageLayoutExtT TransitionImageLayoutExt { get; private set; }
+
         /// <summary>
         ///     The Vulkan API version supported by the selected physical device.
         /// </summary>
@@ -1004,6 +1021,10 @@ namespace Veldrid.Vk
             bool hasMemReqs2 = DeviceApiVersion.IsAtLeast(1, 1);
             bool hasDedicatedAllocation = DeviceApiVersion.IsAtLeast(1, 1);
             bool hasDriverProperties = DeviceApiVersion.IsAtLeast(1, 2);
+            bool hasPushDescriptors = false;
+            bool hasDynamicRendering = DeviceApiVersion.IsAtLeast(1, 3);
+            bool hasMemoryBudget = false;
+            bool hasHostImageCopy = false;
             IntPtr[] activeExtensions = new IntPtr[props.Length];
             uint activeExtensionCount = 0;
 
@@ -1058,6 +1079,31 @@ namespace Veldrid.Vk
                         activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
                         requiredInstanceExtensions.Remove(extensionName);
                     }
+                    else if (extensionName == "VK_KHR_push_descriptor")
+                    {
+                        activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        requiredInstanceExtensions.Remove(extensionName);
+                        hasPushDescriptors = true;
+                    }
+                    else if (extensionName == "VK_KHR_dynamic_rendering")
+                    {
+                        // On 1.3+ this is core; enabling the extension is harmless.
+                        activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        requiredInstanceExtensions.Remove(extensionName);
+                        hasDynamicRendering = true;
+                    }
+                    else if (extensionName == "VK_EXT_memory_budget")
+                    {
+                        activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        requiredInstanceExtensions.Remove(extensionName);
+                        hasMemoryBudget = true;
+                    }
+                    else if (extensionName == "VK_EXT_host_image_copy")
+                    {
+                        activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        requiredInstanceExtensions.Remove(extensionName);
+                        hasHostImageCopy = true;
+                    }
                     else if (requiredInstanceExtensions.Remove(extensionName)) activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
                 }
             }
@@ -1074,6 +1120,26 @@ namespace Veldrid.Vk
             deviceCreateInfo.pQueueCreateInfos = queueCreateInfos;
 
             deviceCreateInfo.pEnabledFeatures = &deviceFeatures;
+
+            // Chain feature structs via pNext for extensions that require opt-in.
+            VkPhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeatures;
+            VkPhysicalDeviceHostImageCopyFeaturesEXT hostImageCopyFeatures;
+
+            if (hasDynamicRendering)
+            {
+                dynamicRenderingFeatures = VkPhysicalDeviceDynamicRenderingFeatures.New();
+                dynamicRenderingFeatures.dynamicRendering = true;
+                dynamicRenderingFeatures.pNext = deviceCreateInfo.pNext;
+                deviceCreateInfo.pNext = &dynamicRenderingFeatures;
+            }
+
+            if (hasHostImageCopy)
+            {
+                hostImageCopyFeatures = VkPhysicalDeviceHostImageCopyFeaturesEXT.New();
+                hostImageCopyFeatures.hostImageCopy = true;
+                hostImageCopyFeatures.pNext = deviceCreateInfo.pNext;
+                deviceCreateInfo.pNext = &hostImageCopyFeatures;
+            }
 
             var layerNames = new StackList<IntPtr>();
             if (standardValidationSupported) layerNames.Add(CommonStrings.StandardValidationLayerName);
@@ -1140,6 +1206,46 @@ namespace Veldrid.Vk
                 apiVersion = new GraphicsApiVersion(conforming.Major, conforming.Minor, conforming.Subminor, conforming.Patch);
                 DriverName = driverName;
                 DriverInfo = driverInfo;
+            }
+
+            // VK_KHR_push_descriptor: query maxPushDescriptors.
+            if (hasPushDescriptors && getPhysicalDeviceProperties2 != null)
+            {
+                var deviceProps2 = VkPhysicalDeviceProperties2KHR.New();
+                var pushDescProps = VkPhysicalDevicePushDescriptorPropertiesKHR.New();
+                deviceProps2.pNext = &pushDescProps;
+                getPhysicalDeviceProperties2(PhysicalDevice, &deviceProps2);
+                MaxPushDescriptors = pushDescProps.maxPushDescriptors;
+                HasPushDescriptors = MaxPushDescriptors > 0;
+            }
+
+            // VK_KHR_dynamic_rendering: load function pointers.
+            if (hasDynamicRendering)
+            {
+                if (DeviceApiVersion.IsAtLeast(1, 3))
+                {
+                    CmdBeginRendering = getDeviceProcAddr<VkCmdBeginRenderingT>("vkCmdBeginRendering"u8);
+                    CmdEndRendering = getDeviceProcAddr<VkCmdEndRenderingT>("vkCmdEndRendering"u8);
+                }
+                else
+                {
+                    CmdBeginRendering = getDeviceProcAddr<VkCmdBeginRenderingT>("vkCmdBeginRendering"u8)
+                                        ?? getDeviceProcAddr<VkCmdBeginRenderingT>("vkCmdBeginRenderingKHR"u8);
+                    CmdEndRendering = getDeviceProcAddr<VkCmdEndRenderingT>("vkCmdEndRendering"u8)
+                                      ?? getDeviceProcAddr<VkCmdEndRenderingT>("vkCmdEndRenderingKHR"u8);
+                }
+
+                HasDynamicRendering = CmdBeginRendering != null && CmdEndRendering != null;
+            }
+
+            HasMemoryBudget = hasMemoryBudget;
+
+            // VK_EXT_host_image_copy: load function pointers.
+            if (hasHostImageCopy)
+            {
+                CopyMemoryToImageExt = getDeviceProcAddr<VkCopyMemoryToImageExtT>("vkCopyMemoryToImageEXT"u8);
+                TransitionImageLayoutExt = getDeviceProcAddr<VkTransitionImageLayoutExtT>("vkTransitionImageLayoutEXT"u8);
+                HasHostImageCopy = CopyMemoryToImageExt != null && TransitionImageLayoutExt != null;
             }
         }
 
@@ -1503,6 +1609,12 @@ namespace Veldrid.Vk
                     width, height, depth,
                     texture.Format);
             }
+            else if (HasHostImageCopy)
+            {
+                // VK_EXT_host_image_copy: upload directly from CPU memory, bypassing
+                // staging buffers and command buffer overhead entirely.
+                hostCopyToImage(vkTex, source, x, y, z, width, height, depth, mipLevel, arrayLayer);
+            }
             else
             {
                 var stagingTex = getFreeStagingTexture(width, height, depth, texture.Format);
@@ -1517,6 +1629,62 @@ namespace Veldrid.Vk
                 lock (stagingResourcesLock) submittedStagingTextures.Add(cb, stagingTex);
                 pool.EndAndSubmit(cb);
             }
+        }
+
+        private void hostCopyToImage(
+            VkTexture vkTex,
+            IntPtr source,
+            uint x, uint y, uint z,
+            uint width, uint height, uint depth,
+            uint mipLevel, uint arrayLayer)
+        {
+            bool hasStencil = FormatHelpers.IsStencilFormat(vkTex.Format);
+            var aspectMask = (vkTex.Usage & TextureUsage.DepthStencil) != 0
+                ? hasStencil
+                    ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+                    : VkImageAspectFlags.Depth
+                : VkImageAspectFlags.Color;
+
+            // Transition to TransferDstOptimal for the host copy.
+            var oldLayout = vkTex.GetImageLayout(mipLevel, arrayLayer);
+            var transitionToTransfer = VkHostImageLayoutTransitionInfoEXT.New();
+            transitionToTransfer.image = vkTex.OptimalDeviceImage;
+            transitionToTransfer.oldLayout = oldLayout;
+            transitionToTransfer.newLayout = VkImageLayout.TransferDstOptimal;
+            transitionToTransfer.subresourceRange = new VkImageSubresourceRange(aspectMask, mipLevel, 1, arrayLayer, 1);
+            var tResult = TransitionImageLayoutExt(device, 1, &transitionToTransfer);
+            VulkanUtil.CheckResult(tResult);
+
+            var region = VkMemoryToImageCopyEXT.New();
+            region.pHostPointer = source.ToPointer();
+            region.imageSubresource.aspectMask = aspectMask;
+            region.imageSubresource.mipLevel = mipLevel;
+            region.imageSubresource.baseArrayLayer = arrayLayer;
+            region.imageSubresource.layerCount = 1;
+            region.imageOffset.x = (int)x;
+            region.imageOffset.y = (int)y;
+            region.imageOffset.z = (int)z;
+            region.imageExtent.width = width;
+            region.imageExtent.height = height;
+            region.imageExtent.depth = depth;
+
+            var copyInfo = VkCopyMemoryToImageInfoEXT.New();
+            copyInfo.dstImage = vkTex.OptimalDeviceImage;
+            copyInfo.dstImageLayout = VkImageLayout.TransferDstOptimal;
+            copyInfo.regionCount = 1;
+            copyInfo.pRegions = &region;
+
+            var cResult = CopyMemoryToImageExt(device, &copyInfo);
+            VulkanUtil.CheckResult(cResult);
+
+            // Transition back to the layout the image was in before.
+            var transitionBack = VkHostImageLayoutTransitionInfoEXT.New();
+            transitionBack.image = vkTex.OptimalDeviceImage;
+            transitionBack.oldLayout = VkImageLayout.TransferDstOptimal;
+            transitionBack.newLayout = oldLayout;
+            transitionBack.subresourceRange = new VkImageSubresourceRange(aspectMask, mipLevel, 1, arrayLayer, 1);
+            tResult = TransitionImageLayoutExt(device, 1, &transitionBack);
+            VulkanUtil.CheckResult(tResult);
         }
 
         private class SharedCommandPool
