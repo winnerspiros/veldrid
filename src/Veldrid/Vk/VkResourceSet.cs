@@ -80,7 +80,7 @@ namespace Veldrid.Vk
                     PushWrites[i].descriptorCount = 1;
                     PushWrites[i].descriptorType = type;
                     PushWrites[i].dstBinding = (uint)i;
-                    // dstSet left as null -- not needed for push descriptors.
+                    // dstSet defaults to null handle — ignored by vkCmdPushDescriptorSetKHR.
 
                     if (type == VkDescriptorType.UniformBuffer || type == VkDescriptorType.UniformBufferDynamic
                                                                 || type == VkDescriptorType.StorageBuffer || type == VkDescriptorType.StorageBufferDynamic)
@@ -90,7 +90,7 @@ namespace Veldrid.Vk
                         PushBufferInfos[i].buffer = rangedVkBuffer.DeviceBuffer;
                         PushBufferInfos[i].offset = range.Offset;
                         PushBufferInfos[i].range = range.SizeInBytes;
-                        // Pointer will be assigned at push time in flushNewResourceSets.
+                        // pBufferInfo/pImageInfo pointers are assigned at push time in pushDescriptorSet.
                         RefCounts.Add(rangedVkBuffer.RefCount);
                     }
                     else if (type == VkDescriptorType.SampledImage)

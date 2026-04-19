@@ -1612,11 +1612,15 @@ namespace Veldrid.Vk
             else if (HasHostImageCopy)
             {
                 // VK_EXT_host_image_copy: upload directly from CPU memory, bypassing
-                // staging buffers and command buffer overhead entirely.
+                // staging buffers and command buffer overhead entirely. This path is
+                // preferred over the staging-buffer path below because it avoids both
+                // the staging texture allocation and the command buffer submit/wait,
+                // reducing latency for texture uploads on supported drivers.
                 hostCopyToImage(vkTex, source, x, y, z, width, height, depth, mipLevel, arrayLayer);
             }
             else
             {
+                // Fallback: stage into a temporary texture then copy via a command buffer.
                 var stagingTex = getFreeStagingTexture(width, height, depth, texture.Format);
                 UpdateTexture(stagingTex, source, sizeInBytes, 0, 0, 0, width, height, depth, 0, 0);
                 var pool = getFreeCommandPool();

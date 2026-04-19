@@ -3,7 +3,7 @@ using Vulkan;
 
 namespace Veldrid.Vk
 {
-    // ─── VK_KHR_dynamic_rendering ───────────────────────────────────────────
+    // --- VK_KHR_dynamic_rendering ---
 
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe struct VkRenderingAttachmentInfo
@@ -110,7 +110,7 @@ namespace Veldrid.Vk
         Max = 0x00000008,
     }
 
-    // ─── VK_EXT_memory_budget ───────────────────────────────────────────────
+    // --- VK_EXT_memory_budget ---
 
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe struct VkPhysicalDeviceMemoryBudgetPropertiesEXT
@@ -131,7 +131,7 @@ namespace Veldrid.Vk
         }
     }
 
-    // ─── VK_EXT_host_image_copy ─────────────────────────────────────────────
+    // --- VK_EXT_host_image_copy ---
 
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe struct VkPhysicalDeviceHostImageCopyFeaturesEXT
@@ -213,7 +213,7 @@ namespace Veldrid.Vk
         }
     }
 
-    // ─── Function pointer delegates ─────────────────────────────────────────
+    // --- Function pointer delegates ---
 
     // VK_KHR_dynamic_rendering
     internal unsafe delegate void VkCmdBeginRenderingT(VkCommandBuffer commandBuffer, VkRenderingInfo* pRenderingInfo);
