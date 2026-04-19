@@ -289,7 +289,7 @@ namespace Veldrid.Vk
                 pipelineCi.pNext = &pipelineRenderingCi;
                 pipelineCi.renderPass = VkRenderPass.Null;
 
-                var result = vkCreateGraphicsPipelines(this.gd.Device, VkPipelineCache.Null, 1, ref pipelineCi, null, out devicePipeline);
+                var result = vkCreateGraphicsPipelines(this.gd.Device, this.gd.PipelineCache, 1, ref pipelineCi, null, out devicePipeline);
                 CheckResult(result);
             }
             else
@@ -373,7 +373,7 @@ namespace Veldrid.Vk
 
                 pipelineCi.renderPass = renderPass;
 
-                var result = vkCreateGraphicsPipelines(this.gd.Device, VkPipelineCache.Null, 1, ref pipelineCi, null, out devicePipeline);
+                var result = vkCreateGraphicsPipelines(this.gd.Device, this.gd.PipelineCache, 1, ref pipelineCi, null, out devicePipeline);
                 CheckResult(result);
             }
 
@@ -446,7 +446,7 @@ namespace Veldrid.Vk
 
             var result = vkCreateComputePipelines(
                 this.gd.Device,
-                VkPipelineCache.Null,
+                this.gd.PipelineCache,
                 1,
                 ref pipelineCi,
                 null,

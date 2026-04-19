@@ -26,11 +26,21 @@ As of April 2024, this repository no longer tracks and is incompatible with the 
 
 ### Performance & Modernization
 - All backends now use `System.Threading.Lock` instead of `object` locks (including OpenGL `StagingMemoryPool`)
+- **Vulkan pipeline cache** — all graphics and compute pipeline creation now uses a shared `VkPipelineCache`, enabling driver-side caching and deduplication of compiled shaders (was `VkPipelineCache.Null` everywhere)
 - Vulkan backend: push descriptors (`VK_KHR_push_descriptor`), dynamic rendering (`VK_KHR_dynamic_rendering`), memory budget (`VK_EXT_memory_budget`), host image copy (`VK_EXT_host_image_copy`)
+- Vulkan backend: `VK_EXT_descriptor_indexing` detection (core in Vulkan 1.2) — enables future bindless descriptor patterns
 - Vulkan backend: `stackalloc` for descriptor sets and dynamic offsets in hot paths
 - Vulkan backend: UTF-8 `u8` string literals for all proc address lookups (zero runtime encoding)
 - D3D11 backend: pre-allocated arrays for vertex strides/offsets in draw calls, deferred context command recording
 - Target framework upgraded to `net10.0` with `LangVersion 14.0`
+
+### GPU Hardware Capability Detection
+- **D3D12 Enhanced Barriers** (Options12) — detected at device creation, exposed via `BackendInfoD3D12.SupportsEnhancedBarriers`
+- **D3D12 Mesh Shaders** (Options7) — `BackendInfoD3D12.SupportsMeshShaders`
+- **D3D12 Variable Rate Shading** (Options6) — `BackendInfoD3D12.SupportsVariableRateShading`
+- **D3D12 DXR Raytracing** (Options5) — `BackendInfoD3D12.SupportsRaytracing`
+- **Vulkan Descriptor Indexing** — `VkGraphicsDevice.HasDescriptorIndexing` (bindless descriptors)
+- These are detection-only flags today — they enable consumers to query hardware capabilities and make informed decisions
 
 ### Bug Fixes from Upstream Issues & PRs
 - **Vulkan: Remove `[Conditional("DEBUG")]` from `VulkanUtil.CheckResult`** — was silently swallowing Vulkan errors in release builds, causing untraceable segfaults ([ppy#61](https://github.com/ppy/veldrid/issues/61))

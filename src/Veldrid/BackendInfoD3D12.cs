@@ -52,6 +52,26 @@ namespace Veldrid
         {
             return Util.AssertSubtype<DeviceBuffer, D3D12Buffer>(buffer).Resource.NativePointer;
         }
+
+        /// <summary>
+        ///     Indicates whether the GPU supports Enhanced Barriers (D3D12 Options12).
+        /// </summary>
+        public bool SupportsEnhancedBarriers => gd.SupportsEnhancedBarriers;
+
+        /// <summary>
+        ///     Indicates whether the GPU supports Mesh Shaders (D3D12 Options7, Tier 1+).
+        /// </summary>
+        public bool SupportsMeshShaders => gd.SupportsMeshShaders;
+
+        /// <summary>
+        ///     Indicates whether the GPU supports Variable Rate Shading (D3D12 Options6, Tier 1+).
+        /// </summary>
+        public bool SupportsVariableRateShading => gd.SupportsVariableRateShading;
+
+        /// <summary>
+        ///     Indicates whether the GPU supports DXR Raytracing (D3D12 Options5, Tier 1.0+).
+        /// </summary>
+        public bool SupportsRaytracing => gd.SupportsRaytracing;
     }
 }
 #endif

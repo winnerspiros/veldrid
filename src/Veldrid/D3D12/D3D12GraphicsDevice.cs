@@ -76,6 +76,12 @@ namespace Veldrid.D3D12
 
         private readonly bool isDebugEnabled;
 
+        // Hardware capability flags detected at device creation.
+        internal bool SupportsEnhancedBarriers { get; private set; }
+        internal bool SupportsMeshShaders { get; private set; }
+        internal bool SupportsVariableRateShading { get; private set; }
+        internal bool SupportsRaytracing { get; private set; }
+
         public D3D12GraphicsDevice(GraphicsDeviceOptions options, D3D12DeviceOptions d3d12Options, SwapchainDescription? swapchainDesc)
         {
             bool enableDebug = options.Debug || d3d12Options.EnableDebugLayer;
@@ -164,6 +170,35 @@ namespace Veldrid.D3D12
             {
                 // Feature query may fail on some drivers.
             }
+
+            // Detect advanced hardware capabilities.
+            try
+            {
+                var options7 = device.CheckFeatureSupport<FeatureDataD3D12Options7>(D3D12Feature.Options7);
+                SupportsMeshShaders = options7.MeshShaderTier >= MeshShaderTier.Tier1;
+            }
+            catch { /* Not supported on this driver/hardware. */ }
+
+            try
+            {
+                var options5 = device.CheckFeatureSupport<FeatureDataD3D12Options5>(D3D12Feature.Options5);
+                SupportsRaytracing = options5.RaytracingTier >= RaytracingTier.Tier1_0;
+            }
+            catch { /* Not supported on this driver/hardware. */ }
+
+            try
+            {
+                var options6 = device.CheckFeatureSupport<FeatureDataD3D12Options6>(D3D12Feature.Options6);
+                SupportsVariableRateShading = options6.VariableShadingRateTier >= VariableShadingRateTier.Tier1;
+            }
+            catch { /* Not supported on this driver/hardware. */ }
+
+            try
+            {
+                var options12 = device.CheckFeatureSupport<FeatureDataD3D12Options12>(D3D12Feature.Options12);
+                SupportsEnhancedBarriers = options12.EnhancedBarriersSupported;
+            }
+            catch { /* Not supported on this driver/hardware. */ }
 
             Features = new GraphicsDeviceFeatures(
                 computeShader: true,

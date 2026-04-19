@@ -87,6 +87,9 @@ namespace Veldrid.Vk
         public VkCopyMemoryToImageExtT CopyMemoryToImageExt { get; private set; }
         public VkTransitionImageLayoutExtT TransitionImageLayoutExt { get; private set; }
 
+        // VK_EXT_descriptor_indexing (core in Vulkan 1.2)
+        public bool HasDescriptorIndexing { get; private set; }
+
         /// <summary>
         ///     The Vulkan API version supported by the selected physical device.
         /// </summary>
@@ -145,6 +148,13 @@ namespace Veldrid.Vk
         private bool khronosValidationSupported;
         private bool standardClipYDirection;
         private VkGetPhysicalDeviceProperties2T getPhysicalDeviceProperties2;
+        private VkPipelineCache pipelineCache;
+
+        /// <summary>
+        ///     The shared VkPipelineCache for this device. Used by all pipeline creation calls
+        ///     to enable driver-side pipeline caching and deduplication.
+        /// </summary>
+        public VkPipelineCache PipelineCache => pipelineCache;
 
         public VkGraphicsDevice(GraphicsDeviceOptions options, SwapchainDescription? scDesc)
             : this(options, scDesc, new VulkanDeviceOptions())
@@ -189,6 +199,11 @@ namespace Veldrid.Vk
                 physicalDeviceFeatures.shaderFloat64);
 
             ResourceFactory = new VkResourceFactory(this);
+
+            // Create pipeline cache for driver-side caching of compiled pipelines.
+            var pipelineCacheCi = VkPipelineCacheCreateInfo.New();
+            var cacheResult = vkCreatePipelineCache(device, ref pipelineCacheCi, null, out pipelineCache);
+            CheckResult(cacheResult);
 
             if (scDesc != null)
             {
@@ -532,6 +547,9 @@ namespace Veldrid.Vk
 
             DescriptorPoolManager.DestroyAll();
             vkDestroyCommandPool(device, graphicsCommandPool, null);
+
+            if (pipelineCache != VkPipelineCache.Null)
+                vkDestroyPipelineCache(device, pipelineCache, null);
 
             Debug.Assert(submittedStagingTextures.Count == 0);
             foreach (var tex in availableStagingTextures) tex.Dispose();
@@ -1025,6 +1043,7 @@ namespace Veldrid.Vk
             bool hasDynamicRendering = DeviceApiVersion.IsAtLeast(1, 3);
             bool hasMemoryBudget = false;
             bool hasHostImageCopy = false;
+            bool hasDescriptorIndexing = DeviceApiVersion.IsAtLeast(1, 2); // Core in Vulkan 1.2
             IntPtr[] activeExtensions = new IntPtr[props.Length];
             uint activeExtensionCount = 0;
 
@@ -1103,6 +1122,13 @@ namespace Veldrid.Vk
                         activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
                         requiredInstanceExtensions.Remove(extensionName);
                         hasHostImageCopy = true;
+                    }
+                    else if (extensionName == "VK_EXT_descriptor_indexing")
+                    {
+                        // Core in Vulkan 1.2; enables bindless/partially-bound descriptors.
+                        activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        requiredInstanceExtensions.Remove(extensionName);
+                        hasDescriptorIndexing = true;
                     }
                     else if (requiredInstanceExtensions.Remove(extensionName)) activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
                 }
@@ -1247,6 +1273,10 @@ namespace Veldrid.Vk
                 TransitionImageLayoutExt = getDeviceProcAddr<VkTransitionImageLayoutExtT>("vkTransitionImageLayoutEXT"u8);
                 HasHostImageCopy = CopyMemoryToImageExt != null && TransitionImageLayoutExt != null;
             }
+
+            // VK_EXT_descriptor_indexing: detection only (core in Vulkan 1.2).
+            // No function pointers to load — just expose the flag for future bindless usage.
+            HasDescriptorIndexing = hasDescriptorIndexing;
         }
 
         // UTF-8 literal overloads: zero runtime encoding cost; 'u8' string literals are null-terminated.
