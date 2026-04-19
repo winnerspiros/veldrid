@@ -28,6 +28,11 @@
         /// <summary>
         ///     OpenGL ES.
         /// </summary>
-        OpenGLES
+        OpenGLES,
+
+        /// <summary>
+        ///     Direct3D 12.
+        /// </summary>
+        Direct3D12
     }
 }

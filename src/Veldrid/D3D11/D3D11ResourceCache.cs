@@ -207,7 +207,7 @@ namespace Veldrid.D3D11
             {
                 var elementDescs = vertexLayouts[slot].Elements;
                 uint stepRate = vertexLayouts[slot].InstanceStepRate;
-                int currentOffset = 0;
+                uint currentOffset = 0;
 
                 for (int i = 0; i < elementDescs.Length; i++)
                 {
@@ -216,12 +216,12 @@ namespace Veldrid.D3D11
                         getSemanticString(desc.Semantic),
                         SemanticIndices.GetAndIncrement(ref si, desc.Semantic),
                         D3D11Formats.ToDxgiFormat(desc.Format),
-                        desc.Offset != 0 ? (int)desc.Offset : currentOffset,
-                        slot,
+                        desc.Offset != 0 ? desc.Offset : currentOffset,
+                        (uint)slot,
                         stepRate == 0 ? InputClassification.PerVertexData : InputClassification.PerInstanceData,
-                        (int)stepRate);
+                        stepRate);
 
-                    currentOffset += (int)FormatSizeHelpers.GetSizeInBytes(desc.Format);
+                    currentOffset += FormatSizeHelpers.GetSizeInBytes(desc.Format);
                     element += 1;
                 }
             }
@@ -252,12 +252,12 @@ namespace Veldrid.D3D11
 
         private struct SemanticIndices
         {
-            private int position;
-            private int texCoord;
-            private int normal;
-            private int color;
+            private uint position;
+            private uint texCoord;
+            private uint normal;
+            private uint color;
 
-            public static int GetAndIncrement(ref SemanticIndices si, VertexElementSemantic type)
+            public static uint GetAndIncrement(ref SemanticIndices si, VertexElementSemantic type)
             {
                 switch (type)
                 {

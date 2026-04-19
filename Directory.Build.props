@@ -11,11 +11,11 @@
 
   <PropertyGroup>
     <VeldridSpirvVersion>1.0.14</VeldridSpirvVersion>
-    <VorticeWindowsVersion>2.4.2</VorticeWindowsVersion>
+    <VorticeWindowsVersion>3.8.3</VorticeWindowsVersion>
   </PropertyGroup>
 
   <PropertyGroup>
-    <PackageLicenseUrl>https://raw.githubusercontent.com/ppy/veldrid/master/LICENSE</PackageLicenseUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <Copyright>Copyright 2024 (c) Eric Mellino and Veldrid contributors. All rights reserved.</Copyright>
     <Authors>Eric Mellino, ppy Pty Ltd</Authors>

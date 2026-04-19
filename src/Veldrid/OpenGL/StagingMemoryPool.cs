@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace Veldrid.OpenGL
 {
@@ -12,7 +13,7 @@ namespace Veldrid.OpenGL
 
         private readonly List<StagingBlock> storage;
         private readonly SortedList<uint, uint> availableBlocks;
-        private readonly object @lock = new object();
+        private readonly Lock @lock = new Lock();
         private bool disposed;
 
         public StagingMemoryPool()

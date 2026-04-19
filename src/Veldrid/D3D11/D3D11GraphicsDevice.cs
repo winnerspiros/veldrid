@@ -141,7 +141,7 @@ namespace Veldrid.D3D11
                 var desc = dxgiAdapter.Description;
                 DeviceName = desc.Description;
                 VendorName = "id:" + ((uint)desc.VendorId).ToString("x8");
-                DeviceId = desc.DeviceId;
+                DeviceId = (int)desc.DeviceId;
             }
 
             switch (device.FeatureLevel)
@@ -321,14 +321,11 @@ namespace Veldrid.D3D11
                         lock (immediateContextLock)
                         {
                             Util.GetMipLevelAndArrayLayer(texture, subresource, out uint mipLevel, out uint arrayLayer);
-                            immediateContext.Map(
+                            uint mapSubresource = D3D11Util.ComputeSubresource(mipLevel, texture.MipLevels, arrayLayer);
+                            var msr = immediateContext.Map(
                                 texture.DeviceTexture,
-                                (int)mipLevel,
-                                (int)arrayLayer,
-                                D3D11Formats.VdToD3D11MapMode(false, mode),
-                                MapFlags.None,
-                                out int _,
-                                out MappedSubresource msr);
+                                mapSubresource,
+                                D3D11Formats.VdToD3D11MapMode(false, mode));
 
                             info.MappedResource = new MappedResource(
                                 resource,
@@ -369,7 +366,7 @@ namespace Veldrid.D3D11
                         else
                         {
                             var texture = Util.AssertSubtype<IMappableResource, D3D11Texture>(resource);
-                            immediateContext.Unmap(texture.DeviceTexture, (int)subresource);
+                            immediateContext.Unmap(texture.DeviceTexture, subresource);
                         }
 
                         bool result = mappedResources.Remove(key);
@@ -431,7 +428,7 @@ namespace Veldrid.D3D11
             return d3D11DeviceOptions;
         }
 
-        private bool checkFormatMultisample(Format format, int sampleCount)
+        private bool checkFormatMultisample(Format format, uint sampleCount)
         {
             return device.CheckMultisampleQualityLevels(format, sampleCount) != 0;
         }
@@ -440,11 +437,15 @@ namespace Veldrid.D3D11
         {
             lock (stagingResourcesLock)
             {
-                foreach (var buffer in availableStagingBuffers)
+                for (int i = 0; i < availableStagingBuffers.Count; i++)
                 {
-                    if (buffer.SizeInBytes >= sizeInBytes)
+                    if (availableStagingBuffers[i].SizeInBytes >= sizeInBytes)
                     {
-                        availableStagingBuffers.Remove(buffer);
+                        var buffer = availableStagingBuffers[i];
+                        // Swap-remove O(1): move last element into vacated slot.
+                        int last = availableStagingBuffers.Count - 1;
+                        availableStagingBuffers[i] = availableStagingBuffers[last];
+                        availableStagingBuffers.RemoveAt(last);
                         return buffer;
                     }
                 }
@@ -603,7 +604,7 @@ namespace Veldrid.D3D11
                 lock (immediateContextLock)
                 {
                     immediateContext.CopySubresourceRegion(
-                        d3dBuffer.Buffer, 0, (int)bufferOffsetInBytes, 0, 0,
+                        d3dBuffer.Buffer, 0, bufferOffsetInBytes, 0, 0,
                         staging.Buffer, 0,
                         sourceRegion);
                 }
@@ -650,7 +651,7 @@ namespace Veldrid.D3D11
             }
             else
             {
-                int subresource = D3D11Util.ComputeSubresource(mipLevel, texture.MipLevels, arrayLayer);
+                uint subresource = D3D11Util.ComputeSubresource(mipLevel, texture.MipLevels, arrayLayer);
                 var resourceRegion = new Box(
                     (int)x,
                     right: (int)(x + width),
@@ -665,12 +666,12 @@ namespace Veldrid.D3D11
                 lock (immediateContextLock)
                 {
                     immediateContext.UpdateSubresource(
+                        source,
                         d3dTex.DeviceTexture,
                         subresource,
-                        resourceRegion,
-                        source,
-                        (int)srcRowPitch,
-                        (int)srcDepthPitch);
+                        srcRowPitch,
+                        srcDepthPitch,
+                        resourceRegion);
                 }
             }
         }

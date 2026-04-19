@@ -37,6 +37,9 @@ namespace Veldrid.OpenGL
         private bool graphicsPipelineActive;
         private bool vertexLayoutFlushed;
 
+        // Cached GL state to skip redundant calls on pipeline activation.
+        private OpenGLPipeline lastGraphicsPipeline;
+
         public OpenGLCommandExecutor(OpenGLGraphicsDevice gd, OpenGLPlatformInfo platformInfo)
         {
             this.gd = gd;
@@ -74,7 +77,11 @@ namespace Veldrid.OpenGL
             glClear(ClearBufferMask.ColorBufferBit);
             CheckLastError();
 
-            if (graphicsPipeline != null && graphicsPipeline.RasterizerState.ScissorTestEnabled) glEnable(EnableCap.ScissorTest);
+            if (graphicsPipeline != null && graphicsPipeline.RasterizerState.ScissorTestEnabled)
+            {
+                glEnable(EnableCap.ScissorTest);
+                CheckLastError();
+            }
 
             if (!isSwapchainFb)
             {
@@ -1076,7 +1083,15 @@ namespace Veldrid.OpenGL
                 activateResourceSet(slot, graphics, brsi, layoutElements, isNew);
             }
 
-            Util.ClearArray(graphics ? newGraphicsResourceSets : newComputeResourceSets);
+            // Only clear the slots actually used — avoids O(N) Array.Clear of the full array.
+            if (graphics)
+            {
+                for (uint i = 0; i < sets; i++) newGraphicsResourceSets[i] = false;
+            }
+            else
+            {
+                for (uint i = 0; i < sets; i++) newComputeResourceSets[i] = false;
+            }
         }
 
         private void flushVertexLayouts()
@@ -1163,6 +1178,17 @@ namespace Veldrid.OpenGL
 
             // Force ResourceSets to be re-bound.
             for (int i = 0; i < graphicsPipeline.ResourceLayouts.Length; i++) newGraphicsResourceSets[i] = true;
+
+            // If the same pipeline is being re-activated, skip all GL state calls —
+            // blend, depth, stencil, rasterizer, and shader program are unchanged.
+            if (lastGraphicsPipeline == graphicsPipeline)
+            {
+                primitiveType = OpenGLFormats.VdToGLPrimitiveType(graphicsPipeline.PrimitiveTopology);
+                ensureVertexArraySizes();
+                return;
+            }
+
+            lastGraphicsPipeline = graphicsPipeline;
 
             // Blend State
 
@@ -1380,6 +1406,14 @@ namespace Veldrid.OpenGL
             glUseProgram(graphicsPipeline.Program);
             CheckLastError();
 
+            ensureVertexArraySizes();
+        }
+
+        /// <summary>
+        ///     Ensures vertex buffer, offset, and divisor arrays are large enough for the current pipeline.
+        /// </summary>
+        private void ensureVertexArraySizes()
+        {
             int vertexStridesCount = graphicsPipeline.VertexStrides.Length;
             Util.EnsureArrayMinimumSize(ref vertexBuffers, (uint)vertexStridesCount);
             Util.EnsureArrayMinimumSize(ref vbOffsets, (uint)vertexStridesCount);
@@ -1392,6 +1426,9 @@ namespace Veldrid.OpenGL
         private void activateComputePipeline()
         {
             graphicsPipelineActive = false;
+            // Invalidate cached graphics pipeline — compute changes the active program,
+            // so next graphics activation must re-apply all GL state.
+            lastGraphicsPipeline = null;
             computePipeline.EnsureResourcesCreated();
             Util.EnsureArrayMinimumSize(ref computeResourceSets, (uint)computePipeline.ResourceLayouts.Length);
             Util.EnsureArrayMinimumSize(ref newComputeResourceSets, (uint)computePipeline.ResourceLayouts.Length);

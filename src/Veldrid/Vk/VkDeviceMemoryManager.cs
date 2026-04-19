@@ -307,8 +307,6 @@ namespace Veldrid.Vk
 
                         if (alignedBlockSize >= size) // Valid match -- split it and return.
                         {
-                            freeBlocks.RemoveAt(i);
-
                             freeBlock.Size = alignedBlockSize;
                             if (freeBlock.Offset % alignment != 0) freeBlock.Offset += alignment - freeBlock.Offset % alignment;
 
@@ -316,16 +314,19 @@ namespace Veldrid.Vk
 
                             if (alignedBlockSize != size)
                             {
-                                var splitBlock = new VkMemoryBlock(
+                                // Update the free block in place to the remainder — avoids RemoveAt+Insert O(n) shifts.
+                                freeBlocks[i] = new VkMemoryBlock(
                                     freeBlock.DeviceMemory,
                                     freeBlock.Offset + size,
                                     freeBlock.Size - size,
                                     memoryTypeIndex,
                                     freeBlock.BaseMappedPointer,
                                     false);
-                                freeBlocks.Insert(i, splitBlock);
-                                block = freeBlock;
                                 block.Size = size;
+                            }
+                            else
+                            {
+                                freeBlocks.RemoveAt(i);
                             }
 
 #if DEBUG
