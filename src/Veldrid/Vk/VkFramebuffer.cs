@@ -36,8 +36,13 @@ namespace Veldrid.Vk
         private readonly VkRenderPass renderPassNoClear;
         private readonly VkRenderPass renderPassClear;
         private readonly List<VkImageView> attachmentViews = new List<VkImageView>();
+        private readonly List<VkImageView> colorViews = new List<VkImageView>();
+        private VkImageView depthView;
         private bool destroyed;
         private string name;
+
+        public override IReadOnlyList<VkImageView> ColorAttachmentViews => colorViews;
+        public override VkImageView DepthAttachmentView => depthView;
 
         public VkFramebuffer(VkGraphicsDevice gd, ref FramebufferDescription description, bool isPresented)
             : base(description.DepthTarget, description.ColorTargets)
@@ -196,6 +201,7 @@ namespace Veldrid.Vk
                 var result = vkCreateImageView(this.gd.Device, ref imageViewCi, null, dest);
                 CheckResult(result);
                 attachmentViews.Add(*dest);
+                colorViews.Add(*dest);
             }
 
             // Depth
@@ -218,6 +224,7 @@ namespace Veldrid.Vk
                 var result = vkCreateImageView(this.gd.Device, ref depthViewCi, null, dest);
                 CheckResult(result);
                 attachmentViews.Add(*dest);
+                depthView = *dest;
             }
 
             Texture dimTex;
