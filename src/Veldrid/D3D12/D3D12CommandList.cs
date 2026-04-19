@@ -43,6 +43,9 @@ namespace Veldrid.D3D12
         private bool hasScissorRect;
         private Color4 cachedBlendFactor;
         private bool hasBlendFactor;
+        private Viewport cachedViewport;
+        private bool hasViewport;
+        private D3D12Framebuffer cachedFramebuffer;
 
         public D3D12CommandList(D3D12GraphicsDevice gd, ref CommandListDescription description)
             : base(ref description, gd.Features, 256u, 16u)
@@ -73,6 +76,8 @@ namespace Veldrid.D3D12
             // Reset cached state — command list state is undefined after Reset.
             hasScissorRect = false;
             hasBlendFactor = false;
+            hasViewport = false;
+            cachedFramebuffer = null;
             currentGraphicsPipeline = null;
             currentComputePipeline = null;
             currentFramebuffer = null;
@@ -85,6 +90,19 @@ namespace Veldrid.D3D12
 
         public override void SetViewport(uint index, ref Viewport viewport)
         {
+            if (hasViewport
+                && cachedViewport.X == viewport.X
+                && cachedViewport.Y == viewport.Y
+                && cachedViewport.Width == viewport.Width
+                && cachedViewport.Height == viewport.Height
+                && cachedViewport.MinDepth == viewport.MinDepth
+                && cachedViewport.MaxDepth == viewport.MaxDepth)
+            {
+                return;
+            }
+
+            cachedViewport = viewport;
+            hasViewport = true;
             commandList.RSSetViewport(viewport.X, viewport.Y, viewport.Width, viewport.Height, viewport.MinDepth, viewport.MaxDepth);
         }
 
@@ -197,7 +215,13 @@ namespace Veldrid.D3D12
 
         protected override void SetFramebufferCore(Framebuffer fb)
         {
-            currentFramebuffer = Util.AssertSubtype<Framebuffer, D3D12Framebuffer>(fb);
+            var d3d12Fb = Util.AssertSubtype<Framebuffer, D3D12Framebuffer>(fb);
+
+            if (cachedFramebuffer == d3d12Fb)
+                return;
+
+            cachedFramebuffer = d3d12Fb;
+            currentFramebuffer = d3d12Fb;
 
             commandList.OMSetRenderTargets(
                 currentFramebuffer.RenderTargetViews,

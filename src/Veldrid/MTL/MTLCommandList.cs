@@ -598,11 +598,12 @@ namespace Veldrid.MTL
 
                 for (uint i = 0; i < vertexBufferCount; i++)
                 {
+                    UIntPtr index = graphicsPipeline.ResourceBindingModel == ResourceBindingModel.Improved
+                        ? nonVertexBufferCount + i
+                        : i;
+
                     if (!vertexBuffersActive[i])
                     {
-                        UIntPtr index = graphicsPipeline.ResourceBindingModel == ResourceBindingModel.Improved
-                            ? nonVertexBufferCount + i
-                            : i;
                         rce.setVertexBuffer(
                             vertexBuffers[i].DeviceBuffer,
                             vbOffsets[i],
@@ -611,13 +612,8 @@ namespace Veldrid.MTL
                         vertexBuffersActive[i] = true;
                         vbOffsetsActive[i] = true;
                     }
-
-                    if (!vbOffsetsActive[i])
+                    else if (!vbOffsetsActive[i])
                     {
-                        UIntPtr index = graphicsPipeline.ResourceBindingModel == ResourceBindingModel.Improved
-                            ? nonVertexBufferCount + i
-                            : i;
-
                         rce.setVertexBufferOffset(
                             vbOffsets[i],
                             index);
@@ -716,6 +712,9 @@ namespace Veldrid.MTL
             var layout = mtlRs.Layout;
             uint dynamicOffsetIndex = 0;
 
+            // Compute all three base offsets in a single pass over the layouts array.
+            getResourceSlotBases(slot, true, out uint baseBuffer, out uint baseTexture, out uint baseSampler);
+
             for (int i = 0; i < mtlRs.Resources.Length; i++)
             {
                 var bindingInfo = layout.GetBindingInfo(i);
@@ -733,38 +732,38 @@ namespace Veldrid.MTL
                     case ResourceKind.UniformBuffer:
                     {
                         var range = Util.GetBufferRange(resource, bufferOffset);
-                        bindBuffer(range, slot, bindingInfo.Slot, bindingInfo.Stages);
+                        bindBuffer(range, baseBuffer, bindingInfo.Slot, bindingInfo.Stages);
                         break;
                     }
 
                     case ResourceKind.TextureReadOnly:
                         var texView = Util.GetTextureView(gd, resource);
                         var mtlTexView = Util.AssertSubtype<TextureView, MtlTextureView>(texView);
-                        bindTexture(mtlTexView, slot, bindingInfo.Slot, bindingInfo.Stages);
+                        bindTexture(mtlTexView, baseTexture, bindingInfo.Slot, bindingInfo.Stages);
                         break;
 
                     case ResourceKind.TextureReadWrite:
                         var texViewRw = Util.GetTextureView(gd, resource);
                         var mtlTexViewRw = Util.AssertSubtype<TextureView, MtlTextureView>(texViewRw);
-                        bindTexture(mtlTexViewRw, slot, bindingInfo.Slot, bindingInfo.Stages);
+                        bindTexture(mtlTexViewRw, baseTexture, bindingInfo.Slot, bindingInfo.Stages);
                         break;
 
                     case ResourceKind.Sampler:
                         var mtlSampler = Util.AssertSubtype<IBindableResource, MtlSampler>(resource);
-                        bindSampler(mtlSampler, slot, bindingInfo.Slot, bindingInfo.Stages);
+                        bindSampler(mtlSampler, baseSampler, bindingInfo.Slot, bindingInfo.Stages);
                         break;
 
                     case ResourceKind.StructuredBufferReadOnly:
                     {
                         var range = Util.GetBufferRange(resource, bufferOffset);
-                        bindBuffer(range, slot, bindingInfo.Slot, bindingInfo.Stages);
+                        bindBuffer(range, baseBuffer, bindingInfo.Slot, bindingInfo.Stages);
                         break;
                     }
 
                     case ResourceKind.StructuredBufferReadWrite:
                     {
                         var range = Util.GetBufferRange(resource, bufferOffset);
-                        bindBuffer(range, slot, bindingInfo.Slot, bindingInfo.Stages);
+                        bindBuffer(range, baseBuffer, bindingInfo.Slot, bindingInfo.Stages);
                         break;
                     }
 
@@ -781,6 +780,9 @@ namespace Veldrid.MTL
             var layout = mtlRs.Layout;
             uint dynamicOffsetIndex = 0;
 
+            // Compute all three base offsets in a single pass over the layouts array.
+            getResourceSlotBases(slot, false, out uint baseBuffer, out uint baseTexture, out uint baseSampler);
+
             for (int i = 0; i < mtlRs.Resources.Length; i++)
             {
                 var bindingInfo = layout.GetBindingInfo(i);
@@ -798,38 +800,38 @@ namespace Veldrid.MTL
                     case ResourceKind.UniformBuffer:
                     {
                         var range = Util.GetBufferRange(resource, bufferOffset);
-                        bindBuffer(range, slot, bindingInfo.Slot, bindingInfo.Stages);
+                        bindBuffer(range, baseBuffer, bindingInfo.Slot, bindingInfo.Stages);
                         break;
                     }
 
                     case ResourceKind.TextureReadOnly:
                         var texView = Util.GetTextureView(gd, resource);
                         var mtlTexView = Util.AssertSubtype<TextureView, MtlTextureView>(texView);
-                        bindTexture(mtlTexView, slot, bindingInfo.Slot, bindingInfo.Stages);
+                        bindTexture(mtlTexView, baseTexture, bindingInfo.Slot, bindingInfo.Stages);
                         break;
 
                     case ResourceKind.TextureReadWrite:
                         var texViewRw = Util.GetTextureView(gd, resource);
                         var mtlTexViewRw = Util.AssertSubtype<TextureView, MtlTextureView>(texViewRw);
-                        bindTexture(mtlTexViewRw, slot, bindingInfo.Slot, bindingInfo.Stages);
+                        bindTexture(mtlTexViewRw, baseTexture, bindingInfo.Slot, bindingInfo.Stages);
                         break;
 
                     case ResourceKind.Sampler:
                         var mtlSampler = Util.AssertSubtype<IBindableResource, MtlSampler>(resource);
-                        bindSampler(mtlSampler, slot, bindingInfo.Slot, bindingInfo.Stages);
+                        bindSampler(mtlSampler, baseSampler, bindingInfo.Slot, bindingInfo.Stages);
                         break;
 
                     case ResourceKind.StructuredBufferReadOnly:
                     {
                         var range = Util.GetBufferRange(resource, bufferOffset);
-                        bindBuffer(range, slot, bindingInfo.Slot, bindingInfo.Stages);
+                        bindBuffer(range, baseBuffer, bindingInfo.Slot, bindingInfo.Stages);
                         break;
                     }
 
                     case ResourceKind.StructuredBufferReadWrite:
                     {
                         var range = Util.GetBufferRange(resource, bufferOffset);
-                        bindBuffer(range, slot, bindingInfo.Slot, bindingInfo.Stages);
+                        bindBuffer(range, baseBuffer, bindingInfo.Slot, bindingInfo.Stages);
                         break;
                     }
 
@@ -839,10 +841,9 @@ namespace Veldrid.MTL
             }
         }
 
-        private void bindBuffer(DeviceBufferRange range, uint set, uint slot, ShaderStages stages)
+        private void bindBuffer(DeviceBufferRange range, uint baseBuffer, uint slot, ShaderStages stages)
         {
             var mtlBuffer = Util.AssertSubtype<DeviceBuffer, MtlBuffer>(range.Buffer);
-            uint baseBuffer = getBufferBase(set, stages != ShaderStages.Compute);
 
             if (stages == ShaderStages.Compute)
             {
@@ -892,9 +893,8 @@ namespace Veldrid.MTL
             }
         }
 
-        private void bindTexture(MtlTextureView mtlTexView, uint set, uint slot, ShaderStages stages)
+        private void bindTexture(MtlTextureView mtlTexView, uint baseTexture, uint slot, ShaderStages stages)
         {
-            uint baseTexture = getTextureBase(set, stages != ShaderStages.Compute);
             UIntPtr index = slot + baseTexture;
 
             if (stages == ShaderStages.Compute && (!boundComputeTextures.TryGetValue(index, out var computeTexture) || computeTexture.NativePtr != mtlTexView.TargetDeviceTexture.NativePtr))
@@ -918,9 +918,8 @@ namespace Veldrid.MTL
             }
         }
 
-        private void bindSampler(MtlSampler mtlSampler, uint set, uint slot, ShaderStages stages)
+        private void bindSampler(MtlSampler mtlSampler, uint baseSampler, uint slot, ShaderStages stages)
         {
-            uint baseSampler = getSamplerBase(set, stages != ShaderStages.Compute);
             UIntPtr index = slot + baseSampler;
 
             if (stages == ShaderStages.Compute && (!boundComputeSamplers.TryGetValue(index, out var computeSampler) || computeSampler.NativePtr != mtlSampler.DeviceSampler.NativePtr))
@@ -944,46 +943,24 @@ namespace Veldrid.MTL
             }
         }
 
-        private uint getBufferBase(uint set, bool graphics)
+        /// <summary>
+        ///     Computes all three resource slot bases in a single loop instead of three separate loops.
+        /// </summary>
+        private void getResourceSlotBases(uint set, bool graphics,
+            out uint bufferBase, out uint textureBase, out uint samplerBase)
         {
             var layouts = graphics ? graphicsPipeline.ResourceLayouts : computePipeline.ResourceLayouts;
-            uint ret = 0;
+            bufferBase = 0;
+            textureBase = 0;
+            samplerBase = 0;
 
             for (int i = 0; i < set; i++)
             {
                 Debug.Assert(layouts[i] != null);
-                ret += layouts[i].BufferCount;
+                bufferBase += layouts[i].BufferCount;
+                textureBase += layouts[i].TextureCount;
+                samplerBase += layouts[i].SamplerCount;
             }
-
-            return ret;
-        }
-
-        private uint getTextureBase(uint set, bool graphics)
-        {
-            var layouts = graphics ? graphicsPipeline.ResourceLayouts : computePipeline.ResourceLayouts;
-            uint ret = 0;
-
-            for (int i = 0; i < set; i++)
-            {
-                Debug.Assert(layouts[i] != null);
-                ret += layouts[i].TextureCount;
-            }
-
-            return ret;
-        }
-
-        private uint getSamplerBase(uint set, bool graphics)
-        {
-            var layouts = graphics ? graphicsPipeline.ResourceLayouts : computePipeline.ResourceLayouts;
-            uint ret = 0;
-
-            for (int i = 0; i < set; i++)
-            {
-                Debug.Assert(layouts[i] != null);
-                ret += layouts[i].SamplerCount;
-            }
-
-            return ret;
         }
 
         private bool ensureRenderPass()

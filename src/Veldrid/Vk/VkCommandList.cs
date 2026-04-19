@@ -30,7 +30,7 @@ namespace Veldrid.Vk
         }
 
         private readonly VkGraphicsDevice gd;
-        private readonly List<VkTexture> preDrawSampledImages = new List<VkTexture>();
+        private readonly List<VkTexture> preDrawSampledImages = new List<VkTexture>(32);
 
         private readonly Lock commandBufferListLock = new Lock();
         private readonly Queue<VkCommandBuffer> availableCommandBuffers = new Queue<VkCommandBuffer>();

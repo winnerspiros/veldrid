@@ -437,11 +437,15 @@ namespace Veldrid.D3D11
         {
             lock (stagingResourcesLock)
             {
-                foreach (var buffer in availableStagingBuffers)
+                for (int i = 0; i < availableStagingBuffers.Count; i++)
                 {
-                    if (buffer.SizeInBytes >= sizeInBytes)
+                    if (availableStagingBuffers[i].SizeInBytes >= sizeInBytes)
                     {
-                        availableStagingBuffers.Remove(buffer);
+                        var buffer = availableStagingBuffers[i];
+                        // Swap-remove O(1): move last element into vacated slot.
+                        int last = availableStagingBuffers.Count - 1;
+                        availableStagingBuffers[i] = availableStagingBuffers[last];
+                        availableStagingBuffers.RemoveAt(last);
                         return buffer;
                     }
                 }

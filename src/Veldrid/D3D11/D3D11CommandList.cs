@@ -580,62 +580,6 @@ namespace Veldrid.D3D11
             }
         }
 
-        private int getConstantBufferBase(uint slot, bool graphics)
-        {
-            var layouts = graphics ? graphicsPipeline.ResourceLayouts : computePipeline.ResourceLayouts;
-            int ret = 0;
-
-            for (int i = 0; i < slot; i++)
-            {
-                Debug.Assert(layouts[i] != null);
-                ret += layouts[i].UniformBufferCount;
-            }
-
-            return ret;
-        }
-
-        private int getUnorderedAccessBase(uint slot, bool graphics)
-        {
-            var layouts = graphics ? graphicsPipeline.ResourceLayouts : computePipeline.ResourceLayouts;
-            int ret = 0;
-
-            for (int i = 0; i < slot; i++)
-            {
-                Debug.Assert(layouts[i] != null);
-                ret += layouts[i].StorageBufferCount;
-            }
-
-            return ret;
-        }
-
-        private int getTextureBase(uint slot, bool graphics)
-        {
-            var layouts = graphics ? graphicsPipeline.ResourceLayouts : computePipeline.ResourceLayouts;
-            int ret = 0;
-
-            for (int i = 0; i < slot; i++)
-            {
-                Debug.Assert(layouts[i] != null);
-                ret += layouts[i].TextureCount;
-            }
-
-            return ret;
-        }
-
-        private int getSamplerBase(uint slot, bool graphics)
-        {
-            var layouts = graphics ? graphicsPipeline.ResourceLayouts : computePipeline.ResourceLayouts;
-            int ret = 0;
-
-            for (int i = 0; i < slot; i++)
-            {
-                Debug.Assert(layouts[i] != null);
-                ret += layouts[i].SamplerCount;
-            }
-
-            return ret;
-        }
-
         private void preDrawCommand()
         {
             flushViewports();
