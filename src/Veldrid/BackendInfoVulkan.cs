@@ -58,23 +58,48 @@ namespace Veldrid
         /// </summary>
         public bool HasMeshShader => gd.HasMeshShader;
 
+        /// <summary>
+        ///     Gets the available Vulkan instance layers.
+        /// </summary>
         public ReadOnlyCollection<string> AvailableInstanceLayers => instanceLayers.Value;
 
+        /// <summary>
+        ///     Gets the available Vulkan instance extensions.
+        /// </summary>
         public ReadOnlyCollection<string> AvailableInstanceExtensions { get; }
 
+        /// <summary>
+        ///     Gets the available Vulkan device extensions with their spec versions.
+        /// </summary>
         public ReadOnlyCollection<ExtensionProperties> AvailableDeviceExtensions => deviceExtensions.Value;
 
+        /// <summary>
+        ///     Describes a Vulkan extension with its name and specification version.
+        /// </summary>
         public readonly struct ExtensionProperties
         {
+            /// <summary>
+            ///     The extension name (e.g. "VK_KHR_swapchain").
+            /// </summary>
             public readonly string Name;
+
+            /// <summary>
+            ///     The specification version of the extension.
+            /// </summary>
             public readonly uint SpecVersion;
 
+            /// <summary>
+            ///     Creates a new <see cref="ExtensionProperties" /> instance.
+            /// </summary>
+            /// <param name="name">The extension name.</param>
+            /// <param name="specVersion">The specification version.</param>
             public ExtensionProperties(string name, uint specVersion)
             {
                 Name = name ?? throw new ArgumentNullException(nameof(name));
                 SpecVersion = specVersion;
             }
 
+            /// <inheritdoc />
             public override string ToString()
             {
                 return Name;

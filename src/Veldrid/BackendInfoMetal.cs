@@ -13,8 +13,14 @@ namespace Veldrid
     /// </summary>
     public class BackendInfoMetal
     {
+        /// <summary>
+        ///     Gets the set of Metal feature sets supported by the device.
+        /// </summary>
         public ReadOnlyCollection<MTLFeatureSet> FeatureSet { get; }
 
+        /// <summary>
+        ///     Gets the maximum Metal feature set supported by the device.
+        /// </summary>
         public MTLFeatureSet MaxFeatureSet => gd.MetalFeatures.MaxFeatureSet;
         private readonly MtlGraphicsDevice gd;
 
