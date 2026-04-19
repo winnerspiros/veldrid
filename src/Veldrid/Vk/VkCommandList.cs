@@ -1543,6 +1543,39 @@ namespace Veldrid.Vk
             func(CommandBuffer, &markerInfo);
         }
 
+        private protected override void SetShadingRateCore(ShadingRate rate)
+        {
+            if (gd.CmdSetFragmentShadingRate == null)
+                return;
+
+            // Map Veldrid ShadingRate to VkExtent2D fragment size.
+            var fragmentSize = rate switch
+            {
+                ShadingRate.Rate1x2 => new VkExtent2D(1, 2),
+                ShadingRate.Rate2x1 => new VkExtent2D(2, 1),
+                ShadingRate.Rate2x2 => new VkExtent2D(2, 2),
+                ShadingRate.Rate2x4 => new VkExtent2D(2, 4),
+                ShadingRate.Rate4x2 => new VkExtent2D(4, 2),
+                ShadingRate.Rate4x4 => new VkExtent2D(4, 4),
+                _ => new VkExtent2D(1, 1), // Rate1x1 or default
+            };
+
+            // Use KEEP for both combiners (pipeline + image) — the per-draw rate is authoritative.
+            var combiners = stackalloc uint[2];
+            combiners[0] = VkFragmentShadingRateCombinerOpKHR.KEEP;
+            combiners[1] = VkFragmentShadingRateCombinerOpKHR.KEEP;
+
+            gd.CmdSetFragmentShadingRate(CommandBuffer, &fragmentSize, combiners);
+        }
+
+        private protected override void DispatchMeshCore(uint groupCountX, uint groupCountY, uint groupCountZ)
+        {
+            if (gd.CmdDrawMeshTasksExt == null)
+                throw new NotSupportedException("Mesh shaders are not supported by this Vulkan device.");
+
+            gd.CmdDrawMeshTasksExt(CommandBuffer, groupCountX, groupCountY, groupCountZ);
+        }
+
         private class StagingResourceInfo
         {
             public List<VkBuffer> BuffersUsed { get; } = new List<VkBuffer>();

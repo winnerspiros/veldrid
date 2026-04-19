@@ -115,6 +115,19 @@
         /// </summary>
         public bool ShaderFloat64 { get; }
 
+        /// <summary>
+        ///     Indicates whether Variable Rate Shading (VRS) is supported.
+        ///     When true, <see cref="CommandList.SetShadingRate" /> can be used to control per-draw shading rate.
+        /// </summary>
+        public bool VariableRateShading { get; }
+
+        /// <summary>
+        ///     Indicates whether Mesh Shaders are supported.
+        ///     When true, <see cref="CommandList.DispatchMesh" /> can be used, and <see cref="ShaderStages.Mesh" />
+        ///     and <see cref="ShaderStages.Task" /> shader stages can be used in pipelines.
+        /// </summary>
+        public bool MeshShader { get; }
+
         internal GraphicsDeviceFeatures(
             bool computeShader,
             bool geometryShader,
@@ -134,7 +147,9 @@
             bool subsetTextureView,
             bool commandListDebugMarkers,
             bool bufferRangeBinding,
-            bool shaderFloat64)
+            bool shaderFloat64,
+            bool variableRateShading = false,
+            bool meshShader = false)
         {
             ComputeShader = computeShader;
             GeometryShader = geometryShader;
@@ -155,6 +170,8 @@
             CommandListDebugMarkers = commandListDebugMarkers;
             BufferRangeBinding = bufferRangeBinding;
             ShaderFloat64 = shaderFloat64;
+            VariableRateShading = variableRateShading;
+            MeshShader = meshShader;
         }
     }
 }

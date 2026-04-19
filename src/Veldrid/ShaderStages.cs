@@ -41,6 +41,18 @@ namespace Veldrid
         /// <summary>
         ///     The compute shader stage.
         /// </summary>
-        Compute = 1 << 5
+        Compute = 1 << 5,
+
+        /// <summary>
+        ///     The task (amplification) shader stage.
+        ///     Requires <see cref="GraphicsDeviceFeatures.MeshShader" /> support.
+        /// </summary>
+        Task = 1 << 6,
+
+        /// <summary>
+        ///     The mesh shader stage.
+        ///     Requires <see cref="GraphicsDeviceFeatures.MeshShader" /> support.
+        /// </summary>
+        Mesh = 1 << 7
     }
 }

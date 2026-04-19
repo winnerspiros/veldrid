@@ -48,6 +48,16 @@ namespace Veldrid
         /// </summary>
         public string DriverInfo => gd.DriverInfo;
 
+        /// <summary>
+        ///     Indicates whether the device supports VK_KHR_fragment_shading_rate (Variable Rate Shading).
+        /// </summary>
+        public bool HasFragmentShadingRate => gd.HasFragmentShadingRate;
+
+        /// <summary>
+        ///     Indicates whether the device supports VK_EXT_mesh_shader (Mesh Shaders).
+        /// </summary>
+        public bool HasMeshShader => gd.HasMeshShader;
+
         public ReadOnlyCollection<string> AvailableInstanceLayers => instanceLayers.Value;
 
         public ReadOnlyCollection<string> AvailableInstanceExtensions { get; }

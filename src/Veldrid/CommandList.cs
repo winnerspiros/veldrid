@@ -649,6 +649,29 @@ namespace Veldrid
         }
 
         /// <summary>
+        ///     Sets the per-draw shading rate for Variable Rate Shading (VRS).
+        ///     Requires <see cref="GraphicsDeviceFeatures.VariableRateShading" /> to be true.
+        ///     On backends that do not support VRS, this call is silently ignored.
+        /// </summary>
+        /// <param name="rate">The base shading rate to use for subsequent draw calls.</param>
+        public void SetShadingRate(ShadingRate rate)
+        {
+            SetShadingRateCore(rate);
+        }
+
+        /// <summary>
+        ///     Dispatches a mesh shader workload.
+        ///     Requires <see cref="GraphicsDeviceFeatures.MeshShader" /> to be true, and a mesh shader pipeline to be bound.
+        /// </summary>
+        /// <param name="groupCountX">The X dimension of the mesh shader thread groups that are dispatched.</param>
+        /// <param name="groupCountY">The Y dimension of the mesh shader thread groups that are dispatched.</param>
+        /// <param name="groupCountZ">The Z dimension of the mesh shader thread groups that are dispatched.</param>
+        public void DispatchMesh(uint groupCountX, uint groupCountY, uint groupCountZ)
+        {
+            DispatchMeshCore(groupCountX, groupCountY, groupCountZ);
+        }
+
+        /// <summary>
         ///     Resolves a multisampled source <see cref="Texture" /> into a non-multisampled destination <see cref="Texture" />.
         /// </summary>
         /// <param name="source">
@@ -1251,5 +1274,20 @@ namespace Veldrid
         private protected abstract void PopDebugGroupCore();
 
         private protected abstract void InsertDebugMarkerCore(string name);
+
+        /// <summary>
+        ///     Backend-specific implementation of <see cref="SetShadingRate" />.
+        ///     Default implementation is a no-op for backends that do not support VRS.
+        /// </summary>
+        private protected virtual void SetShadingRateCore(ShadingRate rate) { }
+
+        /// <summary>
+        ///     Backend-specific implementation of <see cref="DispatchMesh" />.
+        ///     Default implementation throws <see cref="NotSupportedException" /> for backends that do not support mesh shaders.
+        /// </summary>
+        private protected virtual void DispatchMeshCore(uint groupCountX, uint groupCountY, uint groupCountZ)
+        {
+            throw new NotSupportedException("Mesh shaders are not supported by this graphics backend.");
+        }
     }
 }

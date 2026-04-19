@@ -219,7 +219,9 @@ namespace Veldrid.D3D12
                 subsetTextureView: true,
                 commandListDebugMarkers: true,
                 bufferRangeBinding: true,
-                shaderFloat64: supportsDoubles);
+                shaderFloat64: supportsDoubles,
+                variableRateShading: SupportsVariableRateShading,
+                meshShader: SupportsMeshShaders);
 
             // 10. Create ResourceFactory.
             d3d12ResourceFactory = new D3D12ResourceFactory(this);

@@ -224,4 +224,22 @@ namespace Veldrid.Vk
     internal unsafe delegate VkResult VkCopyMemoryToImageExtT(VkDevice device, VkCopyMemoryToImageInfoEXT* pCopyMemoryToImageInfo);
 
     internal unsafe delegate VkResult VkTransitionImageLayoutExtT(VkDevice device, uint transitionCount, VkHostImageLayoutTransitionInfoEXT* pTransitions);
+
+    // --- VK_KHR_fragment_shading_rate ---
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct VkFragmentShadingRateCombinerOpKHR
+    {
+        public const uint KEEP = 0;
+        public const uint REPLACE = 1;
+        public const uint MIN = 2;
+        public const uint MAX = 3;
+        public const uint MUL = 4;
+    }
+
+    internal unsafe delegate void VkCmdSetFragmentShadingRateT(VkCommandBuffer commandBuffer, VkExtent2D* pFragmentSize, uint* combinerOps);
+
+    // --- VK_EXT_mesh_shader ---
+
+    internal delegate void VkCmdDrawMeshTasksExtT(VkCommandBuffer commandBuffer, uint groupCountX, uint groupCountY, uint groupCountZ);
 }

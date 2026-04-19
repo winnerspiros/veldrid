@@ -90,6 +90,14 @@ namespace Veldrid.Vk
         // VK_EXT_descriptor_indexing (core in Vulkan 1.2)
         public bool HasDescriptorIndexing { get; private set; }
 
+        // VK_KHR_fragment_shading_rate
+        public bool HasFragmentShadingRate { get; private set; }
+        public VkCmdSetFragmentShadingRateT CmdSetFragmentShadingRate { get; private set; }
+
+        // VK_EXT_mesh_shader
+        public bool HasMeshShader { get; private set; }
+        public VkCmdDrawMeshTasksExtT CmdDrawMeshTasksExt { get; private set; }
+
         /// <summary>
         ///     The Vulkan API version supported by the selected physical device.
         /// </summary>
@@ -196,7 +204,9 @@ namespace Veldrid.Vk
                 true,
                 debugMarkerEnabled,
                 true,
-                physicalDeviceFeatures.shaderFloat64);
+                physicalDeviceFeatures.shaderFloat64,
+                variableRateShading: HasFragmentShadingRate,
+                meshShader: HasMeshShader);
 
             ResourceFactory = new VkResourceFactory(this);
 
@@ -1044,6 +1054,8 @@ namespace Veldrid.Vk
             bool hasMemoryBudget = false;
             bool hasHostImageCopy = false;
             bool hasDescriptorIndexing = DeviceApiVersion.IsAtLeast(1, 2); // Core in Vulkan 1.2
+            bool hasFragmentShadingRate = false;
+            bool hasMeshShader = false;
             IntPtr[] activeExtensions = new IntPtr[props.Length];
             uint activeExtensionCount = 0;
 
@@ -1129,6 +1141,18 @@ namespace Veldrid.Vk
                         activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
                         requiredInstanceExtensions.Remove(extensionName);
                         hasDescriptorIndexing = true;
+                    }
+                    else if (extensionName == "VK_KHR_fragment_shading_rate")
+                    {
+                        activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        requiredInstanceExtensions.Remove(extensionName);
+                        hasFragmentShadingRate = true;
+                    }
+                    else if (extensionName == "VK_EXT_mesh_shader")
+                    {
+                        activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        requiredInstanceExtensions.Remove(extensionName);
+                        hasMeshShader = true;
                     }
                     else if (requiredInstanceExtensions.Remove(extensionName)) activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
                 }
@@ -1277,6 +1301,20 @@ namespace Veldrid.Vk
             // VK_EXT_descriptor_indexing: detection only (core in Vulkan 1.2).
             // No function pointers to load — just expose the flag for future bindless usage.
             HasDescriptorIndexing = hasDescriptorIndexing;
+
+            // VK_KHR_fragment_shading_rate: load function pointer for per-draw VRS.
+            if (hasFragmentShadingRate)
+            {
+                CmdSetFragmentShadingRate = getDeviceProcAddr<VkCmdSetFragmentShadingRateT>("vkCmdSetFragmentShadingRateKHR"u8);
+                HasFragmentShadingRate = CmdSetFragmentShadingRate != null;
+            }
+
+            // VK_EXT_mesh_shader: load function pointer for mesh shader dispatch.
+            if (hasMeshShader)
+            {
+                CmdDrawMeshTasksExt = getDeviceProcAddr<VkCmdDrawMeshTasksExtT>("vkCmdDrawMeshTasksEXT"u8);
+                HasMeshShader = CmdDrawMeshTasksExt != null;
+            }
         }
 
         // UTF-8 literal overloads: zero runtime encoding cost; 'u8' string literals are null-terminated.

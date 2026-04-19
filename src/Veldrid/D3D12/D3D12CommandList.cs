@@ -29,6 +29,8 @@ namespace Veldrid.D3D12
 
         private readonly D3D12GraphicsDevice gd;
         private readonly ID3D12GraphicsCommandList commandList;
+        private readonly ID3D12GraphicsCommandList5 commandList5; // VRS support (may be null)
+        private readonly ID3D12GraphicsCommandList6 commandList6; // Mesh shader support (may be null)
         private ID3D12CommandAllocator currentAllocator;
         private D3D12Pipeline currentGraphicsPipeline;
         private D3D12Pipeline currentComputePipeline;
@@ -45,6 +47,13 @@ namespace Veldrid.D3D12
             commandList = gd.Device.CreateCommandList<ID3D12GraphicsCommandList>(
                 CommandListType.Direct,
                 currentAllocator);
+
+            // Query for higher command list interfaces when hardware supports the features.
+            if (gd.SupportsVariableRateShading)
+                commandList5 = commandList.QueryInterfaceOrNull<ID3D12GraphicsCommandList5>();
+
+            if (gd.SupportsMeshShaders)
+                commandList6 = commandList.QueryInterfaceOrNull<ID3D12GraphicsCommandList6>();
 
             // The command list starts in the recording state; close it so Begin() can reset it.
             commandList.Close();
@@ -80,6 +89,8 @@ namespace Veldrid.D3D12
         {
             if (!disposed)
             {
+                commandList6?.Dispose();
+                commandList5?.Dispose();
                 commandList.Dispose();
                 disposed = true;
             }
@@ -297,6 +308,38 @@ namespace Veldrid.D3D12
         private protected override void InsertDebugMarkerCore(string name)
         {
             commandList.SetMarker(name);
+        }
+
+        private static readonly ShadingRateCombiner[] s_passthrough_combiners =
+        [
+            ShadingRateCombiner.Passthrough,
+            ShadingRateCombiner.Passthrough
+        ];
+
+        private protected override void SetShadingRateCore(ShadingRate rate)
+        {
+            if (commandList5 == null)
+                return;
+
+            commandList5.RSSetShadingRate(rate switch
+            {
+                ShadingRate.Rate1x1 => Vortice.Direct3D12.ShadingRate.Rate1x1,
+                ShadingRate.Rate1x2 => Vortice.Direct3D12.ShadingRate.Rate1x2,
+                ShadingRate.Rate2x1 => Vortice.Direct3D12.ShadingRate.Rate2x1,
+                ShadingRate.Rate2x2 => Vortice.Direct3D12.ShadingRate.Rate2x2,
+                ShadingRate.Rate2x4 => Vortice.Direct3D12.ShadingRate.Rate2x4,
+                ShadingRate.Rate4x2 => Vortice.Direct3D12.ShadingRate.Rate4x2,
+                ShadingRate.Rate4x4 => Vortice.Direct3D12.ShadingRate.Rate4x4,
+                _ => Vortice.Direct3D12.ShadingRate.Rate1x1,
+            }, s_passthrough_combiners);
+        }
+
+        private protected override void DispatchMeshCore(uint groupCountX, uint groupCountY, uint groupCountZ)
+        {
+            if (commandList6 == null)
+                throw new NotSupportedException("Mesh shaders are not supported by this D3D12 device.");
+
+            commandList6.DispatchMesh(groupCountX, groupCountY, groupCountZ);
         }
 
         /// <summary>
