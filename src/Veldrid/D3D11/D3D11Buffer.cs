@@ -54,7 +54,7 @@ namespace Veldrid.D3D11
             this.rawBuffer = rawBuffer;
 
             var bd = new Vortice.Direct3D11.BufferDescription(
-                (int)sizeInBytes,
+                sizeInBytes,
                 D3D11Formats.VdToD3D11BindFlags(usage));
 
             if ((usage & BufferUsage.StructuredBufferReadOnly) == BufferUsage.StructuredBufferReadOnly
@@ -65,7 +65,7 @@ namespace Veldrid.D3D11
                 else
                 {
                     bd.MiscFlags = ResourceOptionFlags.BufferStructured;
-                    bd.StructureByteStride = (int)structureByteStride;
+                    bd.StructureByteStride = structureByteStride;
                 }
             }
 
@@ -135,8 +135,8 @@ namespace Veldrid.D3D11
             {
                 var srvDesc = new ShaderResourceViewDescription(Buffer,
                     Format.R32_Typeless,
-                    (int)offset / 4,
-                    (int)size / 4,
+                    offset / 4,
+                    size / 4,
                     BufferExtendedShaderResourceViewFlags.Raw);
 
                 return device.CreateShaderResourceView(Buffer, srvDesc);
@@ -147,8 +147,8 @@ namespace Veldrid.D3D11
                 {
                     ViewDimension = ShaderResourceViewDimension.Buffer
                 };
-                srvDesc.Buffer.NumElements = (int)(size / structureByteStride);
-                srvDesc.Buffer.ElementOffset = (int)(offset / structureByteStride);
+                srvDesc.Buffer.NumElements = size / structureByteStride;
+                srvDesc.Buffer.ElementOffset = offset / structureByteStride;
                 return device.CreateShaderResourceView(Buffer, srvDesc);
             }
         }
@@ -157,21 +157,32 @@ namespace Veldrid.D3D11
         {
             if (rawBuffer)
             {
-                var uavDesc = new UnorderedAccessViewDescription(Buffer,
-                    Format.R32_Typeless,
-                    (int)offset / 4,
-                    (int)size / 4,
-                    BufferUnorderedAccessViewFlags.Raw);
+                var uavDesc = new UnorderedAccessViewDescription
+                {
+                    Format = Format.R32_Typeless,
+                    ViewDimension = UnorderedAccessViewDimension.Buffer,
+                    Buffer = new BufferUnorderedAccessView
+                    {
+                        FirstElement = offset / 4,
+                        NumElements = size / 4,
+                        Flags = BufferUnorderedAccessViewFlags.Raw
+                    }
+                };
 
                 return device.CreateUnorderedAccessView(Buffer, uavDesc);
             }
             else
             {
-                var uavDesc = new UnorderedAccessViewDescription(Buffer,
-                    Format.Unknown,
-                    (int)(offset / structureByteStride),
-                    (int)(size / structureByteStride)
-                );
+                var uavDesc = new UnorderedAccessViewDescription
+                {
+                    Format = Format.Unknown,
+                    ViewDimension = UnorderedAccessViewDimension.Buffer,
+                    Buffer = new BufferUnorderedAccessView
+                    {
+                        FirstElement = offset / structureByteStride,
+                        NumElements = size / structureByteStride,
+                    }
+                };
 
                 return device.CreateUnorderedAccessView(Buffer, uavDesc);
             }

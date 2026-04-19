@@ -29,7 +29,7 @@ namespace Veldrid.D3D11
 
         public IDXGISwapChain DxgiSwapChain { get; private set; }
 
-        public int SyncInterval { get; private set; }
+        public uint SyncInterval { get; private set; }
 
         public override bool IsDisposed => disposed;
 
@@ -40,7 +40,7 @@ namespace Veldrid.D3D11
                 unsafe
                 {
                     byte* pname = stackalloc byte[1024];
-                    int size = 1024 - 1;
+                    uint size = 1024 - 1;
                     DxgiSwapChain.GetPrivateData(CommonGuid.DebugObjectName, ref size, new IntPtr(pname));
                     pname[size] = 0;
                     return Marshal.PtrToStringAnsi(new IntPtr(pname));
@@ -53,7 +53,7 @@ namespace Veldrid.D3D11
                 else
                 {
                     IntPtr namePtr = Marshal.StringToHGlobalAnsi(value);
-                    DxgiSwapChain.SetPrivateData(CommonGuid.DebugObjectName, value.Length, namePtr);
+                    DxgiSwapChain.SetPrivateData(CommonGuid.DebugObjectName, (uint)value.Length, namePtr);
                     Marshal.FreeHGlobal(namePtr);
                 }
             }
@@ -179,7 +179,7 @@ namespace Veldrid.D3D11
 
             uint actualWidth = (uint)(width * pixelScale);
             uint actualHeight = (uint)(height * pixelScale);
-            if (resizeBuffers) DxgiSwapChain.ResizeBuffers(2, (int)actualWidth, (int)actualHeight, colorFormat, flags).CheckError();
+            if (resizeBuffers) DxgiSwapChain.ResizeBuffers(2, actualWidth, actualHeight, colorFormat, flags).CheckError();
 
             // Get the backbuffer from the swapchain
             backBufferTexture = DxgiSwapChain.GetBuffer<ID3D11Texture2D>(0);
@@ -260,7 +260,7 @@ namespace Veldrid.D3D11
                     BufferCount = 2,
                     Windowed = true,
                     BufferDescription = new ModeDescription(
-                        (int)width, (int)height, colorFormat),
+                        width, height, colorFormat),
                     OutputWindow = win32Source.Hwnd,
                     SampleDescription = new SampleDescription(1, 0),
                     SwapEffect = swapEffect,
@@ -284,8 +284,8 @@ namespace Veldrid.D3D11
                     AlphaMode = AlphaMode.Ignore,
                     BufferCount = 2,
                     Format = colorFormat,
-                    Height = (int)(height * pixelScale),
-                    Width = (int)(width * pixelScale),
+                    Height = (uint)(height * pixelScale),
+                    Width = (uint)(width * pixelScale),
                     SampleDescription = new SampleDescription(1, 0),
                     SwapEffect = SwapEffect.FlipSequential,
                     BufferUsage = Usage.RenderTargetOutput,

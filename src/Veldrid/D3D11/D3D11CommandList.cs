@@ -68,8 +68,8 @@ namespace Veldrid.D3D11
 
         private uint numVertexBindings;
         private ID3D11Buffer[] vertexBindings = new ID3D11Buffer[1];
-        private int[] vertexStrides = new int[1];
-        private int[] vertexOffsets = new int[1];
+        private uint[] vertexStrides = new uint[1];
+        private uint[] vertexOffsets = new uint[1];
 
         // Cached pipeline State
         private DeviceBuffer ib;
@@ -103,8 +103,8 @@ namespace Veldrid.D3D11
         private string name;
         private bool vertexBindingsChanged;
         private readonly ID3D11Buffer[] cbOut = new ID3D11Buffer[1];
-        private readonly int[] firstConstRef = new int[1];
-        private readonly int[] numConstsRef = new int[1];
+        private readonly uint[] firstConstRef = new uint[1];
+        private readonly uint[] numConstsRef = new uint[1];
 
         public D3D11CommandList(D3D11GraphicsDevice gd, ref CommandListDescription description)
             : base(ref description, gd.Features, gd.UniformBufferMinOffsetAlignment, gd.StructuredBufferMinOffsetAlignment)
@@ -180,7 +180,7 @@ namespace Veldrid.D3D11
         {
             preDispatchCommand();
 
-            DeviceContext.Dispatch((int)groupCountX, (int)groupCountY, (int)groupCountZ);
+            DeviceContext.Dispatch(groupCountX, groupCountY, groupCountZ);
         }
 
         public override void SetScissorRect(uint index, uint x, uint y, uint width, uint height)
@@ -233,12 +233,12 @@ namespace Veldrid.D3D11
             preDrawCommand();
 
             var d3d11Buffer = Util.AssertSubtype<DeviceBuffer, D3D11Buffer>(indirectBuffer);
-            int currentOffset = (int)offset;
+            uint currentOffset = offset;
 
             for (uint i = 0; i < drawCount; i++)
             {
                 DeviceContext.DrawInstancedIndirect(d3d11Buffer.Buffer, currentOffset);
-                currentOffset += (int)stride;
+                currentOffset += stride;
             }
         }
 
@@ -247,12 +247,12 @@ namespace Veldrid.D3D11
             preDrawCommand();
 
             var d3d11Buffer = Util.AssertSubtype<DeviceBuffer, D3D11Buffer>(indirectBuffer);
-            int currentOffset = (int)offset;
+            uint currentOffset = offset;
 
             for (uint i = 0; i < drawCount; i++)
             {
                 DeviceContext.DrawIndexedInstancedIndirect(d3d11Buffer.Buffer, currentOffset);
-                currentOffset += (int)stride;
+                currentOffset += stride;
             }
         }
 
@@ -260,7 +260,7 @@ namespace Veldrid.D3D11
         {
             preDispatchCommand();
             var d3d11Buffer = Util.AssertSubtype<DeviceBuffer, D3D11Buffer>(indirectBuffer);
-            DeviceContext.DispatchIndirect(d3d11Buffer.Buffer, (int)offset);
+            DeviceContext.DispatchIndirect(d3d11Buffer.Buffer, offset);
         }
 
         protected override void ResolveTextureCore(Texture source, Texture destination)
@@ -297,7 +297,7 @@ namespace Veldrid.D3D11
 
             var region = new Box((int)sourceOffset, 0, 0, (int)(sourceOffset + sizeInBytes), 1, 1);
 
-            DeviceContext.CopySubresourceRegion(dstD3D11Buffer.Buffer, 0, (int)destinationOffset, 0, 0, srcD3D11Buffer.Buffer, 0, region);
+            DeviceContext.CopySubresourceRegion(dstD3D11Buffer.Buffer, 0, destinationOffset, 0, 0, srcD3D11Buffer.Buffer, 0, region);
         }
 
         protected override void CopyTextureCore(
@@ -335,15 +335,15 @@ namespace Veldrid.D3D11
 
             for (uint i = 0; i < layerCount; i++)
             {
-                int srcSubresource = D3D11Util.ComputeSubresource(srcMipLevel, source.MipLevels, srcBaseArrayLayer + i);
-                int dstSubresource = D3D11Util.ComputeSubresource(dstMipLevel, destination.MipLevels, dstBaseArrayLayer + i);
+                uint srcSubresource = D3D11Util.ComputeSubresource(srcMipLevel, source.MipLevels, srcBaseArrayLayer + i);
+                uint dstSubresource = D3D11Util.ComputeSubresource(dstMipLevel, destination.MipLevels, dstBaseArrayLayer + i);
 
                 DeviceContext.CopySubresourceRegion(
                     dstD3D11Texture.DeviceTexture,
                     dstSubresource,
-                    (int)dstX,
-                    (int)dstY,
-                    (int)dstZ,
+                    dstX,
+                    dstY,
+                    dstZ,
                     srcD3D11Texture.DeviceTexture,
                     srcSubresource,
                     region);
@@ -677,7 +677,7 @@ namespace Veldrid.D3D11
             if (vertexBindingsChanged)
             {
                 DeviceContext.IASetVertexBuffers(
-                    0, (int)numVertexBindings,
+                    0, numVertexBindings,
                     vertexBindings,
                     vertexStrides,
                     vertexOffsets);
@@ -716,14 +716,14 @@ namespace Veldrid.D3D11
                 else
                     bind = true;
 
-                if (bind) DeviceContext.VSSetShaderResource(slot, srv);
+                if (bind) DeviceContext.VSSetShaderResource((uint)slot, srv);
             }
 
-            if ((stages & ShaderStages.Geometry) == ShaderStages.Geometry) DeviceContext.GSSetShaderResource(slot, srv);
+            if ((stages & ShaderStages.Geometry) == ShaderStages.Geometry) DeviceContext.GSSetShaderResource((uint)slot, srv);
 
-            if ((stages & ShaderStages.TessellationControl) == ShaderStages.TessellationControl) DeviceContext.HSSetShaderResource(slot, srv);
+            if ((stages & ShaderStages.TessellationControl) == ShaderStages.TessellationControl) DeviceContext.HSSetShaderResource((uint)slot, srv);
 
-            if ((stages & ShaderStages.TessellationEvaluation) == ShaderStages.TessellationEvaluation) DeviceContext.DSSetShaderResource(slot, srv);
+            if ((stages & ShaderStages.TessellationEvaluation) == ShaderStages.TessellationEvaluation) DeviceContext.DSSetShaderResource((uint)slot, srv);
 
             if ((stages & ShaderStages.Fragment) == ShaderStages.Fragment)
             {
@@ -740,10 +740,10 @@ namespace Veldrid.D3D11
                 else
                     bind = true;
 
-                if (bind) DeviceContext.PSSetShaderResource(slot, srv!);
+                if (bind) DeviceContext.PSSetShaderResource((uint)slot, srv!);
             }
 
-            if ((stages & ShaderStages.Compute) == ShaderStages.Compute) DeviceContext.CSSetShaderResource(slot, srv);
+            if ((stages & ShaderStages.Compute) == ShaderStages.Compute) DeviceContext.CSSetShaderResource((uint)slot, srv);
         }
 
         private List<BoundTextureInfo> getNewOrCachedBoundTextureInfoList()
@@ -766,17 +766,17 @@ namespace Veldrid.D3D11
 
             var srv = range.Buffer.GetShaderResourceView(range.Offset, range.Size);
 
-            if ((stages & ShaderStages.Vertex) == ShaderStages.Vertex) DeviceContext.VSSetShaderResource(slot, srv);
+            if ((stages & ShaderStages.Vertex) == ShaderStages.Vertex) DeviceContext.VSSetShaderResource((uint)slot, srv);
 
-            if ((stages & ShaderStages.Geometry) == ShaderStages.Geometry) DeviceContext.GSSetShaderResource(slot, srv);
+            if ((stages & ShaderStages.Geometry) == ShaderStages.Geometry) DeviceContext.GSSetShaderResource((uint)slot, srv);
 
-            if ((stages & ShaderStages.TessellationControl) == ShaderStages.TessellationControl) DeviceContext.HSSetShaderResource(slot, srv);
+            if ((stages & ShaderStages.TessellationControl) == ShaderStages.TessellationControl) DeviceContext.HSSetShaderResource((uint)slot, srv);
 
-            if ((stages & ShaderStages.TessellationEvaluation) == ShaderStages.TessellationEvaluation) DeviceContext.DSSetShaderResource(slot, srv);
+            if ((stages & ShaderStages.TessellationEvaluation) == ShaderStages.TessellationEvaluation) DeviceContext.DSSetShaderResource((uint)slot, srv);
 
-            if ((stages & ShaderStages.Fragment) == ShaderStages.Fragment) DeviceContext.PSSetShaderResource(slot, srv);
+            if ((stages & ShaderStages.Fragment) == ShaderStages.Fragment) DeviceContext.PSSetShaderResource((uint)slot, srv);
 
-            if (compute) DeviceContext.CSSetShaderResource(slot, srv);
+            if (compute) DeviceContext.CSSetShaderResource((uint)slot, srv);
         }
 
         private void bindUniformBuffer(D3D11BufferRange range, int slot, ShaderStages stages)
@@ -799,12 +799,12 @@ namespace Veldrid.D3D11
                 if (bind)
                 {
                     if (range.IsFullRange)
-                        DeviceContext.VSSetConstantBuffer(slot, range.Buffer.Buffer);
+                        DeviceContext.VSSetConstantBuffer((uint)slot, range.Buffer.Buffer);
                     else
                     {
                         packRangeParams(range);
-                        if (!gd.SupportsCommandLists) DeviceContext.VSUnsetConstantBuffer(slot);
-                        context1.VSSetConstantBuffers1(slot, 1, cbOut, firstConstRef, numConstsRef);
+                        if (!gd.SupportsCommandLists) DeviceContext.VSUnsetConstantBuffer((uint)slot);
+                        context1.VSSetConstantBuffers1((uint)slot, 1, cbOut, firstConstRef, numConstsRef);
                     }
                 }
             }
@@ -812,36 +812,36 @@ namespace Veldrid.D3D11
             if ((stages & ShaderStages.Geometry) == ShaderStages.Geometry)
             {
                 if (range.IsFullRange)
-                    DeviceContext.GSSetConstantBuffer(slot, range.Buffer.Buffer);
+                    DeviceContext.GSSetConstantBuffer((uint)slot, range.Buffer.Buffer);
                 else
                 {
                     packRangeParams(range);
-                    if (!gd.SupportsCommandLists) DeviceContext.GSUnsetConstantBuffer(slot);
-                    context1.GSSetConstantBuffers1(slot, 1, cbOut, firstConstRef, numConstsRef);
+                    if (!gd.SupportsCommandLists) DeviceContext.GSUnsetConstantBuffer((uint)slot);
+                    context1.GSSetConstantBuffers1((uint)slot, 1, cbOut, firstConstRef, numConstsRef);
                 }
             }
 
             if ((stages & ShaderStages.TessellationControl) == ShaderStages.TessellationControl)
             {
                 if (range.IsFullRange)
-                    DeviceContext.HSSetConstantBuffer(slot, range.Buffer.Buffer);
+                    DeviceContext.HSSetConstantBuffer((uint)slot, range.Buffer.Buffer);
                 else
                 {
                     packRangeParams(range);
-                    if (!gd.SupportsCommandLists) DeviceContext.HSUnsetConstantBuffer(slot);
-                    context1.HSSetConstantBuffers1(slot, 1, cbOut, firstConstRef, numConstsRef);
+                    if (!gd.SupportsCommandLists) DeviceContext.HSUnsetConstantBuffer((uint)slot);
+                    context1.HSSetConstantBuffers1((uint)slot, 1, cbOut, firstConstRef, numConstsRef);
                 }
             }
 
             if ((stages & ShaderStages.TessellationEvaluation) == ShaderStages.TessellationEvaluation)
             {
                 if (range.IsFullRange)
-                    DeviceContext.DSSetConstantBuffer(slot, range.Buffer.Buffer);
+                    DeviceContext.DSSetConstantBuffer((uint)slot, range.Buffer.Buffer);
                 else
                 {
                     packRangeParams(range);
-                    if (!gd.SupportsCommandLists) DeviceContext.DSUnsetConstantBuffer(slot);
-                    context1.DSSetConstantBuffers1(slot, 1, cbOut, firstConstRef, numConstsRef);
+                    if (!gd.SupportsCommandLists) DeviceContext.DSUnsetConstantBuffer((uint)slot);
+                    context1.DSSetConstantBuffers1((uint)slot, 1, cbOut, firstConstRef, numConstsRef);
                 }
             }
 
@@ -863,12 +863,12 @@ namespace Veldrid.D3D11
                 if (bind)
                 {
                     if (range.IsFullRange)
-                        DeviceContext.PSSetConstantBuffer(slot, range.Buffer.Buffer);
+                        DeviceContext.PSSetConstantBuffer((uint)slot, range.Buffer.Buffer);
                     else
                     {
                         packRangeParams(range);
-                        if (!gd.SupportsCommandLists) DeviceContext.PSUnsetConstantBuffer(slot);
-                        context1.PSSetConstantBuffers1(slot, 1, cbOut, firstConstRef, numConstsRef);
+                        if (!gd.SupportsCommandLists) DeviceContext.PSUnsetConstantBuffer((uint)slot);
+                        context1.PSSetConstantBuffers1((uint)slot, 1, cbOut, firstConstRef, numConstsRef);
                     }
                 }
             }
@@ -876,12 +876,12 @@ namespace Veldrid.D3D11
             if ((stages & ShaderStages.Compute) == ShaderStages.Compute)
             {
                 if (range.IsFullRange)
-                    DeviceContext.CSSetConstantBuffer(slot, range.Buffer.Buffer);
+                    DeviceContext.CSSetConstantBuffer((uint)slot, range.Buffer.Buffer);
                 else
                 {
                     packRangeParams(range);
-                    if (!gd.SupportsCommandLists) DeviceContext.CSSetConstantBuffer(slot, null);
-                    context1.CSSetConstantBuffers1(slot, 1, cbOut, firstConstRef, numConstsRef);
+                    if (!gd.SupportsCommandLists) DeviceContext.CSSetConstantBuffer((uint)slot, null);
+                    context1.CSSetConstantBuffers1((uint)slot, 1, cbOut, firstConstRef, numConstsRef);
                 }
             }
         }
@@ -889,9 +889,9 @@ namespace Veldrid.D3D11
         private void packRangeParams(D3D11BufferRange range)
         {
             cbOut[0] = range.Buffer.Buffer;
-            firstConstRef[0] = (int)range.Offset / 16;
+            firstConstRef[0] = range.Offset / 16;
             uint roundedSize = range.Size < 256 ? 256u : range.Size;
-            numConstsRef[0] = (int)roundedSize / 16;
+            numConstsRef[0] = roundedSize / 16;
         }
 
         private void bindUnorderedAccessView(
@@ -924,9 +924,9 @@ namespace Veldrid.D3D11
             if (buffer != null) trackBoundUavBuffer(buffer, actualSlot, compute);
 
             if (compute)
-                DeviceContext.CSSetUnorderedAccessView(actualSlot, uav);
+                DeviceContext.CSSetUnorderedAccessView((uint)actualSlot, uav);
             else
-                DeviceContext.OMSetUnorderedAccessView(actualSlot, uav!);
+                DeviceContext.OMSetUnorderedAccessView((uint)actualSlot, uav!);
         }
 
         private void trackBoundUavBuffer(DeviceBuffer buffer, int slot, bool compute)
@@ -951,9 +951,9 @@ namespace Veldrid.D3D11
                 {
                     int slot = list[i].Item2;
                     if (compute)
-                        DeviceContext.CSUnsetUnorderedAccessView(slot);
+                        DeviceContext.CSUnsetUnorderedAccessView((uint)slot);
                     else
-                        DeviceContext.OMUnsetUnorderedAccessView(slot);
+                        DeviceContext.OMUnsetUnorderedAccessView((uint)slot);
 
                     list.RemoveAt(i);
                     i -= 1;
@@ -978,14 +978,14 @@ namespace Veldrid.D3D11
                 else
                     bind = true;
 
-                if (bind) DeviceContext.VSSetSampler(slot, sampler.DeviceSampler);
+                if (bind) DeviceContext.VSSetSampler((uint)slot, sampler.DeviceSampler);
             }
 
-            if ((stages & ShaderStages.Geometry) == ShaderStages.Geometry) DeviceContext.GSSetSampler(slot, sampler.DeviceSampler);
+            if ((stages & ShaderStages.Geometry) == ShaderStages.Geometry) DeviceContext.GSSetSampler((uint)slot, sampler.DeviceSampler);
 
-            if ((stages & ShaderStages.TessellationControl) == ShaderStages.TessellationControl) DeviceContext.HSSetSampler(slot, sampler.DeviceSampler);
+            if ((stages & ShaderStages.TessellationControl) == ShaderStages.TessellationControl) DeviceContext.HSSetSampler((uint)slot, sampler.DeviceSampler);
 
-            if ((stages & ShaderStages.TessellationEvaluation) == ShaderStages.TessellationEvaluation) DeviceContext.DSSetSampler(slot, sampler.DeviceSampler);
+            if ((stages & ShaderStages.TessellationEvaluation) == ShaderStages.TessellationEvaluation) DeviceContext.DSSetSampler((uint)slot, sampler.DeviceSampler);
 
             if ((stages & ShaderStages.Fragment) == ShaderStages.Fragment)
             {
@@ -1002,15 +1002,15 @@ namespace Veldrid.D3D11
                 else
                     bind = true;
 
-                if (bind) DeviceContext.PSSetSampler(slot, sampler.DeviceSampler);
+                if (bind) DeviceContext.PSSetSampler((uint)slot, sampler.DeviceSampler);
             }
 
-            if ((stages & ShaderStages.Compute) == ShaderStages.Compute) DeviceContext.CSSetSampler(slot, sampler.DeviceSampler);
+            if ((stages & ShaderStages.Compute) == ShaderStages.Compute) DeviceContext.CSSetSampler((uint)slot, sampler.DeviceSampler);
         }
 
         private unsafe void UpdateSubresource_Workaround(
             ID3D11Resource resource,
-            int subresource,
+            uint subresource,
             Box? region,
             IntPtr data)
         {
@@ -1023,7 +1023,7 @@ namespace Veldrid.D3D11
                 pAdjustedSrcData = (byte*)data - dstRegion.Left;
             }
 
-            DeviceContext.UpdateSubresource(resource, subresource, region, (IntPtr)pAdjustedSrcData, 0, 0);
+            DeviceContext.UpdateSubresource((IntPtr)pAdjustedSrcData, resource, subresource, 0u, 0u, region);
         }
 
         private D3D11Buffer getFreeStagingBuffer(uint sizeInBytes)
@@ -1051,7 +1051,7 @@ namespace Veldrid.D3D11
                 ibOffset = offset;
                 var d3d11Buffer = Util.AssertSubtype<DeviceBuffer, D3D11Buffer>(buffer);
                 unbindUavBuffer(buffer);
-                DeviceContext.IASetIndexBuffer(d3d11Buffer.Buffer, D3D11Formats.ToDxgiFormat(format), (int)offset);
+                DeviceContext.IASetIndexBuffer(d3d11Buffer.Buffer, D3D11Formats.ToDxgiFormat(format), offset);
             }
         }
 
@@ -1075,7 +1075,7 @@ namespace Veldrid.D3D11
                 {
                     depthStencilState = d3dPipeline.DepthStencilState;
                     stencilReference = d3dPipeline.StencilReference;
-                    DeviceContext.OMSetDepthStencilState(depthStencilState, (int)stencilReference);
+                    DeviceContext.OMSetDepthStencilState(depthStencilState, stencilReference);
                 }
 
                 if (rasterizerState != d3dPipeline.RasterizerState)
@@ -1167,7 +1167,7 @@ namespace Veldrid.D3D11
                 vertexBindingsChanged = true;
                 unbindUavBuffer(buffer);
                 vertexBindings[index] = d3d11Buffer.Buffer;
-                vertexOffsets[index] = (int)offset;
+                vertexOffsets[index] = offset;
                 numVertexBindings = Math.Max(index + 1, numVertexBindings);
             }
         }
@@ -1177,9 +1177,9 @@ namespace Veldrid.D3D11
             preDrawCommand();
 
             if (instanceCount == 1 && instanceStart == 0)
-                DeviceContext.Draw((int)vertexCount, (int)vertexStart);
+                DeviceContext.Draw(vertexCount, vertexStart);
             else
-                DeviceContext.DrawInstanced((int)vertexCount, (int)instanceCount, (int)vertexStart, (int)instanceStart);
+                DeviceContext.DrawInstanced(vertexCount, instanceCount, vertexStart, instanceStart);
         }
 
         private protected override void DrawIndexedCore(uint indexCount, uint instanceCount, uint indexStart, int vertexOffset, uint instanceStart)
@@ -1188,9 +1188,9 @@ namespace Veldrid.D3D11
 
             Debug.Assert(ib != null);
             if (instanceCount == 1 && instanceStart == 0)
-                DeviceContext.DrawIndexed((int)indexCount, (int)indexStart, vertexOffset);
+                DeviceContext.DrawIndexed(indexCount, indexStart, vertexOffset);
             else
-                DeviceContext.DrawIndexedInstanced((int)indexCount, (int)instanceCount, (int)indexStart, vertexOffset, (int)instanceStart);
+                DeviceContext.DrawIndexedInstanced(indexCount, instanceCount, indexStart, vertexOffset, instanceStart);
         }
 
         private protected override void ClearColorTargetCore(uint index, RgbaFloat clearColor)

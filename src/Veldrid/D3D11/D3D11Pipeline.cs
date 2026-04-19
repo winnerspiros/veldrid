@@ -23,7 +23,7 @@ namespace Veldrid.D3D11
         public ID3D11PixelShader PixelShader { get; }
         public ID3D11ComputeShader ComputeShader { get; }
         public new D3D11ResourceLayout[] ResourceLayouts { get; }
-        public int[] VertexStrides { get; }
+        public uint[] VertexStrides { get; }
 
         public override bool IsComputePipeline { get; }
 
@@ -88,11 +88,11 @@ namespace Veldrid.D3D11
             {
                 InputLayout = inputLayout;
                 int numVertexBuffers = description.ShaderSet.VertexLayouts.Length;
-                VertexStrides = new int[numVertexBuffers];
-                for (int i = 0; i < numVertexBuffers; i++) VertexStrides[i] = (int)description.ShaderSet.VertexLayouts[i].Stride;
+                VertexStrides = new uint[numVertexBuffers];
+                for (int i = 0; i < numVertexBuffers; i++) VertexStrides[i] = description.ShaderSet.VertexLayouts[i].Stride;
             }
             else
-                VertexStrides = Array.Empty<int>();
+                VertexStrides = Array.Empty<uint>();
         }
 
         public D3D11Pipeline(D3D11ResourceCache cache, ref ComputePipelineDescription description)
