@@ -521,16 +521,16 @@ namespace Veldrid.D3D12
                 Footprint = new SubresourceFootPrint
                 {
                     Format = d3dTex.DxgiFormat,
-                    Width = (int)width,
-                    Height = (int)height,
-                    Depth = (int)depth,
-                    RowPitch = (int)alignedRowPitch
+                    Width = width,
+                    Height = height,
+                    Depth = depth,
+                    RowPitch = alignedRowPitch
                 }
             });
 
-            var dstLocation = new TextureCopyLocation(d3dTex.Resource, (int)subresource);
+            var dstLocation = new TextureCopyLocation(d3dTex.Resource, subresource);
 
-            tempCmdList.CopyTextureRegion(dstLocation, (int)x, (int)y, (int)z, srcLocation);
+            tempCmdList.CopyTextureRegion(dstLocation, x, y, z, srcLocation);
 
             tempCmdList.Close();
             commandQueue.ExecuteCommandList(tempCmdList);
@@ -601,7 +601,7 @@ namespace Veldrid.D3D12
             return true;
         }
 
-        private bool checkFormatMultisample(Format format, int sampleCount)
+        private bool checkFormatMultisample(Format format, uint sampleCount)
         {
             var featureData = new FeatureDataMultisampleQualityLevels
             {

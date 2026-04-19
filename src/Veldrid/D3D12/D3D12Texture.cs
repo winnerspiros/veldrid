@@ -70,13 +70,13 @@ namespace Veldrid.D3D12
                 && (description.Usage & TextureUsage.Sampled) == 0)
                 resourceFlags |= ResourceFlags.DenyShaderResource;
 
-            int arraySize = (int)description.ArrayLayers;
+            uint arraySize = description.ArrayLayers;
 
             if ((description.Usage & TextureUsage.Cubemap) == TextureUsage.Cubemap)
                 arraySize *= 6;
 
-            int roundedWidth = (int)description.Width;
-            int roundedHeight = (int)description.Height;
+            uint roundedWidth = description.Width;
+            uint roundedHeight = description.Height;
 
             if (FormatHelpers.IsCompressedFormat(description.Format))
             {
@@ -103,8 +103,8 @@ namespace Veldrid.D3D12
                     (uint)roundedHeight,
                     (ushort)arraySize,
                     (ushort)description.MipLevels,
-                    D3D12Formats.ToDxgiSampleCount(SampleCount),
-                    0,
+                    (uint)D3D12Formats.ToDxgiSampleCount(SampleCount),
+                    0u,
                     resourceFlags);
             }
             else
@@ -142,9 +142,9 @@ namespace Veldrid.D3D12
 
             var desc = existingResource.Description;
             Width = (uint)desc.Width;
-            Height = (uint)desc.Height;
+            Height = desc.Height;
             Depth = desc.DepthOrArraySize;
-            MipLevels = (uint)desc.MipLevels;
+            MipLevels = desc.MipLevels;
 
             if (type == TextureType.Texture3D)
             {
@@ -152,11 +152,11 @@ namespace Veldrid.D3D12
             }
             else
             {
-                ArrayLayers = (uint)desc.DepthOrArraySize;
+                ArrayLayers = desc.DepthOrArraySize;
                 Depth = 1;
             }
 
-            SampleCount = FormatHelpers.GetSampleCount((uint)desc.SampleDescription.Count);
+            SampleCount = FormatHelpers.GetSampleCount(desc.SampleDescription.Count);
             Usage = TextureUsage.RenderTarget;
 
             DxgiFormat = D3D12Formats.ToDxgiFormat(

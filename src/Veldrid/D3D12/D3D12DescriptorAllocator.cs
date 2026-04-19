@@ -89,7 +89,7 @@ namespace Veldrid.D3D12
             var desc = new DescriptorHeapDescription
             {
                 Type = heapType,
-                DescriptorCount = (int)descriptorCount,
+                DescriptorCount = descriptorCount,
                 Flags = shaderVisible ? DescriptorHeapFlags.ShaderVisible : DescriptorHeapFlags.None,
                 NodeMask = 0
             };

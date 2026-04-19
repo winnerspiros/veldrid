@@ -40,7 +40,7 @@ namespace Veldrid.D3D12
                 D3D12Formats.VdToD3D12AddressMode(description.AddressModeV),
                 D3D12Formats.VdToD3D12AddressMode(description.AddressModeW),
                 description.LodBias,
-                (int)description.MaximumAnisotropy,
+                description.MaximumAnisotropy,
                 comparison,
                 in borderColor,
                 description.MinimumLod,

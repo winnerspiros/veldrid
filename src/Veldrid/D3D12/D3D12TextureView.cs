@@ -49,16 +49,16 @@ namespace Veldrid.D3D12
                     if (isArray)
                     {
                         srvDesc.ViewDimension = Vortice.Direct3D12.ShaderResourceViewDimension.Texture1DArray;
-                        srvDesc.Texture1DArray.MostDetailedMip = (int)description.BaseMipLevel;
-                        srvDesc.Texture1DArray.MipLevels = (int)description.MipLevels;
-                        srvDesc.Texture1DArray.FirstArraySlice = (int)description.BaseArrayLayer;
-                        srvDesc.Texture1DArray.ArraySize = (int)description.ArrayLayers;
+                        srvDesc.Texture1DArray.MostDetailedMip = description.BaseMipLevel;
+                        srvDesc.Texture1DArray.MipLevels = description.MipLevels;
+                        srvDesc.Texture1DArray.FirstArraySlice = description.BaseArrayLayer;
+                        srvDesc.Texture1DArray.ArraySize = description.ArrayLayers;
                     }
                     else
                     {
                         srvDesc.ViewDimension = Vortice.Direct3D12.ShaderResourceViewDimension.Texture1D;
-                        srvDesc.Texture1D.MostDetailedMip = (int)description.BaseMipLevel;
-                        srvDesc.Texture1D.MipLevels = (int)description.MipLevels;
+                        srvDesc.Texture1D.MostDetailedMip = description.BaseMipLevel;
+                        srvDesc.Texture1D.MipLevels = description.MipLevels;
                     }
 
                     break;
@@ -69,16 +69,16 @@ namespace Veldrid.D3D12
                         if (d3dTex.ArrayLayers > 1)
                         {
                             srvDesc.ViewDimension = Vortice.Direct3D12.ShaderResourceViewDimension.TextureCubeArray;
-                            srvDesc.TextureCubeArray.MostDetailedMip = (int)description.BaseMipLevel;
-                            srvDesc.TextureCubeArray.MipLevels = (int)description.MipLevels;
-                            srvDesc.TextureCubeArray.First2DArrayFace = (int)description.BaseArrayLayer;
-                            srvDesc.TextureCubeArray.NumCubes = (int)(description.ArrayLayers / 6);
+                            srvDesc.TextureCubeArray.MostDetailedMip = description.BaseMipLevel;
+                            srvDesc.TextureCubeArray.MipLevels = description.MipLevels;
+                            srvDesc.TextureCubeArray.First2DArrayFace = description.BaseArrayLayer;
+                            srvDesc.TextureCubeArray.NumCubes = (description.ArrayLayers / 6);
                         }
                         else
                         {
                             srvDesc.ViewDimension = Vortice.Direct3D12.ShaderResourceViewDimension.TextureCube;
-                            srvDesc.TextureCube.MostDetailedMip = (int)description.BaseMipLevel;
-                            srvDesc.TextureCube.MipLevels = (int)description.MipLevels;
+                            srvDesc.TextureCube.MostDetailedMip = description.BaseMipLevel;
+                            srvDesc.TextureCube.MipLevels = description.MipLevels;
                         }
                     }
                     else if (isArray)
@@ -86,16 +86,16 @@ namespace Veldrid.D3D12
                         if (d3dTex.SampleCount != TextureSampleCount.Count1)
                         {
                             srvDesc.ViewDimension = Vortice.Direct3D12.ShaderResourceViewDimension.Texture2DMultisampledArray;
-                            srvDesc.Texture2DMSArray.FirstArraySlice = (int)description.BaseArrayLayer;
-                            srvDesc.Texture2DMSArray.ArraySize = (int)description.ArrayLayers;
+                            srvDesc.Texture2DMSArray.FirstArraySlice = description.BaseArrayLayer;
+                            srvDesc.Texture2DMSArray.ArraySize = description.ArrayLayers;
                         }
                         else
                         {
                             srvDesc.ViewDimension = Vortice.Direct3D12.ShaderResourceViewDimension.Texture2DArray;
-                            srvDesc.Texture2DArray.MostDetailedMip = (int)description.BaseMipLevel;
-                            srvDesc.Texture2DArray.MipLevels = (int)description.MipLevels;
-                            srvDesc.Texture2DArray.FirstArraySlice = (int)description.BaseArrayLayer;
-                            srvDesc.Texture2DArray.ArraySize = (int)description.ArrayLayers;
+                            srvDesc.Texture2DArray.MostDetailedMip = description.BaseMipLevel;
+                            srvDesc.Texture2DArray.MipLevels = description.MipLevels;
+                            srvDesc.Texture2DArray.FirstArraySlice = description.BaseArrayLayer;
+                            srvDesc.Texture2DArray.ArraySize = description.ArrayLayers;
                         }
                     }
                     else
@@ -107,8 +107,8 @@ namespace Veldrid.D3D12
                         else
                         {
                             srvDesc.ViewDimension = Vortice.Direct3D12.ShaderResourceViewDimension.Texture2D;
-                            srvDesc.Texture2D.MostDetailedMip = (int)description.BaseMipLevel;
-                            srvDesc.Texture2D.MipLevels = (int)description.MipLevels;
+                            srvDesc.Texture2D.MostDetailedMip = description.BaseMipLevel;
+                            srvDesc.Texture2D.MipLevels = description.MipLevels;
                         }
                     }
 
@@ -116,8 +116,8 @@ namespace Veldrid.D3D12
 
                 case TextureType.Texture3D:
                     srvDesc.ViewDimension = Vortice.Direct3D12.ShaderResourceViewDimension.Texture3D;
-                    srvDesc.Texture3D.MostDetailedMip = (int)description.BaseMipLevel;
-                    srvDesc.Texture3D.MipLevels = (int)description.MipLevels;
+                    srvDesc.Texture3D.MostDetailedMip = description.BaseMipLevel;
+                    srvDesc.Texture3D.MipLevels = description.MipLevels;
                     break;
             }
 
@@ -141,12 +141,12 @@ namespace Veldrid.D3D12
                         if (d3dTex.Type == TextureType.Texture1D)
                         {
                             uavDesc.ViewDimension = UnorderedAccessViewDimension.Texture1D;
-                            uavDesc.Texture1D.MipSlice = (int)description.BaseMipLevel;
+                            uavDesc.Texture1D.MipSlice = description.BaseMipLevel;
                         }
                         else
                         {
                             uavDesc.ViewDimension = UnorderedAccessViewDimension.Texture2D;
-                            uavDesc.Texture2D.MipSlice = (int)description.BaseMipLevel;
+                            uavDesc.Texture2D.MipSlice = description.BaseMipLevel;
                         }
                     }
                     else
@@ -154,25 +154,25 @@ namespace Veldrid.D3D12
                         if (d3dTex.Type == TextureType.Texture1D)
                         {
                             uavDesc.ViewDimension = UnorderedAccessViewDimension.Texture1DArray;
-                            uavDesc.Texture1DArray.MipSlice = (int)description.BaseMipLevel;
-                            uavDesc.Texture1DArray.FirstArraySlice = (int)description.BaseArrayLayer;
-                            uavDesc.Texture1DArray.ArraySize = (int)description.ArrayLayers;
+                            uavDesc.Texture1DArray.MipSlice = description.BaseMipLevel;
+                            uavDesc.Texture1DArray.FirstArraySlice = description.BaseArrayLayer;
+                            uavDesc.Texture1DArray.ArraySize = description.ArrayLayers;
                         }
                         else
                         {
                             uavDesc.ViewDimension = UnorderedAccessViewDimension.Texture2DArray;
-                            uavDesc.Texture2DArray.MipSlice = (int)description.BaseMipLevel;
-                            uavDesc.Texture2DArray.FirstArraySlice = (int)description.BaseArrayLayer;
-                            uavDesc.Texture2DArray.ArraySize = (int)description.ArrayLayers;
+                            uavDesc.Texture2DArray.MipSlice = description.BaseMipLevel;
+                            uavDesc.Texture2DArray.FirstArraySlice = description.BaseArrayLayer;
+                            uavDesc.Texture2DArray.ArraySize = description.ArrayLayers;
                         }
                     }
                 }
                 else
                 {
                     uavDesc.ViewDimension = UnorderedAccessViewDimension.Texture3D;
-                    uavDesc.Texture3D.MipSlice = (int)description.BaseMipLevel;
+                    uavDesc.Texture3D.MipSlice = description.BaseMipLevel;
                     uavDesc.Texture3D.FirstWSlice = 0;
-                    uavDesc.Texture3D.WSize = (int)d3dTex.Depth;
+                    uavDesc.Texture3D.WSize = d3dTex.Depth;
                 }
 
                 device.CreateUnorderedAccessView(d3dTex.Resource, null, uavDesc, UavCpuHandle.Value);

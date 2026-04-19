@@ -24,7 +24,7 @@ namespace Veldrid.D3D12
             }
         }
 
-        public int SyncInterval => SyncToVerticalBlank ? 1 : 0;
+        public uint SyncInterval => SyncToVerticalBlank ? 1u : 0u;
 
         public override bool IsDisposed => disposed;
 
@@ -96,12 +96,12 @@ namespace Veldrid.D3D12
 
             var swapChainDesc = new SwapChainDescription1
             {
-                Width = (int)width,
-                Height = (int)height,
+                Width = width,
+                Height = height,
                 Format = colorFormat,
                 BufferUsage = Usage.RenderTargetOutput,
                 BufferCount = 2,
-                SampleDescription = new SampleDescription(1, 0),
+                SampleDescription = new SampleDescription(1u, 0),
                 SwapEffect = SwapEffect.FlipDiscard,
                 Flags = flags
             };
@@ -133,15 +133,15 @@ namespace Veldrid.D3D12
 
             DxgiSwapChain.ResizeBuffers(
                 2,
-                (int)width,
-                (int)height,
+                (uint)width,
+                (uint)height,
                 colorFormat,
                 flags);
 
             createFramebufferResources();
         }
 
-        public int GetCurrentBackBufferIndex()
+        public uint GetCurrentBackBufferIndex()
         {
             return DxgiSwapChain.CurrentBackBufferIndex;
         }
@@ -162,12 +162,12 @@ namespace Veldrid.D3D12
 
         private void createFramebufferResources()
         {
-            int bufferCount = DxgiSwapChain.Description1.BufferCount;
+            uint bufferCount = DxgiSwapChain.Description1.BufferCount;
             backBufferTextures = new D3D12Texture[bufferCount];
 
             for (int i = 0; i < bufferCount; i++)
             {
-                var backBuffer = DxgiSwapChain.GetBuffer<ID3D12Resource>(i);
+                var backBuffer = DxgiSwapChain.GetBuffer<ID3D12Resource>((uint)i);
                 backBufferTextures[i] = new D3D12Texture(
                     backBuffer,
                     TextureType.Texture2D,
@@ -184,7 +184,7 @@ namespace Veldrid.D3D12
                 depthTexture = new D3D12Texture(gd.Device, ref depthDesc);
             }
 
-            int currentIndex = DxgiSwapChain.CurrentBackBufferIndex;
+            uint currentIndex = DxgiSwapChain.CurrentBackBufferIndex;
             var fbDesc = new FramebufferDescription(depthTexture, backBufferTextures[currentIndex]);
             framebuffer = new D3D12Framebuffer(
                 gd.Device,

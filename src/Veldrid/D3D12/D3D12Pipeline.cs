@@ -13,7 +13,7 @@ namespace Veldrid.D3D12
         public ID3D12RootSignature RootSignature { get; }
         public new D3D12ResourceLayout[] ResourceLayouts { get; }
         public Vortice.Direct3D.PrimitiveTopology PrimitiveTopology { get; }
-        public int[] VertexStrides { get; }
+        public uint[] VertexStrides { get; }
         public uint StencilReference { get; }
         public float[] BlendFactor { get; }
 
@@ -81,14 +81,14 @@ namespace Veldrid.D3D12
             // Build vertex strides.
             if (description.ShaderSet.VertexLayouts.Length > 0)
             {
-                VertexStrides = new int[description.ShaderSet.VertexLayouts.Length];
+                VertexStrides = new uint[description.ShaderSet.VertexLayouts.Length];
 
                 for (int i = 0; i < VertexStrides.Length; i++)
-                    VertexStrides[i] = (int)description.ShaderSet.VertexLayouts[i].Stride;
+                    VertexStrides[i] = description.ShaderSet.VertexLayouts[i].Stride;
             }
             else
             {
-                VertexStrides = Array.Empty<int>();
+                VertexStrides = Array.Empty<uint>();
             }
 
             // Build blend state.
@@ -174,7 +174,7 @@ namespace Veldrid.D3D12
                 InputLayout = new InputLayoutDescription(inputElements),
                 PrimitiveTopologyType = D3D12Formats.VdToD3D12PrimitiveTopologyType(description.PrimitiveTopology),
                 SampleMask = uint.MaxValue,
-                SampleDescription = new SampleDescription(D3D12Formats.ToDxgiSampleCount(description.Outputs.SampleCount), 0),
+                SampleDescription = new SampleDescription((uint)D3D12Formats.ToDxgiSampleCount(description.Outputs.SampleCount), 0),
                 DepthStencilFormat = dsvFormat
             };
 
@@ -206,7 +206,7 @@ namespace Veldrid.D3D12
             };
 
             PipelineState = device.CreateComputePipelineState(psoDesc);
-            VertexStrides = Array.Empty<int>();
+            VertexStrides = Array.Empty<uint>();
             BlendFactor = new float[] { 0, 0, 0, 0 };
         }
 
@@ -238,10 +238,10 @@ namespace Veldrid.D3D12
                 var uavRanges = new List<DescriptorRange1>();
                 var samplerRanges = new List<DescriptorRange1>();
 
-                int cbvCount = 0;
-                int srvCount = 0;
-                int uavCount = 0;
-                int samplerCount = 0;
+                uint cbvCount = 0;
+                uint srvCount = 0;
+                uint uavCount = 0;
+                uint samplerCount = 0;
 
                 for (int i = 0; i < elements.Length; i++)
                 {
@@ -249,27 +249,27 @@ namespace Veldrid.D3D12
                     {
                         case ResourceKind.UniformBuffer:
                             cbvRanges.Add(new DescriptorRange1(
-                                DescriptorRangeType.ConstantBufferView, 1, cbvCount, setIndex));
+                                DescriptorRangeType.ConstantBufferView, 1, (uint)cbvCount, (uint)setIndex));
                             cbvCount++;
                             break;
 
                         case ResourceKind.StructuredBufferReadOnly:
                         case ResourceKind.TextureReadOnly:
                             srvRanges.Add(new DescriptorRange1(
-                                DescriptorRangeType.ShaderResourceView, 1, srvCount, setIndex));
+                                DescriptorRangeType.ShaderResourceView, 1, (uint)srvCount, (uint)setIndex));
                             srvCount++;
                             break;
 
                         case ResourceKind.StructuredBufferReadWrite:
                         case ResourceKind.TextureReadWrite:
                             uavRanges.Add(new DescriptorRange1(
-                                DescriptorRangeType.UnorderedAccessView, 1, uavCount, setIndex));
+                                DescriptorRangeType.UnorderedAccessView, 1, (uint)uavCount, (uint)setIndex));
                             uavCount++;
                             break;
 
                         case ResourceKind.Sampler:
                             samplerRanges.Add(new DescriptorRange1(
-                                DescriptorRangeType.Sampler, 1, samplerCount, setIndex));
+                                DescriptorRangeType.Sampler, 1, (uint)samplerCount, (uint)setIndex));
                             samplerCount++;
                             break;
                     }
@@ -318,14 +318,14 @@ namespace Veldrid.D3D12
                     var desc = layout.Elements[elementIndex];
                     elements.Add(new InputElementDescription(
                         getSemanticString(desc.Semantic),
-                        SemanticIndices.GetAndIncrement(ref semanticIndices, desc.Semantic),
+                        (uint)SemanticIndices.GetAndIncrement(ref semanticIndices, desc.Semantic),
                         vertexElementToDxgiFormat(desc.Format),
-                        (int)desc.Offset,
-                        layoutIndex,
+                        desc.Offset,
+                        (uint)layoutIndex,
                         layout.InstanceStepRate == 0
                             ? InputClassification.PerVertexData
                             : InputClassification.PerInstanceData,
-                        (int)layout.InstanceStepRate));
+                        layout.InstanceStepRate));
                 }
             }
 
