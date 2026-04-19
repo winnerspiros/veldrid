@@ -212,6 +212,12 @@ namespace Veldrid.D3D12
             }
         }
 
+        public override bool GetD3D12Info(out BackendInfoD3D12 info)
+        {
+            info = new BackendInfoD3D12(this);
+            return true;
+        }
+
         public override TextureSampleCount GetSampleCountLimit(PixelFormat format, bool depthFormat)
         {
             var dxgiFormat = D3D12Formats.ToDxgiFormat(format, depthFormat);

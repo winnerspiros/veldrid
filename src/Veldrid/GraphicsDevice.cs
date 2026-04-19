@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Threading;
 using Veldrid.D3D11;
+using Veldrid.D3D12;
 using Veldrid.MTL;
 using Veldrid.OpenGL;
 using Veldrid.Vk;
@@ -208,6 +209,12 @@ namespace Veldrid
                 case GraphicsBackend.OpenGLES:
 #if !EXCLUDE_OPENGL_BACKEND
                     return !RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
+#else
+                    return false;
+#endif
+                case GraphicsBackend.Direct3D12:
+#if !EXCLUDE_D3D12_BACKEND
+                    return RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && D3D12GraphicsDevice.IsSupported();
 #else
                     return false;
 #endif
@@ -1412,6 +1419,101 @@ namespace Veldrid
                 options.SwapchainSrgbFormat);
 
             return new MtlGraphicsDevice(options, swapchainDesc, metalOptions);
+        }
+#endif
+
+#if !EXCLUDE_D3D12_BACKEND
+        /// <summary>
+        ///     Tries to get a <see cref="BackendInfoD3D12" /> for this instance. This method will only succeed if this is a D3D12
+        ///     GraphicsDevice.
+        /// </summary>
+        /// <param name="info">If successful, this will contain the <see cref="BackendInfoD3D12" /> for this instance.</param>
+        /// <returns>True if this is a D3D12 GraphicsDevice and the operation was successful. False otherwise.</returns>
+        public virtual bool GetD3D12Info(out BackendInfoD3D12 info)
+        {
+            info = null;
+            return false;
+        }
+
+        /// <summary>
+        ///     Gets a <see cref="BackendInfoD3D12" /> for this instance. This method will only succeed if this is a D3D12
+        ///     GraphicsDevice. Otherwise, this method will throw an exception.
+        /// </summary>
+        /// <returns>The <see cref="BackendInfoD3D12" /> for this instance.</returns>
+        public BackendInfoD3D12 GetD3D12Info()
+        {
+            if (!GetD3D12Info(out var info)) throw new VeldridException($"{nameof(GetD3D12Info)} can only be used on a D3D12 GraphicsDevice.");
+
+            return info;
+        }
+
+        /// <summary>
+        ///     Creates a new <see cref="GraphicsDevice" /> using Direct3D 12.
+        /// </summary>
+        /// <param name="options">Describes several common properties of the GraphicsDevice.</param>
+        /// <returns>A new <see cref="GraphicsDevice" /> using the Direct3D 12 API.</returns>
+        [SupportedOSPlatform("windows")]
+        public static GraphicsDevice CreateD3D12(GraphicsDeviceOptions options)
+        {
+            return new D3D12GraphicsDevice(options, new D3D12DeviceOptions(), null);
+        }
+
+        /// <summary>
+        ///     Creates a new <see cref="GraphicsDevice" /> using Direct3D 12, with a main Swapchain.
+        /// </summary>
+        /// <param name="options">Describes several common properties of the GraphicsDevice.</param>
+        /// <param name="swapchainDescription">A description of the main Swapchain to create.</param>
+        /// <returns>A new <see cref="GraphicsDevice" /> using the Direct3D 12 API.</returns>
+        [SupportedOSPlatform("windows")]
+        public static GraphicsDevice CreateD3D12(GraphicsDeviceOptions options, SwapchainDescription swapchainDescription)
+        {
+            return new D3D12GraphicsDevice(options, new D3D12DeviceOptions(), swapchainDescription);
+        }
+
+        /// <summary>
+        ///     Creates a new <see cref="GraphicsDevice" /> using Direct3D 12.
+        /// </summary>
+        /// <param name="options">Describes several common properties of the GraphicsDevice.</param>
+        /// <param name="d3d12Options">The Direct3D12-specific options used to create the device.</param>
+        /// <returns>A new <see cref="GraphicsDevice" /> using the Direct3D 12 API.</returns>
+        [SupportedOSPlatform("windows")]
+        public static GraphicsDevice CreateD3D12(GraphicsDeviceOptions options, D3D12DeviceOptions d3d12Options)
+        {
+            return new D3D12GraphicsDevice(options, d3d12Options, null);
+        }
+
+        /// <summary>
+        ///     Creates a new <see cref="GraphicsDevice" /> using Direct3D 12, with a main Swapchain.
+        /// </summary>
+        /// <param name="options">Describes several common properties of the GraphicsDevice.</param>
+        /// <param name="d3d12Options">The Direct3D12-specific options used to create the device.</param>
+        /// <param name="swapchainDescription">A description of the main Swapchain to create.</param>
+        /// <returns>A new <see cref="GraphicsDevice" /> using the Direct3D 12 API.</returns>
+        [SupportedOSPlatform("windows")]
+        public static GraphicsDevice CreateD3D12(GraphicsDeviceOptions options, D3D12DeviceOptions d3d12Options, SwapchainDescription swapchainDescription)
+        {
+            return new D3D12GraphicsDevice(options, d3d12Options, swapchainDescription);
+        }
+
+        /// <summary>
+        ///     Creates a new <see cref="GraphicsDevice" /> using Direct3D 12, with a main Swapchain.
+        /// </summary>
+        /// <param name="options">Describes several common properties of the GraphicsDevice.</param>
+        /// <param name="hwnd">The Win32 window handle to render into.</param>
+        /// <param name="width">The initial width of the window.</param>
+        /// <param name="height">The initial height of the window.</param>
+        /// <returns>A new <see cref="GraphicsDevice" /> using the Direct3D 12 API.</returns>
+        [SupportedOSPlatform("windows")]
+        public static GraphicsDevice CreateD3D12(GraphicsDeviceOptions options, IntPtr hwnd, uint width, uint height)
+        {
+            var swapchainDescription = new SwapchainDescription(
+                SwapchainSource.CreateWin32(hwnd, IntPtr.Zero),
+                width, height,
+                options.SwapchainDepthFormat,
+                options.SyncToVerticalBlank,
+                options.SwapchainSrgbFormat);
+
+            return new D3D12GraphicsDevice(options, new D3D12DeviceOptions(), swapchainDescription);
         }
 #endif
     }
