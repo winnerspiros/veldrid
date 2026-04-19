@@ -365,13 +365,16 @@ namespace Veldrid.D3D12
 
         private protected override void SubmitCommandsCore(CommandList cl, Fence fence)
         {
-            // D3D12 command list submission requires a closed ID3D12GraphicsCommandList.
-            // Since D3D12CommandList is not yet implemented, this is a placeholder that
-            // signals the fence immediately for basic fence-based synchronization.
+            var d3d12CL = Util.AssertSubtype<CommandList, D3D12CommandList>(cl);
+
             lock (commandQueueLock)
             {
+                commandQueue.ExecuteCommandList(d3d12CL.CommandListHandle);
+
                 ulong fenceValueForSignal = Interlocked.Increment(ref frameFenceValue);
                 commandQueue.Signal(frameFence, fenceValueForSignal);
+
+                d3d12CL.OnSubmitted(fenceValueForSignal);
 
                 if (fence is D3D12Fence d3d12Fence)
                 {

@@ -21,7 +21,7 @@ namespace Veldrid.D3D12
 
         public override CommandList CreateCommandList(ref CommandListDescription description)
         {
-            throw new NotImplementedException("D3D12 CommandList is not yet implemented.");
+            return new D3D12CommandList(gd, ref description);
         }
 
         public override Framebuffer CreateFramebuffer(ref FramebufferDescription description)
