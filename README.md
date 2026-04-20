@@ -59,10 +59,10 @@ The following changes target tile-based mobile GPUs. They are also harmless (or 
   - Capability flag `OpenGLExtensions.InvalidateFramebuffer` (`GLVersion(4, 3) || GLESVersion(3, 0)`).
   - `OpenGLGraphicsDevice.invalidateSwapchainDepthOnSwap` set during `init()` when `SwapchainDepthFormat != null` and the capability is present; the `WorkItemType.SwapBuffers` handler in the GL execution thread binds default FB and invalidates `Depth`+`Stencil` before the platform `swapBuffers()` call.
   - Color is **not** invalidated — that's what we're presenting.
+- **Vulkan present-mode hot-swap (`VK_EXT_swapchain_maintenance1`, promoted to `VK_KHR_swapchain_maintenance1` in Vulkan 1.4)** — toggling `SyncToVerticalBlank` or `AllowTearing` previously forced a full swapchain rebuild plus image reacquire (a multi-millisecond stall plus one dropped frame). When the device exposes the maintenance1 trio (`VK_KHR_get_surface_capabilities2` + `VK_EXT_surface_maintenance1` + `VK_EXT_swapchain_maintenance1`), Veldrid now creates the swapchain with the full *compatibility set* of present modes (queried via `VkSurfacePresentModeCompatibilityEXT`) and chains a per-present `VkSwapchainPresentModeInfoEXT` to apply the new mode at `vkQueuePresentKHR` time — no rebuild, no dropped frame. This makes runtime "low-latency mode" toggles essentially free on Adreno 740 / recent Mali / NVIDIA / Intel / Mesa. Falls back transparently to the recreate-and-reacquire path on devices without the extension. Implementation in `src/Veldrid/Vk/VkSwapchain.cs` (compat-set query + `VkSwapchainPresentModesCreateInfoEXT` chain) and `src/Veldrid/Vk/VkGraphicsDevice.cs` (`HasSwapchainMaintenance1` detection + per-present mode chain in `SwapBuffersCore`). **No new public API** — the existing `Swapchain.SyncToVerticalBlank` / `GraphicsDevice.AllowTearing` setters just got faster.
 
 #### Mobile optimizations explicitly *not* shipped (yet) and why
 - **Persisted `VkPipelineCache`.** Veldrid already creates a `VkPipelineCache` (no longer `VkPipelineCache.Null`) so within-process pipeline creation is deduplicated, but the cache is not persisted across application launches. Persisting it would require a deliberate public API: a path or stream to read/write the blob, plus pipeline-cache UUID and driver-version validation per the Vulkan spec.
-- **`VK_KHR_swapchain_maintenance1`** (Adreno 740 supports it). Allows changing present mode without recreating the swapchain — useful for runtime "low-latency mode" toggles. Out of scope for this round; needs new public API.
 - **`glInvalidateFramebuffer` for offscreen FBOs.** Same mechanism, larger potential win, but requires a render-pass concept Veldrid's GL backend doesn't currently model. Mis-invalidating an attachment that the user later samples (shadow maps, ping-pong post-processing) would silently corrupt rendering. Not safe to ship without per-attachment usage tracking.
 
 ### Variable Rate Shading (VRS)
@@ -87,6 +87,7 @@ The following changes target tile-based mobile GPUs. They are also harmless (or 
 - **Vulkan Descriptor Indexing** — `VkGraphicsDevice.HasDescriptorIndexing` (bindless descriptors)
 - **Vulkan Fragment Shading Rate** — `BackendInfoVulkan.HasFragmentShadingRate`
 - **Vulkan Mesh Shaders** — `BackendInfoVulkan.HasMeshShader`
+- **Vulkan Swapchain Maintenance 1** — `VkGraphicsDevice.HasSwapchainMaintenance1` (present-mode hot-swap; auto-applied by `Swapchain.SyncToVerticalBlank` / `GraphicsDevice.AllowTearing` setters)
 
 ### Bug Fixes from Upstream Issues & PRs
 - **Vulkan: Remove `[Conditional("DEBUG")]` from `VulkanUtil.CheckResult`** — was silently swallowing Vulkan errors in release builds, causing untraceable segfaults ([ppy#61](https://github.com/ppy/veldrid/issues/61))
@@ -105,6 +106,11 @@ The following changes target tile-based mobile GPUs. They are also harmless (or 
 - Artifact name uses `${{ github.run_id }}-${{ github.sha }}` (PR builds set `github.ref_name` to e.g. `4/merge`, which contains a `/` — disallowed in artifact names).
 - Push to default branch publishes prereleases to GitHub Packages via `GITHUB_TOKEN`; tagged refs publish to nuget.org and create a GitHub Release named `Veldrid <tag>`. All publish steps use `--skip-duplicate` for idempotency.
 - `actions/cache@v4` for `~/.nuget/packages` on all 3 OS jobs; `concurrency:` group cancels superseded non-tag runs.
+- **One-click manual publish** — `.github/workflows/publish.yml` exposes a `workflow_dispatch` job (Actions → *Publish NuGet Packages* → *Run workflow*) with three inputs:
+  - `destination`: `github` (default) / `nuget.org` / `both`
+  - `create_release`: attach `.nupkg` files to a GitHub Release (most useful with a tag ref)
+  - `dry_run`: build + pack only, skip every push step (verifies the Nerdbank.GitVersioning-computed version before committing to a publish)
+  - Always uploads `.nupkg` files as workflow artifacts (30-day retention) regardless of publish outcome. `GITHUB_TOKEN` is sufficient for GitHub Packages; `NUGET_API_KEY` is only needed for `nuget.org`/`both`.
 
 ### Supported Backends
 | Backend | Platforms | Status |

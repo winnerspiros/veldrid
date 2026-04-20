@@ -48,7 +48,10 @@ namespace Veldrid.Vk
                     return;
                 }
 
-                if (syncToVBlank != value) newSyncToVBlank = value;
+                // Hot-swap unavailable: defer to the AcquireNextImage recreate path.
+                // Re-toggling back to the live value clears any pending change instead of
+                // queuing a redundant recreate.
+                newSyncToVBlank = syncToVBlank != value ? value : (bool?)null;
             }
         }
 
