@@ -45,6 +45,7 @@ namespace Veldrid.Vk
         private bool commandBufferBegun;
         private bool commandBufferEnded;
         private VkRect2D[] scissorRects = Array.Empty<VkRect2D>();
+        private VkViewport[] cachedViewports = Array.Empty<VkViewport>();
 
         private VkClearValue[] clearValues = Array.Empty<VkClearValue>();
         private bool[] validColorClearValues = Array.Empty<bool>();
@@ -160,6 +161,7 @@ namespace Veldrid.Vk
             currentGraphicsPipeline = null;
             clearSets(currentGraphicsResourceSets);
             Util.ClearArray(scissorRects);
+            Util.ClearArray(cachedViewports);
 
             currentComputePipeline = null;
             clearSets(currentComputeResourceSets);
@@ -227,7 +229,17 @@ namespace Veldrid.Vk
                     maxDepth = viewport.MaxDepth
                 };
 
-                vkCmdSetViewport(CommandBuffer, index, 1, ref vkViewport);
+                ref var cached = ref cachedViewports[index];
+                if (cached.x != vkViewport.x
+                    || cached.y != vkViewport.y
+                    || cached.width != vkViewport.width
+                    || cached.height != vkViewport.height
+                    || cached.minDepth != vkViewport.minDepth
+                    || cached.maxDepth != vkViewport.maxDepth)
+                {
+                    cached = vkViewport;
+                    vkCmdSetViewport(CommandBuffer, index, 1, ref vkViewport);
+                }
             }
         }
 
@@ -690,6 +702,7 @@ namespace Veldrid.Vk
             currentFramebufferEverActive = false;
             newFramebuffer = true;
             Util.EnsureArrayMinimumSize(ref scissorRects, Math.Max(1, (uint)vkFb.ColorTargets.Count));
+            Util.EnsureArrayMinimumSize(ref cachedViewports, Math.Max(1, (uint)vkFb.ColorTargets.Count));
             uint clearValueCount = (uint)vkFb.ColorTargets.Count;
             Util.EnsureArrayMinimumSize(ref clearValues, clearValueCount + 1); // Leave an extra space for the depth value (tracked separately).
             Util.ClearArray(validColorClearValues);
