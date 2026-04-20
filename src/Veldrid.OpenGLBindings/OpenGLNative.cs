@@ -1645,6 +1645,19 @@ namespace Veldrid.OpenGLBindings
             => p_glClipControl(origin, depth);
 
         [UnmanagedFunctionPointer(CallConv)]
+        private delegate void glInvalidateFramebuffer_t(
+            FramebufferTarget target,
+            uint numAttachments,
+            GLFramebufferAttachment* attachments);
+        private static glInvalidateFramebuffer_t p_glInvalidateFramebuffer;
+        public static void glInvalidateFramebuffer(
+            FramebufferTarget target,
+            uint numAttachments,
+            GLFramebufferAttachment* attachments)
+            => p_glInvalidateFramebuffer(target, numAttachments, attachments);
+        public static bool HasGlInvalidateFramebuffer => p_glInvalidateFramebuffer != null;
+
+        [UnmanagedFunctionPointer(CallConv)]
         private delegate void glGetFramebufferAttachmentParameteriv_t(
             FramebufferTarget target,
             GLFramebufferAttachment attachment,
@@ -1901,6 +1914,11 @@ namespace Veldrid.OpenGLBindings
             LoadFunction("glDebugMessageInsert", out p_glDebugMessageInsert);
 
             LoadFunction("glReadPixels", out p_glReadPixels);
+
+            // glInvalidateFramebuffer is core in GL 4.3+ and GLES 3.0+. Used for tile-store skipping
+            // on tile-based GPUs (Adreno / Mali / PowerVR). LoadFunction silently returns null on
+            // older contexts; callers must check Extensions.InvalidateFramebuffer / HasGlInvalidateFramebuffer.
+            LoadFunction("glInvalidateFramebuffer", out p_glInvalidateFramebuffer);
 
             if (!gles)
             {

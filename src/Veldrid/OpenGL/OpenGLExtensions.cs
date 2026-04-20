@@ -34,6 +34,7 @@ namespace Veldrid.OpenGL
         public readonly bool StorageBuffers;
         public readonly bool AnisotropicFilter;
         public readonly bool OesPackedDepthStencil;
+        public readonly bool InvalidateFramebuffer;
         private readonly HashSet<string> extensions;
         private readonly GraphicsBackend backend;
         private readonly int major;
@@ -98,6 +99,12 @@ namespace Veldrid.OpenGL
             OesPackedDepthStencil = GLVersion(3, 0) || GLESVersion(3, 0)
                                     || IsExtensionSupported("GL_ARB_framebuffer_object")
                                     || IsExtensionSupported("GL_OES_packed_depth_stencil");
+
+            // glInvalidateFramebuffer: core in GL 4.3+ and GLES 3.0+. The single most impactful
+            // mobile optimization on tile-based GPUs — lets the driver skip tile→main-memory
+            // writeback for attachments whose contents the next frame doesn't need (canonically
+            // the swapchain's depth/stencil after present).
+            InvalidateFramebuffer = GLVersion(4, 3) || GLESVersion(3, 0);
         }
 
         /// <summary>
