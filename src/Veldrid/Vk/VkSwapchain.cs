@@ -218,7 +218,13 @@ namespace Veldrid.Vk
 
             if (syncToVBlank)
             {
-                if (Array.IndexOf(presentModes, VkPresentModeKHR.FifoRelaxedKHR) >= 0)
+                // Prefer MAILBOX over FIFO_RELAXED when vsync is requested: both avoid tearing
+                // under steady state, but MAILBOX replaces the queued frame instead of queueing it,
+                // cutting one full frame of input-to-photon latency. This is the canonical
+                // "low-latency vsync" choice on Android tilers.
+                if (Array.IndexOf(presentModes, VkPresentModeKHR.MailboxKHR) >= 0)
+                    presentMode = VkPresentModeKHR.MailboxKHR;
+                else if (Array.IndexOf(presentModes, VkPresentModeKHR.FifoRelaxedKHR) >= 0)
                     presentMode = VkPresentModeKHR.FifoRelaxedKHR;
             }
             else if (allowTearing && Array.IndexOf(presentModes, VkPresentModeKHR.ImmediateKHR) >= 0)

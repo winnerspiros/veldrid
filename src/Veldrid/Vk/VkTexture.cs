@@ -83,6 +83,7 @@ namespace Veldrid.Vk
             VkFormat = VkFormats.VdToVkPixelFormat(Format, (description.Usage & TextureUsage.DepthStencil) == TextureUsage.DepthStencil);
 
             bool isStaging = (Usage & TextureUsage.Staging) == TextureUsage.Staging;
+            bool isTransient = (Usage & TextureUsage.Transient) == TextureUsage.Transient;
 
             if (!isStaging)
             {
@@ -93,7 +94,9 @@ namespace Veldrid.Vk
                 imageCi.extent.width = Width;
                 imageCi.extent.height = Height;
                 imageCi.extent.depth = Depth;
-                imageCi.initialLayout = VkImageLayout.Preinitialized;
+                // Preinitialized layout is only valid for images backed by host-visible memory.
+                // Transient images use lazily-allocated (tile-only) memory and must start as Undefined.
+                imageCi.initialLayout = isTransient ? VkImageLayout.Undefined : VkImageLayout.Preinitialized;
                 imageCi.usage = VkFormats.VdToVkTextureUsage(Usage);
                 imageCi.tiling = VkImageTiling.Optimal;
                 imageCi.format = VkFormat;
@@ -126,10 +129,25 @@ namespace Veldrid.Vk
                     prefersDedicatedAllocation = false;
                 }
 
+                // For transient attachments, prefer LAZILY_ALLOCATED memory so the image lives only
+                // in tile RAM on tile-based GPUs (Adreno / Mali / PowerVR) — zero physical-memory
+                // backing, zero DRAM bandwidth for tile→main writeback. If no such memory type is
+                // available (desktop GPUs typically don't expose it), fall back to plain DeviceLocal.
+                var memoryProperties = VkMemoryPropertyFlags.DeviceLocal;
+                if (isTransient
+                    && TryFindMemoryType(
+                        gd.PhysicalDeviceMemProperties,
+                        memoryRequirements.memoryTypeBits,
+                        VkMemoryPropertyFlags.DeviceLocal | VkMemoryPropertyFlags.LazilyAllocated,
+                        out _))
+                {
+                    memoryProperties |= VkMemoryPropertyFlags.LazilyAllocated;
+                }
+
                 var memoryToken = gd.MemoryManager.Allocate(
                     gd.PhysicalDeviceMemProperties,
                     memoryRequirements.memoryTypeBits,
-                    VkMemoryPropertyFlags.DeviceLocal,
+                    memoryProperties,
                     false,
                     memoryRequirements.size,
                     memoryRequirements.alignment,
@@ -141,7 +159,8 @@ namespace Veldrid.Vk
                 CheckResult(result);
 
                 imageLayouts = new VkImageLayout[subresourceCount];
-                for (int i = 0; i < imageLayouts.Length; i++) imageLayouts[i] = VkImageLayout.Preinitialized;
+                var initialLayout = isTransient ? VkImageLayout.Undefined : VkImageLayout.Preinitialized;
+                for (int i = 0; i < imageLayouts.Length; i++) imageLayouts[i] = initialLayout;
             }
             else // isStaging
             {

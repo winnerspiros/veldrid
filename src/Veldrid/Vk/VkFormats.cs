@@ -94,10 +94,19 @@ namespace Veldrid.Vk
 
         internal static VkImageUsageFlags VdToVkTextureUsage(TextureUsage vdUsage)
         {
-            var vkUsage = VkImageUsageFlags.TransferDst | VkImageUsageFlags.TransferSrc;
+            // TextureUsage.Transient: the image is only ever used as a render-pass attachment —
+            // never sampled, copied, mapped, or persisted across frames. Strip TransferSrc/Dst
+            // and Sampled so the Vulkan driver can place the image in tile-only / lazily-allocated
+            // memory on tile-based GPUs. Per the Vulkan spec, an image with TRANSIENT_ATTACHMENT_BIT
+            // may only have *Attachment + InputAttachment usages.
+            bool isTransient = (vdUsage & TextureUsage.Transient) == TextureUsage.Transient;
+
+            var vkUsage = isTransient
+                ? VkImageUsageFlags.TransientAttachment
+                : (VkImageUsageFlags.TransferDst | VkImageUsageFlags.TransferSrc);
             bool isDepthStencil = (vdUsage & TextureUsage.DepthStencil) == TextureUsage.DepthStencil;
 
-            if ((vdUsage & TextureUsage.Sampled) == TextureUsage.Sampled)
+            if (!isTransient && (vdUsage & TextureUsage.Sampled) == TextureUsage.Sampled)
                 vkUsage |= VkImageUsageFlags.Sampled;
 
             if (isDepthStencil)
@@ -106,7 +115,7 @@ namespace Veldrid.Vk
             if ((vdUsage & TextureUsage.RenderTarget) == TextureUsage.RenderTarget)
                 vkUsage |= VkImageUsageFlags.ColorAttachment;
 
-            if ((vdUsage & TextureUsage.Storage) == TextureUsage.Storage)
+            if (!isTransient && (vdUsage & TextureUsage.Storage) == TextureUsage.Storage)
                 vkUsage |= VkImageUsageFlags.Storage;
 
             return vkUsage;

@@ -110,6 +110,14 @@ namespace Veldrid.OpenGL
 
         private bool syncToVBlank;
 
+        // True iff the swapchain framebuffer has a depth attachment AND the GL/GLES context exposes
+        // glInvalidateFramebuffer (core in GL 4.3+ / GLES 3.0+). When set, we discard the default
+        // framebuffer's depth+stencil attachments immediately before SwapBuffers so the tiler skips
+        // the depth/stencil tile-store on every frame. This is the single most impactful mobile
+        // optimization on Adreno / Mali / PowerVR — at 1440x3088x120 Hz it saves ~2 GB/s of DRAM
+        // bandwidth, which translates to lower power, lower thermals, and higher sustained FPS.
+        private bool invalidateSwapchainDepthOnSwap;
+
         public OpenGLGraphicsDevice(
             GraphicsDeviceOptions options,
             OpenGLPlatformInfo platformInfo,
@@ -456,12 +464,22 @@ namespace Veldrid.OpenGL
                 options.SwapchainDepthFormat,
                 swapchainFormat != PixelFormat.B8G8R8A8UNormSRgb);
 
+            invalidateSwapchainDepthOnSwap = options.SwapchainDepthFormat != null
+                                             && Extensions.InvalidateFramebuffer;
+
             // Set miscellaneous initial states.
             if (backendType == GraphicsBackend.OpenGL)
             {
                 glEnable(EnableCap.TextureCubeMapSeamless);
                 CheckLastError();
             }
+
+            // Disable dithering. It is enabled by default in both desktop GL and GLES, costs
+            // fragment cycles on tile-based mobile GPUs (Mali / Adreno / PowerVR), and produces
+            // no visible difference on the >=8-bpc color targets used by modern displays.
+            // Both Arm and Qualcomm explicitly recommend disabling it for game-style rendering.
+            glDisable(EnableCap.Dither);
+            CheckLastError();
 
             TextureSamplerManager = new OpenGLTextureSamplerManager(Extensions);
             commandExecutor = new OpenGLCommandExecutor(this, platformInfo);
@@ -1301,6 +1319,27 @@ namespace Veldrid.OpenGL
 
                         case WorkItemType.SwapBuffers:
                         {
+                            // Tile-store skip: tell the driver the default framebuffer's depth and
+                            // stencil contents are not needed after present. On tile-based GPUs
+                            // (Adreno / Mali / PowerVR) this allows the tiler to drop the per-tile
+                            // depth/stencil writeback to main memory, cutting DRAM bandwidth and
+                            // power. Color is preserved (it's what we're presenting). This is an
+                            // unambiguously safe optimization: the spec leaves the default FB's
+                            // depth/stencil contents undefined across SwapBuffers, so any caller
+                            // depending on them would already be broken on tilers.
+                            if (gd.invalidateSwapchainDepthOnSwap)
+                            {
+                                glBindFramebuffer(FramebufferTarget.Framebuffer, 0);
+                                CheckLastError();
+                                GLFramebufferAttachment* attachments = stackalloc GLFramebufferAttachment[2]
+                                {
+                                    GLFramebufferAttachment.Depth,
+                                    GLFramebufferAttachment.Stencil,
+                                };
+                                glInvalidateFramebuffer(FramebufferTarget.Framebuffer, 2, attachments);
+                                CheckLastError();
+                            }
+
                             gd.swapBuffers();
                             gd.flushDisposables();
                         }

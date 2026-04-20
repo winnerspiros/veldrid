@@ -185,16 +185,25 @@ namespace Veldrid.D3D11
 
         public override void SetScissorRect(uint index, uint x, uint y, uint width, uint height)
         {
-            scissorRectsChanged = true;
             Util.EnsureArrayMinimumSize(ref scissors, index + 1);
-            scissors[index] = new RawRect((int)x, (int)y, (int)(x + width), (int)(y + height));
+            var rect = new RawRect((int)x, (int)y, (int)(x + width), (int)(y + height));
+            ref var cached = ref scissors[index];
+            if (cached.Left != rect.Left || cached.Top != rect.Top
+                || cached.Right != rect.Right || cached.Bottom != rect.Bottom)
+            {
+                cached = rect;
+                scissorRectsChanged = true;
+            }
         }
 
         public override void SetViewport(uint index, ref Viewport viewport)
         {
-            viewportsChanged = true;
             Util.EnsureArrayMinimumSize(ref viewports, index + 1);
-            viewports[index] = viewport;
+            if (!viewports[index].Equals(viewport))
+            {
+                viewports[index] = viewport;
+                viewportsChanged = true;
+            }
         }
 
         internal void OnCompleted()

@@ -45,6 +45,22 @@ namespace Veldrid
         /// <summary>
         ///     The Texture supports automatic generation of mipmaps through <see cref="CommandList.GenerateMipmaps(Texture)" />.
         /// </summary>
-        GenerateMipmaps = 1 << 6
+        GenerateMipmaps = 1 << 6,
+
+        /// <summary>
+        ///     The Texture's contents are not needed outside of a render pass — i.e. the texture is
+        ///     written to and read from only as an attachment, never sampled, copied, or persisted
+        ///     across frames. On tile-based mobile GPUs (Adreno / Mali / PowerVR) this lets the
+        ///     Vulkan backend allocate the image with <c>VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT</c>
+        ///     and back it with <c>VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT</c> memory, so the image
+        ///     never occupies physical memory and lives entirely in tile RAM. Saves both VRAM and
+        ///     DRAM bandwidth — the canonical use is the swapchain depth/stencil buffer (the Veldrid
+        ///     swapchain framebuffer opts in automatically). Implies the texture cannot be sampled,
+        ///     used as a copy source/destination, mapped, or used as compute storage. Mutually
+        ///     exclusive with <see cref="Sampled" />, <see cref="Storage" />, <see cref="Staging" />,
+        ///     and <see cref="GenerateMipmaps" />. Backends that don't model lazy allocation
+        ///     (D3D11, D3D12, Metal, OpenGL) silently ignore this flag.
+        /// </summary>
+        Transient = 1 << 7
     }
 }

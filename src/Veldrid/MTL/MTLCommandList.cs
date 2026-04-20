@@ -146,14 +146,23 @@ namespace Veldrid.MTL
 
         public override void SetViewport(uint index, ref Viewport viewport)
         {
-            viewportsChanged = true;
-            viewports[index] = new MTLViewport(
-                viewport.X,
-                viewport.Y,
-                viewport.Width,
-                viewport.Height,
-                viewport.MinDepth,
-                viewport.MaxDepth);
+            ref var current = ref viewports[index];
+            if (current.originX != viewport.X
+                || current.originY != viewport.Y
+                || current.width != viewport.Width
+                || current.height != viewport.Height
+                || current.znear != viewport.MinDepth
+                || current.zfar != viewport.MaxDepth)
+            {
+                current = new MTLViewport(
+                    viewport.X,
+                    viewport.Y,
+                    viewport.Width,
+                    viewport.Height,
+                    viewport.MinDepth,
+                    viewport.MaxDepth);
+                viewportsChanged = true;
+            }
         }
 
         public void SetCompletionFence(MTLCommandBuffer cb, MtlFence fence)

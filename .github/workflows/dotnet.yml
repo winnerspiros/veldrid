@@ -22,11 +22,19 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded runs on the same branch / PR to save CI minutes
+# and give faster feedback. Tag-triggered runs are kept distinct so
+# release publishing isn't cancelled by subsequent commits.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 jobs:
   build_windows:
     runs-on: windows-latest
     permissions:
-      contents: write
+      contents: write   # for GitHub Release on tag push
+      packages: write   # for GitHub Packages prerelease publish on master
 
     steps:
     - uses: actions/checkout@v6
@@ -36,19 +44,36 @@ jobs:
       uses: actions/setup-dotnet@v5
       with:
         dotnet-version: 10.0.x
+    - name: Cache NuGet packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props', '**/packages.lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
     - name: Restore dependencies
       run: dotnet restore src
     - name: Build
       run: dotnet build --no-restore src -c Release -p:TreatWarningsAsErrors=true
     - name: Build Packages
       run: dotnet pack src -c Release
+    - name: Upload package artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: nupkgs-${{ github.run_id }}-${{ github.sha }}
+        path: bin\Packages\Release\ppy.*.nupkg
+        if-no-files-found: error
+    - name: Publish prerelease to GitHub Packages (push to default branch)
+      if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      run: dotnet nuget push bin\Packages\Release\ppy.*.nupkg -s https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --api-key ${{ secrets.GITHUB_TOKEN }} --skip-duplicate
     - name: Publish tagged release to nuget.org
       if: startsWith(github.ref, 'refs/tags/')
-      run: dotnet nuget push bin\Packages\Release\ppy.*.nupkg -s https://api.nuget.org/v3/index.json --api-key ${{secrets.NUGET_API_KEY}}
+      run: dotnet nuget push bin\Packages\Release\ppy.*.nupkg -s https://api.nuget.org/v3/index.json --api-key ${{secrets.NUGET_API_KEY}} --skip-duplicate
     - name: Generate GitHub Release
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v2
       with:
+        name: Veldrid ${{ github.ref_name }}
         files: |
           bin\Packages\Release\ppy.*.nupkg
 
@@ -63,6 +88,13 @@ jobs:
       uses: actions/setup-dotnet@v5
       with:
         dotnet-version: 10.0.x
+    - name: Cache NuGet packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props', '**/packages.lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
     - name: Restore dependencies
       run: dotnet restore src
     - name: Build
@@ -81,6 +113,13 @@ jobs:
       uses: actions/setup-dotnet@v5
       with:
         dotnet-version: 10.0.x
+    - name: Cache NuGet packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props', '**/packages.lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
     - name: Restore dependencies
       run: dotnet restore src
     - name: Build
