@@ -20,5 +20,9 @@
         public static FixedUtf8String VkKhrGetPhysicalDeviceProperties2 { get; } = "VK_KHR_get_physical_device_properties2";
         public static FixedUtf8String VkKhrPortabilitySubset { get; } = "VK_KHR_portability_subset";
         public static FixedUtf8String VkKhrPortabilityEnumeration { get; } = "VK_KHR_portability_enumeration";
+
+        // Required for VK_EXT_swapchain_maintenance1 — see VkSwapchain present-mode hot-swap.
+        public static FixedUtf8String VkKhrGetSurfaceCapabilities2 { get; } = "VK_KHR_get_surface_capabilities2";
+        public static FixedUtf8String VkExtSurfaceMaintenance1 { get; } = "VK_EXT_surface_maintenance1";
     }
 }

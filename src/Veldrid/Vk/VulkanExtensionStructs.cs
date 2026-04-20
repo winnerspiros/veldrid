@@ -242,4 +242,152 @@ namespace Veldrid.Vk
     // --- VK_EXT_mesh_shader ---
 
     internal delegate void VkCmdDrawMeshTasksExtT(VkCommandBuffer commandBuffer, uint groupCountX, uint groupCountY, uint groupCountZ);
+
+    // --- VK_KHR_get_surface_capabilities2 ---
+    // Required as the underlying query mechanism for VK_EXT_surface_maintenance1.
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct VkPhysicalDeviceSurfaceInfo2KHR
+    {
+        public const VkStructureType TYPE = (VkStructureType)1000119000;
+
+        public VkStructureType sType;
+        public void* pNext;
+        public VkSurfaceKHR surface;
+
+        public static VkPhysicalDeviceSurfaceInfo2KHR New()
+        {
+            var ret = default(VkPhysicalDeviceSurfaceInfo2KHR);
+            ret.sType = TYPE;
+            return ret;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct VkSurfaceCapabilities2KHR
+    {
+        public const VkStructureType TYPE = (VkStructureType)1000119001;
+
+        public VkStructureType sType;
+        public void* pNext;
+        public VkSurfaceCapabilitiesKHR surfaceCapabilities;
+
+        public static VkSurfaceCapabilities2KHR New()
+        {
+            var ret = default(VkSurfaceCapabilities2KHR);
+            ret.sType = TYPE;
+            return ret;
+        }
+    }
+
+    internal unsafe delegate VkResult VkGetPhysicalDeviceSurfaceCapabilities2KhrT(
+        VkPhysicalDevice physicalDevice,
+        VkPhysicalDeviceSurfaceInfo2KHR* pSurfaceInfo,
+        VkSurfaceCapabilities2KHR* pSurfaceCapabilities);
+
+    // --- VK_EXT_surface_maintenance1 ---
+    // Lets us discover, per *anchor* present mode, which other present modes the swapchain
+    // can be hot-switched to without recreation. Chained as input to
+    // vkGetPhysicalDeviceSurfaceCapabilities2KHR; results are returned via the
+    // VkSurfacePresentModeCompatibilityEXT struct chained on the output.
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct VkSurfacePresentModeEXT
+    {
+        public const VkStructureType TYPE = (VkStructureType)1000274000;
+
+        public VkStructureType sType;
+        public void* pNext;
+        public VkPresentModeKHR presentMode;
+
+        public static VkSurfacePresentModeEXT New()
+        {
+            var ret = default(VkSurfacePresentModeEXT);
+            ret.sType = TYPE;
+            return ret;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct VkSurfacePresentModeCompatibilityEXT
+    {
+        public const VkStructureType TYPE = (VkStructureType)1000274002;
+
+        public VkStructureType sType;
+        public void* pNext;
+        public uint presentModeCount;
+        public VkPresentModeKHR* pPresentModes;
+
+        public static VkSurfacePresentModeCompatibilityEXT New()
+        {
+            var ret = default(VkSurfacePresentModeCompatibilityEXT);
+            ret.sType = TYPE;
+            return ret;
+        }
+    }
+
+    // --- VK_EXT_swapchain_maintenance1 (promoted to KHR in Vulkan 1.4) ---
+    // Allows changing present mode at vkQueuePresentKHR time without rebuilding the
+    // swapchain — useful for runtime "low-latency mode" toggles. Adreno 740, recent
+    // Mali / NVIDIA / Intel / Mesa drivers all support it.
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT
+    {
+        public const VkStructureType TYPE = (VkStructureType)1000275000;
+
+        public VkStructureType sType;
+        public void* pNext;
+        public VkBool32 swapchainMaintenance1;
+
+        public static VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT New()
+        {
+            var ret = default(VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT);
+            ret.sType = TYPE;
+            return ret;
+        }
+    }
+
+    // Chained to VkSwapchainCreateInfoKHR.pNext on creation. The first entry in
+    // pPresentModes is the swapchain's initial present mode; subsequent entries are
+    // those we want to keep the option to switch to. Every listed mode must be in the
+    // *compatibility set* of the initial mode (queried via VK_EXT_surface_maintenance1).
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct VkSwapchainPresentModesCreateInfoEXT
+    {
+        public const VkStructureType TYPE = (VkStructureType)1000275002;
+
+        public VkStructureType sType;
+        public void* pNext;
+        public uint presentModeCount;
+        public VkPresentModeKHR* pPresentModes;
+
+        public static VkSwapchainPresentModesCreateInfoEXT New()
+        {
+            var ret = default(VkSwapchainPresentModesCreateInfoEXT);
+            ret.sType = TYPE;
+            return ret;
+        }
+    }
+
+    // Chained to VkPresentInfoKHR.pNext per-present. pPresentModes is parallel to
+    // pSwapchains: one VkPresentModeKHR per swapchain. We only ever present a single
+    // swapchain, so the array is length 1.
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct VkSwapchainPresentModeInfoEXT
+    {
+        public const VkStructureType TYPE = (VkStructureType)1000275003;
+
+        public VkStructureType sType;
+        public void* pNext;
+        public uint swapchainCount;
+        public VkPresentModeKHR* pPresentModes;
+
+        public static VkSwapchainPresentModeInfoEXT New()
+        {
+            var ret = default(VkSwapchainPresentModeInfoEXT);
+            ret.sType = TYPE;
+            return ret;
+        }
+    }
 }

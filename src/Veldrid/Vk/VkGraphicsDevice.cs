@@ -98,6 +98,14 @@ namespace Veldrid.Vk
         public bool HasMeshShader { get; private set; }
         public VkCmdDrawMeshTasksExtT CmdDrawMeshTasksExt { get; private set; }
 
+        // VK_KHR_get_surface_capabilities2 + VK_EXT_surface_maintenance1 (instance) +
+        // VK_EXT_swapchain_maintenance1 (device).
+        // When true, the swapchain can hot-swap present modes at vkQueuePresentKHR
+        // time without rebuilding — used by VkSwapchain to make SyncToVerticalBlank /
+        // AllowTearing toggles near-free.
+        public bool HasSwapchainMaintenance1 { get; private set; }
+        public VkGetPhysicalDeviceSurfaceCapabilities2KhrT GetPhysicalDeviceSurfaceCapabilities2 { get; private set; }
+
         /// <summary>
         ///     The Vulkan API version supported by the selected physical device.
         /// </summary>
@@ -895,6 +903,16 @@ namespace Veldrid.Vk
             bool hasDeviceProperties2 = availableInstanceExtensions.Contains(CommonStrings.VkKhrGetPhysicalDeviceProperties2);
             if (hasDeviceProperties2) instanceExtensions.Add(CommonStrings.VkKhrGetPhysicalDeviceProperties2);
 
+            // VK_KHR_get_surface_capabilities2 + VK_EXT_surface_maintenance1 are required
+            // by VK_EXT_swapchain_maintenance1 to query per-mode compatibility sets.
+            // Both are instance-level; the device-level extension is detected later.
+            bool hasSurfaceCapabilities2 = availableInstanceExtensions.Contains(CommonStrings.VkKhrGetSurfaceCapabilities2);
+            if (hasSurfaceCapabilities2) instanceExtensions.Add(CommonStrings.VkKhrGetSurfaceCapabilities2);
+
+            bool hasSurfaceMaintenance1 = hasSurfaceCapabilities2
+                                          && availableInstanceExtensions.Contains(CommonStrings.VkExtSurfaceMaintenance1);
+            if (hasSurfaceMaintenance1) instanceExtensions.Add(CommonStrings.VkExtSurfaceMaintenance1);
+
             string[] requestedInstanceExtensions = options.InstanceExtensions ?? Array.Empty<string>();
             var tempStrings = new List<FixedUtf8String>();
 
@@ -947,6 +965,14 @@ namespace Veldrid.Vk
             {
                 getPhysicalDeviceProperties2 = getInstanceProcAddr<VkGetPhysicalDeviceProperties2T>("vkGetPhysicalDeviceProperties2"u8)
                                                ?? getInstanceProcAddr<VkGetPhysicalDeviceProperties2T>("vkGetPhysicalDeviceProperties2KHR"u8);
+            }
+
+            // Load vkGetPhysicalDeviceSurfaceCapabilities2KHR for VK_EXT_surface_maintenance1
+            // queries. Required before we can validate VK_EXT_swapchain_maintenance1 below.
+            if (hasSurfaceMaintenance1)
+            {
+                GetPhysicalDeviceSurfaceCapabilities2 =
+                    getInstanceProcAddr<VkGetPhysicalDeviceSurfaceCapabilities2KhrT>("vkGetPhysicalDeviceSurfaceCapabilities2KHR"u8);
             }
 
             foreach (var tempStr in tempStrings) tempStr.Dispose();
@@ -1056,6 +1082,7 @@ namespace Veldrid.Vk
             bool hasDescriptorIndexing = DeviceApiVersion.IsAtLeast(1, 2); // Core in Vulkan 1.2
             bool hasFragmentShadingRate = false;
             bool hasMeshShader = false;
+            bool hasSwapchainMaintenance1 = false;
             IntPtr[] activeExtensions = new IntPtr[props.Length];
             uint activeExtensionCount = 0;
 
@@ -1154,6 +1181,19 @@ namespace Veldrid.Vk
                         requiredInstanceExtensions.Remove(extensionName);
                         hasMeshShader = true;
                     }
+                    // VK_EXT_swapchain_maintenance1 (and the promoted KHR variant in
+                    // Vulkan 1.4) only become useful if the prerequisite instance
+                    // extensions were enabled — otherwise we can't query the
+                    // present-mode compatibility set, so the swapchain create call
+                    // would have nothing valid to chain.
+                    else if ((extensionName == "VK_EXT_swapchain_maintenance1"
+                              || extensionName == "VK_KHR_swapchain_maintenance1")
+                             && GetPhysicalDeviceSurfaceCapabilities2 != null)
+                    {
+                        activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        requiredInstanceExtensions.Remove(extensionName);
+                        hasSwapchainMaintenance1 = true;
+                    }
                     else if (requiredInstanceExtensions.Remove(extensionName)) activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
                 }
             }
@@ -1174,6 +1214,7 @@ namespace Veldrid.Vk
             // Chain feature structs via pNext for extensions that require opt-in.
             VkPhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeatures;
             VkPhysicalDeviceHostImageCopyFeaturesEXT hostImageCopyFeatures;
+            VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT swapchainMaintenance1Features;
 
             if (hasDynamicRendering)
             {
@@ -1189,6 +1230,14 @@ namespace Veldrid.Vk
                 hostImageCopyFeatures.hostImageCopy = true;
                 hostImageCopyFeatures.pNext = deviceCreateInfo.pNext;
                 deviceCreateInfo.pNext = &hostImageCopyFeatures;
+            }
+
+            if (hasSwapchainMaintenance1)
+            {
+                swapchainMaintenance1Features = VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT.New();
+                swapchainMaintenance1Features.swapchainMaintenance1 = true;
+                swapchainMaintenance1Features.pNext = deviceCreateInfo.pNext;
+                deviceCreateInfo.pNext = &swapchainMaintenance1Features;
             }
 
             var layerNames = new StackList<IntPtr>();
@@ -1315,6 +1364,10 @@ namespace Veldrid.Vk
                 CmdDrawMeshTasksExt = getDeviceProcAddr<VkCmdDrawMeshTasksExtT>("vkCmdDrawMeshTasksEXT"u8);
                 HasMeshShader = CmdDrawMeshTasksExt != null;
             }
+
+            // VK_EXT_swapchain_maintenance1: no device function pointers required by
+            // our usage (only struct chaining at create- and present-time).
+            HasSwapchainMaintenance1 = hasSwapchainMaintenance1;
         }
 
         // UTF-8 literal overloads: zero runtime encoding cost; 'u8' string literals are null-terminated.
@@ -1525,6 +1578,21 @@ namespace Veldrid.Vk
             presentInfo.pSwapchains = &deviceSwapchain;
             uint imageIndex = vkSc.ImageIndex;
             presentInfo.pImageIndices = &imageIndex;
+
+            // VK_EXT_swapchain_maintenance1: chain the per-present mode override so the
+            // driver applies any pending hot-swap (vsync ↔ low-latency) without a
+            // swapchain rebuild. The pointed-to mode must remain valid until vkQueuePresentKHR
+            // returns, which is satisfied by the stack-local `currentMode` below.
+            var presentModeInfo = default(VkSwapchainPresentModeInfoEXT);
+            VkPresentModeKHR currentMode;
+            if (HasSwapchainMaintenance1 && vkSc.HasPresentModeHotSwap)
+            {
+                currentMode = vkSc.CurrentPresentMode;
+                presentModeInfo = VkSwapchainPresentModeInfoEXT.New();
+                presentModeInfo.swapchainCount = 1;
+                presentModeInfo.pPresentModes = &currentMode;
+                presentInfo.pNext = &presentModeInfo;
+            }
 
             if (vkSc.PresentQueueIndex == GraphicsQueueIndex)
             {
