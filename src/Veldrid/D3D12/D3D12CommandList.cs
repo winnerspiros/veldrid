@@ -45,6 +45,8 @@ namespace Veldrid.D3D12
         private bool hasBlendFactor;
         private Viewport cachedViewport;
         private bool hasViewport;
+        private uint cachedStencilReference;
+        private bool hasStencilReference;
         private D3D12Framebuffer cachedFramebuffer;
 
         public D3D12CommandList(D3D12GraphicsDevice gd, ref CommandListDescription description)
@@ -77,6 +79,7 @@ namespace Veldrid.D3D12
             hasScissorRect = false;
             hasBlendFactor = false;
             hasViewport = false;
+            hasStencilReference = false;
             cachedFramebuffer = null;
             currentGraphicsPipeline = null;
             currentComputePipeline = null;
@@ -155,7 +158,13 @@ namespace Veldrid.D3D12
             {
                 commandList.SetGraphicsRootSignature(d3d12Pipeline.RootSignature);
                 commandList.IASetPrimitiveTopology(d3d12Pipeline.PrimitiveTopology);
-                commandList.OMSetStencilRef(d3d12Pipeline.StencilReference);
+
+                if (!hasStencilReference || cachedStencilReference != d3d12Pipeline.StencilReference)
+                {
+                    cachedStencilReference = d3d12Pipeline.StencilReference;
+                    hasStencilReference = true;
+                    commandList.OMSetStencilRef(d3d12Pipeline.StencilReference);
+                }
 
                 var blendFactor = new Color4(
                     d3d12Pipeline.BlendFactor[0],
