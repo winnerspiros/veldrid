@@ -162,13 +162,18 @@ namespace Veldrid.Vk
             if (depthFormat.HasValue)
             {
                 depthAttachment?.Target.Dispose();
+                // Mark the swapchain depth as Transient so the Vulkan backend allocates it with
+                // VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT + LAZILY_ALLOCATED memory on tilers.
+                // The swapchain depth is never sampled, copied, or persisted across frames — it's
+                // a pure per-frame scratch buffer — making this safe and a major mobile win
+                // (35.6 MB at 1440x3088xD32S8 stays in tile RAM, zero DRAM allocation).
                 var depthTexture = (VkTexture)gd.ResourceFactory.CreateTexture(TextureDescription.Texture2D(
                     Math.Max(1, scExtent.width),
                     Math.Max(1, scExtent.height),
                     1,
                     1,
                     depthFormat.Value,
-                    TextureUsage.DepthStencil));
+                    TextureUsage.DepthStencil | TextureUsage.Transient));
                 depthAttachment = new FramebufferAttachment(depthTexture, 0);
             }
         }

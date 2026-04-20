@@ -60,7 +60,7 @@ jobs:
     - name: Upload package artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: nupkgs-${{ github.ref_name }}-${{ github.run_number }}-${{ github.sha }}
+        name: nupkgs-${{ github.run_id }}-${{ github.sha }}
         path: bin\Packages\Release\ppy.*.nupkg
         if-no-files-found: error
     - name: Publish prerelease to GitHub Packages (push to default branch)
