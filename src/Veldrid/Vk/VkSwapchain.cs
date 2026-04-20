@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using Vulkan;
 using static Vulkan.VulkanNative;
 using static Veldrid.Vk.VulkanUtil;
@@ -35,7 +36,22 @@ namespace Veldrid.Vk
             get => newSyncToVBlank ?? syncToVBlank;
             set
             {
-                if (syncToVBlank != value) newSyncToVBlank = value;
+                if (syncToVBlank == value && newSyncToVBlank == null)
+                    return;
+
+                // Try a hot-swap (no swapchain rebuild) when VK_EXT_swapchain_maintenance1
+                // is available and the new mode is in the create-time compatibility set.
+                if (tryHotSwapPresentMode(value, allowTearing))
+                {
+                    syncToVBlank = value;
+                    newSyncToVBlank = null;
+                    return;
+                }
+
+                // Hot-swap unavailable: defer to the AcquireNextImage recreate path.
+                // Re-toggling back to the live value clears any pending change instead of
+                // queuing a redundant recreate.
+                newSyncToVBlank = syncToVBlank != value ? value : (bool?)null;
             }
         }
 
@@ -49,11 +65,25 @@ namespace Veldrid.Vk
                 if (allowTearing == value)
                     return;
 
-                allowTearing = value;
+                if (tryHotSwapPresentMode(syncToVBlank, value))
+                {
+                    allowTearing = value;
+                    return;
+                }
 
+                allowTearing = value;
                 recreateAndReacquire(framebuffer.Width, framebuffer.Height);
             }
         }
+
+        // Exposed to VkGraphicsDevice.SwapBuffersCore so the per-present
+        // VkSwapchainPresentModeInfoEXT can carry the active mode.
+        public VkPresentModeKHR CurrentPresentMode => currentPresentMode;
+
+        // True only when the swapchain was created with a non-trivial compatibility
+        // list (i.e. VK_EXT_swapchain_maintenance1 active AND ≥2 modes available).
+        // Lets the per-present chain be skipped in the common single-mode case.
+        public bool HasPresentModeHotSwap => compatiblePresentModes != null && compatiblePresentModes.Length > 1;
 
         private readonly VkGraphicsDevice gd;
         private readonly VkSwapchainFramebuffer framebuffer;
@@ -67,6 +97,13 @@ namespace Veldrid.Vk
         private uint currentImageIndex;
         private string name;
         private bool disposed;
+
+        // VK_EXT_swapchain_maintenance1 hot-swap state.
+        // compatiblePresentModes is the union of modes the current swapchain may switch
+        // to per-present (always includes currentPresentMode). null if the extension is
+        // unavailable for this swapchain — falls back to the recreate path.
+        private VkPresentModeKHR currentPresentMode;
+        private VkPresentModeKHR[] compatiblePresentModes;
 
         public VkSwapchain(VkGraphicsDevice gd, ref SwapchainDescription description)
             : this(gd, ref description, VkSurfaceKHR.Null)
@@ -127,7 +164,6 @@ namespace Veldrid.Vk
                 recreateAndReacquire(framebuffer.Width, framebuffer.Height);
                 return false;
             }
-
             var result = vkAcquireNextImageKHR(
                 device,
                 deviceSwapchain,
@@ -214,25 +250,17 @@ namespace Veldrid.Vk
             result = vkGetPhysicalDeviceSurfacePresentModesKHR(gd.PhysicalDevice, Surface, ref presentModeCount, out presentModes[0]);
             CheckResult(result);
 
-            var presentMode = VkPresentModeKHR.FifoKHR;
+            var presentMode = choosePresentMode(presentModes, syncToVBlank, allowTearing);
 
-            if (syncToVBlank)
-            {
-                // Prefer MAILBOX over FIFO_RELAXED when vsync is requested: both avoid tearing
-                // under steady state, but MAILBOX replaces the queued frame instead of queueing it,
-                // cutting one full frame of input-to-photon latency. This is the canonical
-                // "low-latency vsync" choice on Android tilers.
-                if (Array.IndexOf(presentModes, VkPresentModeKHR.MailboxKHR) >= 0)
-                    presentMode = VkPresentModeKHR.MailboxKHR;
-                else if (Array.IndexOf(presentModes, VkPresentModeKHR.FifoRelaxedKHR) >= 0)
-                    presentMode = VkPresentModeKHR.FifoRelaxedKHR;
-            }
-            else if (allowTearing && Array.IndexOf(presentModes, VkPresentModeKHR.ImmediateKHR) >= 0)
-                presentMode = VkPresentModeKHR.ImmediateKHR; // Lowest latency; tearing is acceptable.
-            else if (Array.IndexOf(presentModes, VkPresentModeKHR.MailboxKHR) >= 0)
-                presentMode = VkPresentModeKHR.MailboxKHR; // Low latency without tearing.
-            else if (Array.IndexOf(presentModes, VkPresentModeKHR.ImmediateKHR) >= 0)
-                presentMode = VkPresentModeKHR.ImmediateKHR; // Fallback: lower latency than FIFO.
+            // VK_EXT_swapchain_maintenance1: query the compatibility set for the chosen
+            // initial present mode. Modes in this set can be hot-swapped per-present
+            // without rebuilding the swapchain (e.g. low-latency mode toggle at runtime).
+            // We intersect with the surface-supported modes to be safe; drivers are
+            // *supposed* to only return supported modes but defense-in-depth is cheap.
+            compatiblePresentModes = gd.HasSwapchainMaintenance1
+                ? queryCompatiblePresentModes(presentMode, presentModes)
+                : null;
+            currentPresentMode = presentMode;
 
             uint maxImageCount = surfaceCapabilities.maxImageCount == 0 ? uint.MaxValue : surfaceCapabilities.maxImageCount;
             uint imageCount = Math.Min(maxImageCount, surfaceCapabilities.minImageCount + 1);
@@ -270,11 +298,122 @@ namespace Veldrid.Vk
             var oldSwapchain = deviceSwapchain;
             swapchainCi.oldSwapchain = oldSwapchain;
 
-            result = vkCreateSwapchainKHR(gd.Device, ref swapchainCi, null, out deviceSwapchain);
-            CheckResult(result);
+            // Pin compatible present modes for the duration of vkCreateSwapchainKHR. The
+            // spec is explicit: pPresentModes must be valid only during the create call.
+            fixed (VkPresentModeKHR* compatibleModesPtr = compatiblePresentModes)
+            {
+                var presentModesCi = default(VkSwapchainPresentModesCreateInfoEXT);
+                if (compatiblePresentModes != null && compatiblePresentModes.Length > 1)
+                {
+                    presentModesCi = VkSwapchainPresentModesCreateInfoEXT.New();
+                    presentModesCi.presentModeCount = (uint)compatiblePresentModes.Length;
+                    presentModesCi.pPresentModes = compatibleModesPtr;
+                    swapchainCi.pNext = &presentModesCi;
+                }
+
+                result = vkCreateSwapchainKHR(gd.Device, ref swapchainCi, null, out deviceSwapchain);
+                CheckResult(result);
+            }
+
             if (oldSwapchain != VkSwapchainKHR.Null) vkDestroySwapchainKHR(gd.Device, oldSwapchain, null);
 
             framebuffer.SetNewSwapchain(deviceSwapchain, width, height, surfaceFormat, swapchainCi.imageExtent);
+            return true;
+        }
+
+        // Pure helper: maps (sync, tearing, available modes) → chosen VkPresentModeKHR.
+        // Kept in sync with the create-time logic so hot-swap chooses the same mode the
+        // recreate path would.
+        private static VkPresentModeKHR choosePresentMode(VkPresentModeKHR[] presentModes, bool syncToVBlank, bool allowTearing)
+        {
+            if (syncToVBlank)
+            {
+                // Prefer MAILBOX over FIFO_RELAXED when vsync is requested: both avoid tearing
+                // under steady state, but MAILBOX replaces the queued frame instead of queueing it,
+                // cutting one full frame of input-to-photon latency. This is the canonical
+                // "low-latency vsync" choice on Android tilers.
+                if (Array.IndexOf(presentModes, VkPresentModeKHR.MailboxKHR) >= 0)
+                    return VkPresentModeKHR.MailboxKHR;
+                if (Array.IndexOf(presentModes, VkPresentModeKHR.FifoRelaxedKHR) >= 0)
+                    return VkPresentModeKHR.FifoRelaxedKHR;
+                return VkPresentModeKHR.FifoKHR;
+            }
+
+            if (allowTearing && Array.IndexOf(presentModes, VkPresentModeKHR.ImmediateKHR) >= 0)
+                return VkPresentModeKHR.ImmediateKHR; // Lowest latency; tearing is acceptable.
+            if (Array.IndexOf(presentModes, VkPresentModeKHR.MailboxKHR) >= 0)
+                return VkPresentModeKHR.MailboxKHR; // Low latency without tearing.
+            if (Array.IndexOf(presentModes, VkPresentModeKHR.ImmediateKHR) >= 0)
+                return VkPresentModeKHR.ImmediateKHR; // Fallback: lower latency than FIFO.
+
+            return VkPresentModeKHR.FifoKHR;
+        }
+
+        // Returns the set of present modes the swapchain can hot-swap to (always
+        // includes anchor). Returns null if VK_EXT_surface_maintenance1 wasn't enabled
+        // or the query failed — caller falls back to recreate-on-toggle.
+        private VkPresentModeKHR[] queryCompatiblePresentModes(VkPresentModeKHR anchor, VkPresentModeKHR[] surfaceSupported)
+        {
+            if (gd.GetPhysicalDeviceSurfaceCapabilities2 == null)
+                return null;
+
+            var surfaceMode = VkSurfacePresentModeEXT.New();
+            surfaceMode.presentMode = anchor;
+
+            var surfaceInfo = VkPhysicalDeviceSurfaceInfo2KHR.New();
+            surfaceInfo.surface = Surface;
+            surfaceInfo.pNext = &surfaceMode;
+
+            // Two-pass query: first call with pPresentModes = null returns the count.
+            var compat = VkSurfacePresentModeCompatibilityEXT.New();
+            var caps2 = VkSurfaceCapabilities2KHR.New();
+            caps2.pNext = &compat;
+
+            if (gd.GetPhysicalDeviceSurfaceCapabilities2(gd.PhysicalDevice, &surfaceInfo, &caps2) != VkResult.Success)
+                return null;
+
+            uint count = compat.presentModeCount;
+            if (count == 0)
+                return new[] { anchor };
+
+            var modes = new VkPresentModeKHR[count];
+            fixed (VkPresentModeKHR* modesPtr = modes)
+            {
+                compat.pPresentModes = modesPtr;
+                if (gd.GetPhysicalDeviceSurfaceCapabilities2(gd.PhysicalDevice, &surfaceInfo, &caps2) != VkResult.Success)
+                    return null;
+            }
+
+            // Defensive intersection with the surface-supported modes; deduplicate while
+            // ensuring `anchor` is the first entry (required by VkSwapchainPresentModesCreateInfoEXT).
+            var result = new List<VkPresentModeKHR>((int)count) { anchor };
+            for (int i = 0; i < count; i++)
+            {
+                var m = modes[i];
+                if (m == anchor) continue;
+                if (Array.IndexOf(surfaceSupported, m) < 0) continue;
+                if (result.Contains(m)) continue;
+                result.Add(m);
+            }
+
+            return result.ToArray();
+        }
+
+        // Returns true if the present mode that (sync, tearing) imply is in the current
+        // swapchain's hot-swap compatibility set, in which case we update currentPresentMode
+        // and the next vkQueuePresentKHR will apply it. Returns false if a recreate is needed.
+        private bool tryHotSwapPresentMode(bool syncToVBlankCandidate, bool allowTearingCandidate)
+        {
+            if (!gd.HasSwapchainMaintenance1 || compatiblePresentModes == null || compatiblePresentModes.Length <= 1)
+                return false;
+
+            // Re-query surface-supported modes is expensive; the compat set is itself
+            // already a subset of supported, so it's also the candidate universe.
+            var desired = choosePresentMode(compatiblePresentModes, syncToVBlankCandidate, allowTearingCandidate);
+            if (Array.IndexOf(compatiblePresentModes, desired) < 0)
+                return false;
+
+            currentPresentMode = desired;
             return true;
         }
 

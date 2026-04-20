@@ -1,0 +1,119 @@
+name: Publish NuGet Packages
+
+# One-click manual publish to GitHub Packages (and optionally nuget.org).
+# Trigger via the Actions tab → select this workflow → "Run workflow".
+#
+# Inputs
+# ──────
+#   destination    — github (default), nuget.org, or both
+#   create_release — cut a GitHub Release and attach the .nupkg files
+#                    (most useful when running against a tag ref)
+#   dry_run        — build and pack only; skip every push / release step
+#                    (handy for verifying the packages look correct)
+#
+# Secrets required
+# ────────────────
+#   GITHUB_TOKEN  — provided automatically; needs `packages: write` (set below)
+#   NUGET_API_KEY — only required when destination is "nuget.org" or "both"
+#
+# GitHub Packages registry
+# ────────────────────────
+#   https://nuget.pkg.github.com/<owner>/index.json
+#   Consumers must add this source and authenticate with a PAT that has
+#   read:packages scope (public packages can be consumed without auth).
+
+on:
+  workflow_dispatch:
+    inputs:
+      destination:
+        description: 'Publish destination'
+        type: choice
+        required: true
+        default: 'github'
+        options:
+          - github
+          - nuget.org
+          - both
+      create_release:
+        description: 'Create a GitHub Release (attach .nupkg files)'
+        type: boolean
+        default: false
+      dry_run:
+        description: 'Dry run — build and pack only, skip all publish steps'
+        type: boolean
+        default: false
+
+# Default to read-only; the job elevates what it actually needs.
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    permissions:
+      contents: write   # create GitHub Release / upload release assets
+      packages: write   # push to GitHub Packages
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history is required by Nerdbank.GitVersioning to compute
+          # the correct version number from commit depth.
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props', '**/packages.lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore dependencies
+        run: dotnet restore src
+
+      - name: Build
+        run: dotnet build --no-restore src -c Release -p:TreatWarningsAsErrors=true
+
+      - name: Pack
+        run: dotnet pack --no-build src -c Release
+
+      # Always upload the .nupkg files as a workflow artifact so they can be
+      # downloaded and inspected regardless of whether publishing succeeds.
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkgs-${{ github.run_id }}-${{ github.sha }}
+          path: bin\Packages\Release\ppy.*.nupkg
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish to GitHub Packages
+        if: ${{ !inputs.dry_run && (inputs.destination == 'github' || inputs.destination == 'both') }}
+        run: >
+          dotnet nuget push bin\Packages\Release\ppy.*.nupkg
+          --source https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+          --api-key ${{ secrets.GITHUB_TOKEN }}
+          --skip-duplicate
+
+      - name: Publish to nuget.org
+        if: ${{ !inputs.dry_run && (inputs.destination == 'nuget.org' || inputs.destination == 'both') }}
+        run: >
+          dotnet nuget push bin\Packages\Release\ppy.*.nupkg
+          --source https://api.nuget.org/v3/index.json
+          --api-key ${{ secrets.NUGET_API_KEY }}
+          --skip-duplicate
+
+      - name: Create GitHub Release
+        if: ${{ !inputs.dry_run && inputs.create_release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Veldrid ${{ github.ref_name }}
+          files: bin\Packages\Release\ppy.*.nupkg
+          fail_on_unmatched_files: true
