@@ -463,6 +463,13 @@ namespace Veldrid.OpenGL
                 CheckLastError();
             }
 
+            // Disable dithering. It is enabled by default in both desktop GL and GLES, costs
+            // fragment cycles on tile-based mobile GPUs (Mali / Adreno / PowerVR), and produces
+            // no visible difference on the >=8-bpc color targets used by modern displays.
+            // Both Arm and Qualcomm explicitly recommend disabling it for game-style rendering.
+            glDisable(EnableCap.Dither);
+            CheckLastError();
+
             TextureSamplerManager = new OpenGLTextureSamplerManager(Extensions);
             commandExecutor = new OpenGLCommandExecutor(this, platformInfo);
 
