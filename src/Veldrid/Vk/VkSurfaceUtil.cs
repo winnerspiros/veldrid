@@ -123,7 +123,23 @@ namespace Veldrid.Vk
 
         private static VkSurfaceKHR createAndroidSurface(VkInstance instance, AndroidSurfaceSwapchainSource androidSource)
         {
+            // Guard against a null JNI Surface jobject. Passing IntPtr.Zero into ANativeWindow_fromSurface
+            // can crash inside JNI before we get a chance to inspect the result.
+            if (androidSource.Surface == IntPtr.Zero)
+                throw new VeldridException(
+                    "Android Surface is null. The SurfaceView's Surface is not yet bound to a native window. " +
+                    "Defer Vulkan swapchain creation until SurfaceHolder.Callback.surfaceCreated has fired.");
+
             IntPtr aNativeWindow = AndroidRuntime.ANativeWindow_fromSurface(androidSource.JniEnv, androidSource.Surface);
+
+            // ANativeWindow_fromSurface returns nullptr when the Java Surface object is not currently
+            // associated with a native window (e.g. SurfaceHolder was released, or surfaceCreated has
+            // not fired yet). Calling ANativeWindow_setBuffersGeometry on that nullptr dereferences a
+            // null ANativeWindow vtable and crashes with SIGSEGV pc=0 on the SDL thread.
+            if (aNativeWindow == IntPtr.Zero)
+                throw new VeldridException(
+                    "ANativeWindow_fromSurface returned null. The Java Surface object is not currently associated " +
+                    "with a native window (SurfaceHolder may have been released, or surfaceCreated has not fired yet).");
 
             try
             {
