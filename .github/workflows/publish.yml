@@ -1,20 +1,7 @@
 name: Publish NuGet Packages
 
-# One-click manual publish to GitHub Packages (and optionally nuget.org).
+# Manual one-click publish to GitHub Packages.
 # Trigger via the Actions tab → select this workflow → "Run workflow".
-#
-# Inputs
-# ──────
-#   destination    — github (default), nuget.org, or both
-#   create_release — cut a GitHub Release and attach the .nupkg files
-#                    (most useful when running against a tag ref)
-#   dry_run        — build and pack only; skip every push / release step
-#                    (handy for verifying the packages look correct)
-#
-# Secrets required
-# ────────────────
-#   GITHUB_TOKEN  — provided automatically; needs `packages: write` (set below)
-#   NUGET_API_KEY — only required when destination is "nuget.org" or "both"
 #
 # GitHub Packages registry
 # ────────────────────────
@@ -24,26 +11,7 @@ name: Publish NuGet Packages
 
 on:
   workflow_dispatch:
-    inputs:
-      destination:
-        description: 'Publish destination'
-        type: choice
-        required: true
-        default: 'github'
-        options:
-          - github
-          - nuget.org
-          - both
-      create_release:
-        description: 'Create a GitHub Release (attach .nupkg files)'
-        type: boolean
-        default: false
-      dry_run:
-        description: 'Dry run — build and pack only, skip all publish steps'
-        type: boolean
-        default: false
 
-# Default to read-only; the job elevates what it actually needs.
 permissions:
   contents: read
 
@@ -51,24 +19,10 @@ jobs:
   publish:
     runs-on: windows-latest
     permissions:
-      contents: write   # create GitHub Release / upload release assets
+      contents: read
       packages: write   # push to GitHub Packages
 
     steps:
-      # Fail fast with a clear message when the user asks for a GitHub Release
-      # but didn't dispatch the workflow against a tag ref. Without this guard
-      # the workflow would still publish the .nupkg files successfully, then
-      # fail at the very last step (softprops/action-gh-release errors with
-      # "GitHub Releases requires a tag"), leaving the run marked as failed
-      # and giving the false impression that publishing didn't happen.
-      - name: Validate inputs
-        shell: bash
-        run: |
-          if [ "${{ inputs.create_release }}" = "true" ] && [[ "${{ github.ref }}" != refs/tags/* ]]; then
-            echo "::error::create_release=true requires the workflow to be dispatched against a tag ref (got '${{ github.ref }}'). Re-run the workflow and select a tag, or set create_release=false."
-            exit 1
-          fi
-
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -98,8 +52,6 @@ jobs:
       - name: Pack
         run: dotnet pack --no-build src -c Release
 
-      # Always upload the .nupkg files as a workflow artifact so they can be
-      # downloaded and inspected regardless of whether publishing succeeds.
       - name: Upload package artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -109,29 +61,8 @@ jobs:
           retention-days: 30
 
       - name: Publish to GitHub Packages
-        if: ${{ !inputs.dry_run && (inputs.destination == 'github' || inputs.destination == 'both') }}
         run: >
           dotnet nuget push bin\Packages\Release\ppy.*.nupkg
           --source https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
           --api-key ${{ secrets.GITHUB_TOKEN }}
           --skip-duplicate
-
-      - name: Publish to nuget.org
-        if: ${{ !inputs.dry_run && (inputs.destination == 'nuget.org' || inputs.destination == 'both') }}
-        run: >
-          dotnet nuget push bin\Packages\Release\ppy.*.nupkg
-          --source https://api.nuget.org/v3/index.json
-          --api-key ${{ secrets.NUGET_API_KEY }}
-          --skip-duplicate
-
-      - name: Create GitHub Release
-        # Belt-and-braces: the Validate inputs step already rejects
-        # create_release=true on a non-tag ref, but gate this step on the ref
-        # too so a successful publish is never followed by a red workflow run
-        # if the action is ever invoked in an unexpected configuration.
-        if: ${{ !inputs.dry_run && inputs.create_release && startsWith(github.ref, 'refs/tags/') }}
-        uses: softprops/action-gh-release@v2
-        with:
-          name: Veldrid ${{ github.ref_name }}
-          files: bin\Packages\Release\ppy.*.nupkg
-          fail_on_unmatched_files: true

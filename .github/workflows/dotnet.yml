@@ -33,8 +33,8 @@ jobs:
   build_windows:
     runs-on: windows-latest
     permissions:
-      contents: write   # for GitHub Release on tag push
-      packages: write   # for GitHub Packages prerelease publish on master
+      contents: read
+      packages: write   # for GitHub Packages publish
 
     steps:
     - uses: actions/checkout@v6
@@ -63,19 +63,9 @@ jobs:
         name: nupkgs-${{ github.run_id }}-${{ github.sha }}
         path: bin\Packages\Release\ppy.*.nupkg
         if-no-files-found: error
-    - name: Publish prerelease to GitHub Packages (push to default branch)
-      if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    - name: Publish to GitHub Packages
+      if: github.event_name == 'push' && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/tags/'))
       run: dotnet nuget push bin\Packages\Release\ppy.*.nupkg -s https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --api-key ${{ secrets.GITHUB_TOKEN }} --skip-duplicate
-    - name: Publish tagged release to nuget.org
-      if: startsWith(github.ref, 'refs/tags/')
-      run: dotnet nuget push bin\Packages\Release\ppy.*.nupkg -s https://api.nuget.org/v3/index.json --api-key ${{secrets.NUGET_API_KEY}} --skip-duplicate
-    - name: Generate GitHub Release
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v2
-      with:
-        name: Veldrid ${{ github.ref_name }}
-        files: |
-          bin\Packages\Release\ppy.*.nupkg
 
   build_linux:
     runs-on: ubuntu-latest
