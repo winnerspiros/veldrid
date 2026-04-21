@@ -43,14 +43,36 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nuget-
 
+      # Patch version.json so every manual run produces a unique, monotonically
+      # increasing package version. We keep Major.Minor from version.json and
+      # use the workflow run number as the patch component, e.g. "4.9.42".
+      # PublicRelease=true is passed to Nerdbank.GitVersioning at build/pack
+      # time so it doesn't append its own "-g<sha>" prerelease tag, giving a
+      # clean version that NuGet treats as a stable release.
+      - name: Compute unique package version
+        id: version
+        shell: pwsh
+        run: |
+          $json = Get-Content version.json -Raw
+          # Extract Major.Minor[.Patch] from version.json's "version" field via
+          # regex so the // comments don't trip up ConvertFrom-Json.
+          $match = [regex]::Match($json, '"version"\s*:\s*"([^"-]+)')
+          if (-not $match.Success) { throw "Could not parse version from version.json" }
+          $baseVersion = $match.Groups[1].Value.Trim('.')   # e.g. "4.9"
+          $newVersion = "$baseVersion.${{ github.run_number }}"
+          Write-Host "Setting version to: $newVersion"
+          $patched = [regex]::Replace($json, '"version"\s*:\s*"[^"]*"', '"version": "' + $newVersion + '"')
+          Set-Content -Path version.json -Value $patched -NoNewline
+          "PACKAGE_VERSION=$newVersion" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Restore dependencies
         run: dotnet restore src
 
       - name: Build
-        run: dotnet build --no-restore src -c Release -p:TreatWarningsAsErrors=true
+        run: dotnet build --no-restore src -c Release -p:TreatWarningsAsErrors=true -p:PublicRelease=true
 
       - name: Pack
-        run: dotnet pack --no-build src -c Release
+        run: dotnet pack --no-build src -c Release -p:PublicRelease=true
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v4
