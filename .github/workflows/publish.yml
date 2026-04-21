@@ -55,6 +55,20 @@ jobs:
       packages: write   # push to GitHub Packages
 
     steps:
+      # Fail fast with a clear message when the user asks for a GitHub Release
+      # but didn't dispatch the workflow against a tag ref. Without this guard
+      # the workflow would still publish the .nupkg files successfully, then
+      # fail at the very last step (softprops/action-gh-release errors with
+      # "GitHub Releases requires a tag"), leaving the run marked as failed
+      # and giving the false impression that publishing didn't happen.
+      - name: Validate inputs
+        shell: bash
+        run: |
+          if [ "${{ inputs.create_release }}" = "true" ] && [[ "${{ github.ref }}" != refs/tags/* ]]; then
+            echo "::error::create_release=true requires the workflow to be dispatched against a tag ref (got '${{ github.ref }}'). Re-run the workflow and select a tag, or set create_release=false."
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -111,7 +125,11 @@ jobs:
           --skip-duplicate
 
       - name: Create GitHub Release
-        if: ${{ !inputs.dry_run && inputs.create_release }}
+        # Belt-and-braces: the Validate inputs step already rejects
+        # create_release=true on a non-tag ref, but gate this step on the ref
+        # too so a successful publish is never followed by a red workflow run
+        # if the action is ever invoked in an unexpected configuration.
+        if: ${{ !inputs.dry_run && inputs.create_release && startsWith(github.ref, 'refs/tags/') }}
         uses: softprops/action-gh-release@v2
         with:
           name: Veldrid ${{ github.ref_name }}
