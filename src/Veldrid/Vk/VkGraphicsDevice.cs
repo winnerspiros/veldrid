@@ -1583,7 +1583,7 @@ namespace Veldrid.Vk
             // driver applies any pending hot-swap (vsync ↔ low-latency) without a
             // swapchain rebuild. The pointed-to mode must remain valid until vkQueuePresentKHR
             // returns, which is satisfied by the stack-local `currentMode` below.
-            var presentModeInfo = default(VkSwapchainPresentModeInfoEXT);
+            VkSwapchainPresentModeInfoEXT presentModeInfo;
             VkPresentModeKHR currentMode;
             if (HasSwapchainMaintenance1 && vkSc.HasPresentModeHotSwap)
             {
