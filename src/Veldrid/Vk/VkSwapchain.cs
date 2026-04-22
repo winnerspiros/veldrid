@@ -164,16 +164,24 @@ namespace Veldrid.Vk
                 recreateAndReacquire(framebuffer.Width, framebuffer.Height);
                 return false;
             }
+            // Bound the wait so a misbehaving driver (e.g. Adreno after a surface-lost event,
+            // where vkAcquireNextImageKHR has been observed to never return) cannot deadlock
+            // the render thread. VK_TIMEOUT / VK_NOT_READY are treated like VK_ERROR_OUT_OF_DATE_KHR
+            // so the swapchain is force-recreated, converting the hang into a recoverable per-frame stall.
+            const ulong acquire_timeout_ns = 100_000_000; // 100 ms
             var result = vkAcquireNextImageKHR(
                 device,
                 deviceSwapchain,
-                ulong.MaxValue,
+                acquire_timeout_ns,
                 semaphore,
                 fence,
                 ref currentImageIndex);
             framebuffer.SetImageIndex(currentImageIndex);
 
-            if (result == VkResult.ErrorOutOfDateKHR || result == VkResult.SuboptimalKHR)
+            if (result == VkResult.ErrorOutOfDateKHR
+                || result == VkResult.SuboptimalKHR
+                || result == VkResult.Timeout
+                || result == VkResult.NotReady)
             {
                 createSwapchain(framebuffer.Width, framebuffer.Height);
                 return false;
