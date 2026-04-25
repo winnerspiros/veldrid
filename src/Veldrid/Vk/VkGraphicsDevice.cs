@@ -106,6 +106,16 @@ namespace Veldrid.Vk
         public bool HasSwapchainMaintenance1 { get; private set; }
         public VkGetPhysicalDeviceSurfaceCapabilities2KhrT GetPhysicalDeviceSurfaceCapabilities2 { get; private set; }
 
+        // VK_KHR_synchronization2 (core in Vulkan 1.3). Feature-detect + opt-in only;
+        // submission paths are unchanged. Surfaced so a follow-up PR can migrate the
+        // per-CL fence pool to vkQueueSubmit2 + timeline semaphores without re-touching
+        // device-creation code.
+        public bool HasSynchronization2 { get; private set; }
+
+        // VK_KHR_timeline_semaphore (core in Vulkan 1.2). Feature-detect + opt-in only;
+        // see HasSynchronization2 for context.
+        public bool HasTimelineSemaphore { get; private set; }
+
         /// <summary>
         ///     The Vulkan API version supported by the selected physical device.
         /// </summary>
@@ -219,9 +229,28 @@ namespace Veldrid.Vk
             ResourceFactory = new VkResourceFactory(this);
 
             // Create pipeline cache for driver-side caching of compiled pipelines.
+            // When the host supplies persisted PipelineCacheData (typically a blob saved
+            // to disk on a previous run), feed it through pInitialData so the driver can
+            // skip re-compiling matching pipelines. The driver header-validates the blob
+            // (vendorID / deviceID / driver UUID) and silently discards on mismatch, so
+            // it's always safe to pass through stale data without manual versioning.
             var pipelineCacheCi = VkPipelineCacheCreateInfo.New();
-            var cacheResult = vkCreatePipelineCache(device, ref pipelineCacheCi, null, out pipelineCache);
-            CheckResult(cacheResult);
+            byte[] initialCacheData = vkOptions.PipelineCacheData;
+            if (initialCacheData != null && initialCacheData.Length > 0)
+            {
+                fixed (byte* initialDataPtr = initialCacheData)
+                {
+                    pipelineCacheCi.initialDataSize = (UIntPtr)initialCacheData.Length;
+                    pipelineCacheCi.pInitialData = initialDataPtr;
+                    var cacheResult = vkCreatePipelineCache(device, ref pipelineCacheCi, null, out pipelineCache);
+                    CheckResult(cacheResult);
+                }
+            }
+            else
+            {
+                var cacheResult = vkCreatePipelineCache(device, ref pipelineCacheCi, null, out pipelineCache);
+                CheckResult(cacheResult);
+            }
 
             if (scDesc != null)
             {
@@ -1083,6 +1112,8 @@ namespace Veldrid.Vk
             bool hasFragmentShadingRate = false;
             bool hasMeshShader = false;
             bool hasSwapchainMaintenance1 = false;
+            bool hasSynchronization2 = DeviceApiVersion.IsAtLeast(1, 3); // Core in Vulkan 1.3
+            bool hasTimelineSemaphore = DeviceApiVersion.IsAtLeast(1, 2); // Core in Vulkan 1.2
             IntPtr[] activeExtensions = new IntPtr[props.Length];
             uint activeExtensionCount = 0;
 
@@ -1194,6 +1225,25 @@ namespace Veldrid.Vk
                         requiredInstanceExtensions.Remove(extensionName);
                         hasSwapchainMaintenance1 = true;
                     }
+                    // VK_KHR_synchronization2: foundation for vkQueueSubmit2 + per-stage
+                    // semaphore submit-info structs. Detection-only; submission paths still
+                    // use legacy vkQueueSubmit. Core in Vulkan 1.3.
+                    else if (extensionName == "VK_KHR_synchronization2")
+                    {
+                        activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        requiredInstanceExtensions.Remove(extensionName);
+                        hasSynchronization2 = true;
+                    }
+                    // VK_KHR_timeline_semaphore: foundation for replacing the per-CL fence
+                    // pool with a single monotonically-incrementing counter queried via
+                    // vkGetSemaphoreCounterValue / vkWaitSemaphores. Detection-only.
+                    // Core in Vulkan 1.2.
+                    else if (extensionName == "VK_KHR_timeline_semaphore")
+                    {
+                        activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        requiredInstanceExtensions.Remove(extensionName);
+                        hasTimelineSemaphore = true;
+                    }
                     else if (requiredInstanceExtensions.Remove(extensionName)) activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
                 }
             }
@@ -1215,6 +1265,8 @@ namespace Veldrid.Vk
             VkPhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeatures;
             VkPhysicalDeviceHostImageCopyFeaturesEXT hostImageCopyFeatures;
             VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT swapchainMaintenance1Features;
+            VkPhysicalDeviceSynchronization2Features synchronization2Features;
+            VkPhysicalDeviceTimelineSemaphoreFeatures timelineSemaphoreFeatures;
 
             if (hasDynamicRendering)
             {
@@ -1238,6 +1290,22 @@ namespace Veldrid.Vk
                 swapchainMaintenance1Features.swapchainMaintenance1 = true;
                 swapchainMaintenance1Features.pNext = deviceCreateInfo.pNext;
                 deviceCreateInfo.pNext = &swapchainMaintenance1Features;
+            }
+
+            if (hasSynchronization2)
+            {
+                synchronization2Features = VkPhysicalDeviceSynchronization2Features.New();
+                synchronization2Features.synchronization2 = true;
+                synchronization2Features.pNext = deviceCreateInfo.pNext;
+                deviceCreateInfo.pNext = &synchronization2Features;
+            }
+
+            if (hasTimelineSemaphore)
+            {
+                timelineSemaphoreFeatures = VkPhysicalDeviceTimelineSemaphoreFeatures.New();
+                timelineSemaphoreFeatures.timelineSemaphore = true;
+                timelineSemaphoreFeatures.pNext = deviceCreateInfo.pNext;
+                deviceCreateInfo.pNext = &timelineSemaphoreFeatures;
             }
 
             var layerNames = new StackList<IntPtr>();
@@ -1368,6 +1436,11 @@ namespace Veldrid.Vk
             // VK_EXT_swapchain_maintenance1: no device function pointers required by
             // our usage (only struct chaining at create- and present-time).
             HasSwapchainMaintenance1 = hasSwapchainMaintenance1;
+
+            // Detection-only foundation flags. The hot-path migration to vkQueueSubmit2
+            // and timeline-semaphore-based completion tracking is intentionally separate.
+            HasSynchronization2 = hasSynchronization2;
+            HasTimelineSemaphore = hasTimelineSemaphore;
         }
 
         // UTF-8 literal overloads: zero runtime encoding cost; 'u8' string literals are null-terminated.
@@ -1594,11 +1667,20 @@ namespace Veldrid.Vk
                 presentInfo.pNext = &presentModeInfo;
             }
 
+            // VK_KHR_incremental_present is intentionally NOT chained here.
+            // On Qualcomm/Adreno (vendorID 0x5143) it has been observed to deliver
+            // stale tile contents after a surface rotation — the dirty-rect path
+            // skips a full-frame composite that the rotated swapchain depends on.
+            // If a future contributor wants to enable it for desktop drivers,
+            // gate the chain on `vkSc.gd.PhysicalDeviceProperties.vendorID != 0x5143`
+            // (or skip entirely on Android) before adding it back.
+            VkResult presentResult;
             if (vkSc.PresentQueueIndex == GraphicsQueueIndex)
             {
                 lock (graphicsQueueLock)
                 {
-                    vkQueuePresentKHR(vkSc.PresentQueue, ref presentInfo);
+                    presentResult = vkQueuePresentKHR(vkSc.PresentQueue, ref presentInfo);
+                    handlePresentResult(vkSc, presentResult);
                     acquireAndWaitNextImage(vkSc);
                 }
             }
@@ -1606,10 +1688,33 @@ namespace Veldrid.Vk
             {
                 lock (vkSc)
                 {
-                    vkQueuePresentKHR(vkSc.PresentQueue, ref presentInfo);
+                    presentResult = vkQueuePresentKHR(vkSc.PresentQueue, ref presentInfo);
+                    handlePresentResult(vkSc, presentResult);
                     acquireAndWaitNextImage(vkSc);
                 }
             }
+        }
+
+        // VK_ERROR_OUT_OF_DATE_KHR / VK_SUBOPTIMAL_KHR are expected on Android
+        // (rotation, fold, DeX attach, system bars showing/hiding). Treat them as
+        // a needs-rebuild signal rather than a hard failure: silently recreate
+        // and re-acquire. This avoids the per-rotate managed exception that the
+        // osu! framework retry loop would otherwise have to swallow every frame
+        // until the surface settled.
+        private static void handlePresentResult(VkSwapchain vkSc, VkResult result)
+        {
+            if (result == VkResult.Success)
+                return;
+
+            if (result == VkResult.ErrorOutOfDateKHR || result == VkResult.SuboptimalKHR)
+            {
+                vkSc.RecreateAfterPresent();
+                return;
+            }
+
+            // Any other non-success result is genuinely unexpected (device lost,
+            // OOM, etc.) — surface it the same way as the rest of the backend.
+            CheckResult(result);
         }
 
         private void acquireAndWaitNextImage(VkSwapchain vkSc)

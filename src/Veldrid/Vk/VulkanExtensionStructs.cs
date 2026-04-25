@@ -390,4 +390,50 @@ namespace Veldrid.Vk
             return ret;
         }
     }
+
+    // --- VK_KHR_synchronization2 (core in Vulkan 1.3) ---
+    // Foundation for moving the per-CL fence pool to a timeline-semaphore-driven
+    // completion model. Detection-only at present; no function pointers loaded
+    // (call sites still use legacy vkQueueSubmit). Enabling the feature is cheap
+    // and lets future work flip to vkQueueSubmit2 / vkWaitSemaphores without
+    // re-touching device-creation code.
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct VkPhysicalDeviceSynchronization2Features
+    {
+        public const VkStructureType TYPE = (VkStructureType)1000314007;
+
+        public VkStructureType sType;
+        public void* pNext;
+        public VkBool32 synchronization2;
+
+        public static VkPhysicalDeviceSynchronization2Features New()
+        {
+            var ret = default(VkPhysicalDeviceSynchronization2Features);
+            ret.sType = TYPE;
+            return ret;
+        }
+    }
+
+    // --- VK_KHR_timeline_semaphore (core in Vulkan 1.2) ---
+    // Foundation for replacing the availableSubmissionFences pool with a single
+    // monotonically-incrementing timeline counter. Detection-only at present;
+    // hot-path migration is a separate change.
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct VkPhysicalDeviceTimelineSemaphoreFeatures
+    {
+        public const VkStructureType TYPE = (VkStructureType)1000207000;
+
+        public VkStructureType sType;
+        public void* pNext;
+        public VkBool32 timelineSemaphore;
+
+        public static VkPhysicalDeviceTimelineSemaphoreFeatures New()
+        {
+            var ret = default(VkPhysicalDeviceTimelineSemaphoreFeatures);
+            ret.sType = TYPE;
+            return ret;
+        }
+    }
 }
