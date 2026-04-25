@@ -18,6 +18,17 @@
         public string[] DeviceExtensions;
 
         /// <summary>
+        ///     Optional pre-warmed VkPipelineCache blob, typically obtained from a previous run via
+        ///     <see cref="BackendInfoVulkan.GetPipelineCacheData" /> and persisted to disk. When supplied, the data is
+        ///     passed through <c>VkPipelineCacheCreateInfo.pInitialData</c> at device creation, letting the driver
+        ///     skip recompiling pipelines whose SPIR-V matches a previously-seen entry. The driver validates the blob
+        ///     header (vendorID / deviceID / driver UUID) and silently discards it if it does not match the current
+        ///     device, so it is always safe to pass through stale data without manual versioning. Pass <c>null</c> on
+        ///     first launch.
+        /// </summary>
+        public byte[] PipelineCacheData;
+
+        /// <summary>
         ///     Constructs a new VulkanDeviceOptions.
         /// </summary>
         /// <param name="instanceExtensions">

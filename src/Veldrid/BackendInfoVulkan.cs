@@ -59,6 +59,61 @@ namespace Veldrid
         public bool HasMeshShader => gd.HasMeshShader;
 
         /// <summary>
+        ///     Indicates whether the device supports VK_KHR_synchronization2 (core in Vulkan 1.3).
+        ///     Detection-only at present; submission paths still use legacy vkQueueSubmit. Surfaced so
+        ///     a follow-up change can migrate the per-CL fence pool to vkQueueSubmit2 + timeline
+        ///     semaphores without re-touching device-creation code.
+        /// </summary>
+        public bool HasSynchronization2 => gd.HasSynchronization2;
+
+        /// <summary>
+        ///     Indicates whether the device supports VK_KHR_timeline_semaphore (core in Vulkan 1.2).
+        ///     See <see cref="HasSynchronization2" /> for context.
+        /// </summary>
+        public bool HasTimelineSemaphore => gd.HasTimelineSemaphore;
+
+        /// <summary>
+        ///     Returns the current contents of the device's <c>VkPipelineCache</c> as a serialised blob,
+        ///     suitable for persisting to disk and feeding back into
+        ///     <see cref="VulkanDeviceOptions.PipelineCacheData" /> on the next launch. The blob's first
+        ///     bytes are a driver-validated header (vendorID / deviceID / driver UUID), so it is always
+        ///     safe to round-trip stale data — the driver silently discards mismatched blobs at create
+        ///     time. Should typically be called once just before disposing the GraphicsDevice. Returns
+        ///     an empty array if the cache is empty or the driver returns no data.
+        /// </summary>
+        /// <remarks>
+        ///     This call is a two-pass query (size, then data) and may briefly contend with concurrent
+        ///     pipeline creation. Avoid calling it on the render hot-path.
+        /// </remarks>
+        public unsafe byte[] GetPipelineCacheData()
+        {
+            var pipelineCache = gd.PipelineCache;
+            if (pipelineCache.Handle == 0)
+                return Array.Empty<byte>();
+
+            UIntPtr size = UIntPtr.Zero;
+            var sizeResult = Vulkan.VulkanNative.vkGetPipelineCacheData(gd.Device, pipelineCache, ref size, null);
+            if (sizeResult != Vulkan.VkResult.Success || size == UIntPtr.Zero)
+                return Array.Empty<byte>();
+
+            byte[] data = new byte[(int)size];
+            fixed (byte* dataPtr = data)
+            {
+                var dataResult = Vulkan.VulkanNative.vkGetPipelineCacheData(gd.Device, pipelineCache, ref size, dataPtr);
+                // VK_INCOMPLETE means the cache grew between the two calls — treat the partial as truncated.
+                if (dataResult != Vulkan.VkResult.Success && dataResult != Vulkan.VkResult.Incomplete)
+                    return Array.Empty<byte>();
+            }
+
+            // size may have been clamped down by the driver between calls — slice if so.
+            int actual = (int)size;
+            if (actual == data.Length) return data;
+            byte[] trimmed = new byte[actual];
+            Array.Copy(data, trimmed, actual);
+            return trimmed;
+        }
+
+        /// <summary>
         ///     Gets the available Vulkan instance layers.
         /// </summary>
         public ReadOnlyCollection<string> AvailableInstanceLayers => instanceLayers.Value;
