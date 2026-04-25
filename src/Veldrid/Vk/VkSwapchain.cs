@@ -155,6 +155,22 @@ namespace Veldrid.Vk
             recreateAndReacquire(width, height);
         }
 
+        /// <summary>
+        ///     Triggered by <see cref="VkGraphicsDevice.SwapBuffersCore" /> when
+        ///     <c>vkQueuePresentKHR</c> reports <c>VK_ERROR_OUT_OF_DATE_KHR</c> or
+        ///     <c>VK_SUBOPTIMAL_KHR</c> (typical on Android after a rotation /
+        ///     fold / DeX-attach). Recreates the swapchain in-place and
+        ///     re-acquires so the next frame doesn't have to bounce a second
+        ///     OUT_OF_DATE through the acquire path. Never throws on these
+        ///     two results — callers expect a needs-rebuild signal, not an
+        ///     exception (the per-rotate exception cost is what the osu!
+        ///     framework retry loop was trying to avoid).
+        /// </summary>
+        public void RecreateAfterPresent()
+        {
+            recreateAndReacquire(framebuffer.Width, framebuffer.Height);
+        }
+
         public bool AcquireNextImage(VkDevice device, VkSemaphore semaphore, Vulkan.VkFence fence)
         {
             if (newSyncToVBlank != null)
@@ -299,7 +315,19 @@ namespace Veldrid.Vk
                 swapchainCi.queueFamilyIndexCount = 0;
             }
 
-            swapchainCi.preTransform = surfaceCapabilities.currentTransform;
+            // Adreno (and to a lesser extent some Mali drivers) report a rotated
+            // currentTransform (e.g. Rotate90KHR) for activities that are already
+            // landscape-locked at the OS level. Honouring it produces a black or
+            // 90°-rotated swapchain because the compositor double-rotates.
+            // Forcing IDENTITY when the surface advertises it as a supported
+            // transform avoids that whole class of bugs and is what every Android
+            // sample/engine ships in practice. Driver still applies the final
+            // display rotation via the system compositor.
+            var preTransform = surfaceCapabilities.currentTransform;
+            if (OperatingSystem.IsAndroid()
+                && (surfaceCapabilities.supportedTransforms & VkSurfaceTransformFlagsKHR.IdentityKHR) != 0)
+                preTransform = VkSurfaceTransformFlagsKHR.IdentityKHR;
+            swapchainCi.preTransform = preTransform;
             swapchainCi.compositeAlpha = VkCompositeAlphaFlagsKHR.OpaqueKHR;
             swapchainCi.clipped = true;
 

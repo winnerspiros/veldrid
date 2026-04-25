@@ -1594,11 +1594,20 @@ namespace Veldrid.Vk
                 presentInfo.pNext = &presentModeInfo;
             }
 
+            // VK_KHR_incremental_present is intentionally NOT chained here.
+            // On Qualcomm/Adreno (vendorID 0x5143) it has been observed to deliver
+            // stale tile contents after a surface rotation — the dirty-rect path
+            // skips a full-frame composite that the rotated swapchain depends on.
+            // If a future contributor wants to enable it for desktop drivers,
+            // gate the chain on `vkSc.gd.PhysicalDeviceProperties.vendorID != 0x5143`
+            // (or skip entirely on Android) before adding it back.
+            VkResult presentResult;
             if (vkSc.PresentQueueIndex == GraphicsQueueIndex)
             {
                 lock (graphicsQueueLock)
                 {
-                    vkQueuePresentKHR(vkSc.PresentQueue, ref presentInfo);
+                    presentResult = vkQueuePresentKHR(vkSc.PresentQueue, ref presentInfo);
+                    handlePresentResult(vkSc, presentResult);
                     acquireAndWaitNextImage(vkSc);
                 }
             }
@@ -1606,10 +1615,33 @@ namespace Veldrid.Vk
             {
                 lock (vkSc)
                 {
-                    vkQueuePresentKHR(vkSc.PresentQueue, ref presentInfo);
+                    presentResult = vkQueuePresentKHR(vkSc.PresentQueue, ref presentInfo);
+                    handlePresentResult(vkSc, presentResult);
                     acquireAndWaitNextImage(vkSc);
                 }
             }
+        }
+
+        // VK_ERROR_OUT_OF_DATE_KHR / VK_SUBOPTIMAL_KHR are expected on Android
+        // (rotation, fold, DeX attach, system bars showing/hiding). Treat them as
+        // a needs-rebuild signal rather than a hard failure: silently recreate
+        // and re-acquire. This avoids the per-rotate managed exception that the
+        // osu! framework retry loop would otherwise have to swallow every frame
+        // until the surface settled.
+        private static void handlePresentResult(VkSwapchain vkSc, VkResult result)
+        {
+            if (result == VkResult.Success)
+                return;
+
+            if (result == VkResult.ErrorOutOfDateKHR || result == VkResult.SuboptimalKHR)
+            {
+                vkSc.RecreateAfterPresent();
+                return;
+            }
+
+            // Any other non-success result is genuinely unexpected (device lost,
+            // OOM, etc.) — surface it the same way as the rest of the backend.
+            CheckResult(result);
         }
 
         private void acquireAndWaitNextImage(VkSwapchain vkSc)
