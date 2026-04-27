@@ -521,6 +521,18 @@ namespace Veldrid.MTL
 
         protected override void SetFramebufferCore(Framebuffer fb)
         {
+            var newFb = Util.AssertSubtype<Framebuffer, MtlFramebuffer>(fb);
+
+            // Same-framebuffer redundancy fast path. If the caller re-binds the framebuffer that's already
+            // active and at least one draw has happened against it (so its render encoder is open), we
+            // preserve the encoder. On Apple Silicon TBDR GPUs every render-encoder boundary is a tile
+            // flush — keeping the encoder alive across redundant SetFramebuffer calls (which Veldrid
+            // callers often issue defensively per draw node) avoids that bandwidth hit.
+            //
+            // We deliberately do NOT short-circuit when currentFramebufferEverActive == false, because the
+            // logic below relies on the fb-change path to apply pending clear values via begin/endRenderPass.
+            if (ReferenceEquals(mtlFramebuffer, newFb) && currentFramebufferEverActive) return;
+
             if (!currentFramebufferEverActive && mtlFramebuffer != null)
             {
                 // This ensures that any submitted clear values will be used even if nothing has been drawn.
@@ -528,7 +540,7 @@ namespace Veldrid.MTL
             }
 
             ensureNoRenderPass();
-            mtlFramebuffer = Util.AssertSubtype<Framebuffer, MtlFramebuffer>(fb);
+            mtlFramebuffer = newFb;
             viewportCount = Math.Max(1u, (uint)fb.ColorTargets.Count);
             Util.EnsureArrayMinimumSize(ref viewports, viewportCount);
             Util.ClearArray(viewports);
@@ -696,6 +708,17 @@ namespace Veldrid.MTL
 
         private MtlBuffer getFreeStagingBuffer(uint sizeInBytes)
         {
+            // Round small allocations up to a 64 KiB floor (mirroring the Vulkan staging-pool default)
+            // so per-frame upload patterns that hit dozens of small UpdateBuffer / UpdateTexture calls reuse
+            // the same pooled buffer instead of churning the Metal allocator. Allocations bigger than the
+            // floor are left alone; capping recycle at a ceiling matches the VkGraphicsDevice 4 MiB rule.
+            const uint min_pooled_staging_buffer_size = 64 * 1024;
+            const uint max_pooled_staging_buffer_size = 4 * 1024 * 1024;
+
+            uint allocSize = sizeInBytes < min_pooled_staging_buffer_size
+                ? min_pooled_staging_buffer_size
+                : sizeInBytes;
+
             lock (submittedCommandsLock)
             {
                 foreach (var buffer in availableStagingBuffers)
@@ -708,8 +731,13 @@ namespace Veldrid.MTL
                 }
             }
 
+            // Don't over-allocate giants: anything bigger than the recycle ceiling stays at exact size,
+            // since it'd just be disposed on completion rather than returned to the pool.
+            if (allocSize > max_pooled_staging_buffer_size && sizeInBytes >= max_pooled_staging_buffer_size)
+                allocSize = sizeInBytes;
+
             var staging = gd.ResourceFactory.CreateBuffer(
-                new BufferDescription(sizeInBytes, BufferUsage.Staging));
+                new BufferDescription(allocSize, BufferUsage.Staging));
 
             return Util.AssertSubtype<DeviceBuffer, MtlBuffer>(staging);
         }
