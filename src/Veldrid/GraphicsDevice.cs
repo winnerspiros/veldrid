@@ -667,6 +667,117 @@ namespace Veldrid
         }
 
         /// <summary>
+        ///     Begins a new <see cref="TextureUpdateBatch" /> that coalesces many small
+        ///     <see cref="UpdateTexture(Texture, IntPtr, uint, uint, uint, uint, uint, uint, uint, uint, uint)" />
+        ///     calls into a single staging-buffer copy and a single queue submission per <see cref="TextureUpdateBatch.Submit" />.
+        ///
+        ///     <para>
+        ///         On the Vulkan backend this is a substantial throughput / latency win when many texture regions are
+        ///         uploaded per frame (font glyph atlases, sprite-sheet streaming, masking buffers): instead of one
+        ///         <c>vkQueueSubmit</c> per call — each contending with <c>vkQueuePresentKHR</c> on the graphics queue
+        ///         — the entire batch becomes a single submission. On other backends the default implementation simply
+        ///         forwards each <c>Add</c> straight to the corresponding <c>UpdateTexture</c>, so callers can use this
+        ///         API portably without per-backend branching.
+        ///     </para>
+        ///
+        ///     <para>
+        ///         The returned object is <strong>not</strong> thread-safe. Use it from a single thread, and dispose it
+        ///         (via <c>using</c> or an explicit <see cref="TextureUpdateBatch.Dispose" /> call) at the end of the
+        ///         frame to flush any pending uploads. Disposed batches are returned to a per-device pool, so disposing
+        ///         and re-acquiring per frame allocates no managed garbage after warmup.
+        ///     </para>
+        /// </summary>
+        public virtual TextureUpdateBatch BeginTextureUpdateBatch()
+        {
+            return DefaultTextureUpdateBatch.Acquire(this);
+        }
+
+        /// <summary>
+        ///     Begins a new <see cref="BufferUpdateBatch" /> that coalesces many small
+        ///     <see cref="UpdateBuffer(DeviceBuffer, uint, IntPtr, uint)" /> calls into a single staging-buffer
+        ///     copy and a single queue submission per <see cref="BufferUpdateBatch.Submit" />. The Vulkan
+        ///     backend overrides this; other backends fall back to a default implementation that forwards
+        ///     each <c>Add</c> straight to <c>UpdateBuffer</c>. See <see cref="BeginTextureUpdateBatch" />
+        ///     for thread-safety / lifetime guidance — the same conventions apply.
+        /// </summary>
+        public virtual BufferUpdateBatch BeginBufferUpdateBatch()
+        {
+            return DefaultBufferUpdateBatch.Acquire(this);
+        }
+
+        /// <summary>
+        ///     Default <see cref="TextureUpdateBatch" /> implementation used by every backend that does not override
+        ///     <see cref="BeginTextureUpdateBatch" />. Each <c>Add</c> is forwarded straight to <c>UpdateTextureCore</c>,
+        ///     so the call still completes synchronously; <c>Submit</c> is a no-op. This keeps the public API portable
+        ///     while letting the Vulkan backend opt in to true batching.
+        /// </summary>
+        private sealed class DefaultTextureUpdateBatch : TextureUpdateBatch
+        {
+            private static readonly Stack<DefaultTextureUpdateBatch> s_pool = new Stack<DefaultTextureUpdateBatch>();
+            private static readonly object s_pool_lock = new object();
+
+            private GraphicsDevice gd;
+
+            public static DefaultTextureUpdateBatch Acquire(GraphicsDevice device)
+            {
+                DefaultTextureUpdateBatch batch;
+                lock (s_pool_lock) batch = s_pool.Count > 0 ? s_pool.Pop() : new DefaultTextureUpdateBatch();
+                batch.gd = device;
+                batch.MarkOpen();
+                return batch;
+            }
+
+            public override void Add(
+                Texture texture, IntPtr source, uint sizeInBytes,
+                uint x, uint y, uint z,
+                uint width, uint height, uint depth,
+                uint mipLevel, uint arrayLayer)
+            {
+                CheckOpen();
+                gd.UpdateTexture(texture, source, sizeInBytes, x, y, z, width, height, depth, mipLevel, arrayLayer);
+            }
+
+            public override void Submit() => CheckOpen();
+
+            protected override void ReleaseToPool()
+            {
+                gd = null;
+                lock (s_pool_lock) s_pool.Push(this);
+            }
+        }
+
+        private sealed class DefaultBufferUpdateBatch : BufferUpdateBatch
+        {
+            private static readonly Stack<DefaultBufferUpdateBatch> s_pool = new Stack<DefaultBufferUpdateBatch>();
+            private static readonly object s_pool_lock = new object();
+
+            private GraphicsDevice gd;
+
+            public static DefaultBufferUpdateBatch Acquire(GraphicsDevice device)
+            {
+                DefaultBufferUpdateBatch batch;
+                lock (s_pool_lock) batch = s_pool.Count > 0 ? s_pool.Pop() : new DefaultBufferUpdateBatch();
+                batch.gd = device;
+                batch.MarkOpen();
+                return batch;
+            }
+
+            public override void Add(DeviceBuffer buffer, uint bufferOffsetInBytes, IntPtr source, uint sizeInBytes)
+            {
+                CheckOpen();
+                gd.UpdateBuffer(buffer, bufferOffsetInBytes, source, sizeInBytes);
+            }
+
+            public override void Submit() => CheckOpen();
+
+            protected override void ReleaseToPool()
+            {
+                gd = null;
+                lock (s_pool_lock) s_pool.Push(this);
+            }
+        }
+
+        /// <summary>
         ///     Updates a <see cref="DeviceBuffer" /> region with new data.
         ///     This function must be used with a blittable value type <typeparamref name="T" />.
         /// </summary>

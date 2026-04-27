@@ -35,6 +35,7 @@ namespace Veldrid.OpenGL
         public readonly bool AnisotropicFilter;
         public readonly bool OesPackedDepthStencil;
         public readonly bool InvalidateFramebuffer;
+        public readonly bool ClearBufferIndividual;
         private readonly HashSet<string> extensions;
         private readonly GraphicsBackend backend;
         private readonly int major;
@@ -105,6 +106,12 @@ namespace Veldrid.OpenGL
             // writeback for attachments whose contents the next frame doesn't need (canonically
             // the swapchain's depth/stencil after present).
             InvalidateFramebuffer = GLVersion(4, 3) || GLESVersion(3, 0);
+
+            // glClearBufferfv / glClearBufferfi: core in GL 3.0+ and GLES 3.0+. Replaces
+            // glDrawBuffers+glClearColor+glClear+glDrawBuffers with a single call that targets
+            // exactly one attachment without touching draw-buffer state. Mobile drivers (Mali/Adreno)
+            // re-do tile setup on every glDrawBuffers change, so this is a meaningful per-pass win.
+            ClearBufferIndividual = GLVersion(3, 0) || GLESVersion(3, 0);
         }
 
         /// <summary>

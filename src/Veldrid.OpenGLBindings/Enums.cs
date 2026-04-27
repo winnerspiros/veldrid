@@ -128,6 +128,17 @@ namespace Veldrid.OpenGLBindings
         FramebufferExt = 36160
     }
 
+    /// <summary>
+    ///     Buffer kind selector for <c>glClearBuffer*</c> (GL 3.0+ / GLES 3.0+).
+    /// </summary>
+    public enum ClearBuffer
+    {
+        Color = 0x1800,
+        Depth = 0x1801,
+        Stencil = 0x1802,
+        DepthStencil = 0x84F9,
+    }
+
     public enum RenderbufferTarget
     {
         Renderbuffer = 36161
