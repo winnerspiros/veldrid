@@ -15,11 +15,17 @@ namespace Veldrid.Vk
         public VkSwapchainKHR DeviceSwapchain => deviceSwapchain;
         public uint ImageIndex => currentImageIndex;
         public Vulkan.VkFence ImageAvailableFence => imageAvailableFence;
-        public VkSurfaceKHR Surface { get; }
+        public VkSurfaceKHR Surface => surface;
 
         public VkQueue PresentQueue => presentQueue;
         public uint PresentQueueIndex => presentQueueIndex;
         public ResourceRefCount RefCount { get; }
+
+        // True if the swapchain is in a known-bad state and must be re-created before
+        // the next present (e.g. transient zero-extent surface, surface-lost recovery
+        // partially completed). SwapBuffersCore reads this and skips vkQueuePresentKHR
+        // on this frame, retrying createSwapchain instead.
+        public bool NeedsRecreation => needsRecreation;
 
         public override string Name
         {
@@ -87,8 +93,15 @@ namespace Veldrid.Vk
 
         private readonly VkGraphicsDevice gd;
         private readonly VkSwapchainFramebuffer framebuffer;
-        private readonly uint presentQueueIndex;
-        private readonly VkQueue presentQueue;
+        // The original SwapchainSource is retained so we can re-create the underlying
+        // VkSurfaceKHR on VK_ERROR_SURFACE_LOST_KHR (Android stop/start, surfaceDestroyed
+        // → surfaceCreated, lock screen, fold/unfold, PiP exit). Without this, a single
+        // surface-lost event leaves the swapchain permanently dead and the framework
+        // sees a permanent black screen for the lifetime of the process.
+        private readonly SwapchainSource swapchainSource;
+        private VkSurfaceKHR surface;
+        private uint presentQueueIndex;
+        private VkQueue presentQueue;
         private readonly bool colorSrgb;
         private VkSwapchainKHR deviceSwapchain;
         private Vulkan.VkFence imageAvailableFence;
@@ -97,6 +110,10 @@ namespace Veldrid.Vk
         private uint currentImageIndex;
         private string name;
         private bool disposed;
+        private bool needsRecreation;
+        // Set by createSwapchain when any WSI call returns VK_ERROR_SURFACE_LOST_KHR;
+        // attemptRecreate reads this to decide whether to rebuild the surface and retry.
+        private bool lastCreateSurfaceLost;
 
         // VK_EXT_swapchain_maintenance1 hot-swap state.
         // compatiblePresentModes is the union of modes the current swapchain may switch
@@ -116,9 +133,9 @@ namespace Veldrid.Vk
             syncToVBlank = description.SyncToVerticalBlank;
             colorSrgb = description.ColorSrgb;
 
-            SwapchainSource swapchainSource = description.Source;
+            swapchainSource = description.Source;
 
-            Surface = existingSurface == VkSurfaceKHR.Null
+            surface = existingSurface == VkSurfaceKHR.Null
                 ? VkSurfaceUtil.CreateSurface(gd, gd.Instance, swapchainSource)
                 : existingSurface;
 
@@ -126,17 +143,47 @@ namespace Veldrid.Vk
 
             vkGetDeviceQueue(this.gd.Device, presentQueueIndex, 0, out presentQueue);
 
-            framebuffer = new VkSwapchainFramebuffer(gd, this, Surface, description.Width, description.Height, description.DepthFormat);
+            framebuffer = new VkSwapchainFramebuffer(gd, this, surface, description.Width, description.Height, description.DepthFormat);
 
-            createSwapchain(description.Width, description.Height);
+            // On Android the SurfaceView can be in a transient state where
+            // vkGetPhysicalDeviceSurfaceCapabilitiesKHR reports a 0×0 extent
+            // (between surfaceCreated and surfaceChanged). attemptRecreate
+            // returns false in that window. Poll briefly so startup doesn't
+            // proceed against a VK_NULL_HANDLE swapchain (which would silently
+            // black-screen on the very first AcquireNextImage), then fall
+            // through to a managed exception so the host can retry the create.
+            // attemptRecreate also rebuilds the surface on VK_ERROR_SURFACE_LOST_KHR.
+            const int max_initial_create_attempts = 25; // ~250 ms total
+            const int initial_create_retry_delay_ms = 10;
+            bool created = false;
+            for (int attempt = 0; attempt < max_initial_create_attempts; attempt++)
+            {
+                if (attemptRecreate(description.Width, description.Height))
+                {
+                    created = true;
+                    break;
+                }
+
+                System.Threading.Thread.Sleep(initial_create_retry_delay_ms);
+            }
+            if (!created)
+            {
+                // The swapchain never came up; clean up everything we constructed
+                // before throwing so we don't leak the surface/framebuffer/old chain.
+                framebuffer.Dispose();
+                if (deviceSwapchain != VkSwapchainKHR.Null)
+                    vkDestroySwapchainKHR(this.gd.Device, deviceSwapchain, null);
+                if (surface != VkSurfaceKHR.Null)
+                    vkDestroySurfaceKHR(this.gd.Instance, surface, null);
+                throw new VeldridException("The Vulkan surface was not ready in time; cannot create a swapchain.");
+            }
 
             var fenceCi = VkFenceCreateInfo.New();
             fenceCi.flags = VkFenceCreateFlags.None;
             vkCreateFence(this.gd.Device, ref fenceCi, null, out imageAvailableFence);
 
-            AcquireNextImage(this.gd.Device, VkSemaphore.Null, imageAvailableFence);
-            vkWaitForFences(this.gd.Device, 1, ref imageAvailableFence, true, ulong.MaxValue);
-            vkResetFences(this.gd.Device, 1, ref imageAvailableFence);
+            if (AcquireNextImage(this.gd.Device, VkSemaphore.Null, imageAvailableFence))
+                WaitAndResetImageAvailableFence();
 
             RefCount = new ResourceRefCount(disposeCore);
         }
@@ -180,6 +227,13 @@ namespace Veldrid.Vk
                 recreateAndReacquire(framebuffer.Width, framebuffer.Height);
                 return false;
             }
+
+            // If a previous frame couldn't (re)create the swapchain (e.g. transient
+            // zero-extent surface) we still hold the prior deviceSwapchain. Try the
+            // create again here before attempting an acquire.
+            if (needsRecreation && !attemptRecreate(framebuffer.Width, framebuffer.Height))
+                return false;
+
             // Bound the wait so a misbehaving driver (e.g. Adreno after a surface-lost event,
             // where vkAcquireNextImageKHR has been observed to never return) cannot deadlock
             // the render thread. VK_TIMEOUT / VK_NOT_READY are treated like VK_ERROR_OUT_OF_DATE_KHR
@@ -194,12 +248,30 @@ namespace Veldrid.Vk
                 ref currentImageIndex);
             framebuffer.SetImageIndex(currentImageIndex);
 
+            if (result == VkResult.ErrorSurfaceLostKHR)
+            {
+                // Drop the dead surface and rebuild from the original SwapchainSource.
+                // On Android this re-resolves the JNI Surface → fresh ANativeWindow →
+                // fresh VkSurfaceKHR, recovering from stop/start, surfaceDestroyed →
+                // surfaceCreated, lock screen, fold/unfold, PiP exit, etc.
+                rebuildFenceAfterFailedAcquire(ref fence);
+                if (!recreateSurfaceAndSwapchain(framebuffer.Width, framebuffer.Height))
+                    needsRecreation = true;
+                return false;
+            }
+
             if (result == VkResult.ErrorOutOfDateKHR
                 || result == VkResult.SuboptimalKHR
                 || result == VkResult.Timeout
                 || result == VkResult.NotReady)
             {
-                createSwapchain(framebuffer.Width, framebuffer.Height);
+                // SUBOPTIMAL_KHR signals the fence/semaphore per spec; the others do not.
+                // Either way, destroy + recreate the fence so the next acquire can reuse
+                // it without hitting "fence must be unsignaled" or worse, racing a still-
+                // pending driver signal.
+                rebuildFenceAfterFailedAcquire(ref fence);
+                if (!attemptRecreate(framebuffer.Width, framebuffer.Height))
+                    needsRecreation = true;
                 return false;
             }
 
@@ -208,23 +280,160 @@ namespace Veldrid.Vk
             return true;
         }
 
+        // Bounded fence wait + reset so a misbehaving driver cannot wedge startup or
+        // the recreate path. On timeout, destroy + recreate the fence — its "in-use"
+        // state is unknown and reusing it would be UB on the next acquire.
+        internal void WaitAndResetImageAvailableFence()
+        {
+            const ulong fence_wait_timeout_ns = 250_000_000; // 250 ms
+            var result = vkWaitForFences(gd.Device, 1, ref imageAvailableFence, true, fence_wait_timeout_ns);
+            if (result == VkResult.Success)
+            {
+                vkResetFences(gd.Device, 1, ref imageAvailableFence);
+                return;
+            }
+
+            // Driver never signaled within the budget — replace the fence wholesale.
+            recreateImageAvailableFence();
+            needsRecreation = true;
+        }
+
+        // Replaces imageAvailableFence with a fresh, unsignaled fence. Safe to call
+        // even when the original may still have an in-flight signal pending: the old
+        // fence handle is destroyed, and the spec only forbids destruction while in
+        // use by a *queue submission*; vkAcquireNextImageKHR does not enqueue a queue
+        // op for the fence in the strict sense — it's signaled by the WSI layer.
+        // Even so, we vkDeviceWaitIdle first to drain any pending GPU work that
+        // could be holding a reference.
+        private void recreateImageAvailableFence()
+        {
+            gd.WaitForIdle();
+            vkDestroyFence(gd.Device, imageAvailableFence, null);
+            var fenceCi = VkFenceCreateInfo.New();
+            fenceCi.flags = VkFenceCreateFlags.None;
+            vkCreateFence(gd.Device, ref fenceCi, null, out imageAvailableFence);
+        }
+
+        // After a non-Success acquire the fence may or may not be signaled
+        // (SUBOPTIMAL_KHR signals; the others don't). Always rebuild it so the next
+        // acquire starts from a known-clean state. The `fence` parameter is kept
+        // up-to-date for callers who hold the same handle.
+        private void rebuildFenceAfterFailedAcquire(ref Vulkan.VkFence fence)
+        {
+            if (fence != imageAvailableFence) return;
+            recreateImageAvailableFence();
+            fence = imageAvailableFence;
+        }
+
         private void recreateAndReacquire(uint width, uint height)
+        {
+            if (!attemptRecreate(width, height))
+            {
+                needsRecreation = true;
+                return;
+            }
+
+            if (AcquireNextImage(gd.Device, VkSemaphore.Null, imageAvailableFence))
+                WaitAndResetImageAvailableFence();
+        }
+
+        // Wraps createSwapchain with surface-lost recovery. If the surface has died,
+        // rebuild it from the original SwapchainSource and retry the create once.
+        private bool attemptRecreate(uint width, uint height)
         {
             if (createSwapchain(width, height))
             {
-                if (AcquireNextImage(gd.Device, VkSemaphore.Null, imageAvailableFence))
+                needsRecreation = false;
+                return true;
+            }
+
+            // Retry once after rebuilding the surface, but only when the WSI explicitly
+            // told us the surface is dead. A zero-extent return (transient Android state)
+            // is *not* fixed by surface recreation — the surface is fine, just not ready.
+            if (lastCreateSurfaceLost && recreateSurface() && createSwapchain(width, height))
+            {
+                needsRecreation = false;
+                return true;
+            }
+
+            needsRecreation = true;
+            return false;
+        }
+
+        private bool recreateSurfaceAndSwapchain(uint width, uint height)
+        {
+            if (!recreateSurface()) return false;
+            return attemptRecreate(width, height);
+        }
+
+        // Destroys the dead VkSurfaceKHR and creates a fresh one from the original
+        // SwapchainSource. On Android this re-resolves the JNI Surface so the new
+        // VkSurfaceKHR wraps the current ANativeWindow. Returns false if the source
+        // didn't yield a new surface (host hasn't re-created it yet) so callers can
+        // mark needsRecreation and retry next frame.
+        private bool recreateSurface()
+        {
+            try
+            {
+                gd.WaitForIdle();
+
+                var oldSurface = surface;
+                var newSurface = VkSurfaceUtil.CreateSurface(gd, gd.Instance, swapchainSource);
+                if (newSurface == VkSurfaceKHR.Null)
+                    return false;
+
+                // The new surface may live on a different queue family; verify it before
+                // committing to the swap. If it doesn't, throw away the new surface and
+                // keep the original (still-dead) one — caller will retry next frame.
+                surface = newSurface;
+                if (!getPresentQueueIndex(out var newPresentQueueIndex))
                 {
-                    vkWaitForFences(gd.Device, 1, ref imageAvailableFence, true, ulong.MaxValue);
-                    vkResetFences(gd.Device, 1, ref imageAvailableFence);
+                    vkDestroySurfaceKHR(gd.Instance, newSurface, null);
+                    surface = oldSurface;
+                    return false;
                 }
+
+                // The existing deviceSwapchain is bound to the old (now-dead) surface.
+                // Per Vulkan spec, oldSwapchain passed to vkCreateSwapchainKHR must be
+                // associated with the same surface as the new chain — so we must
+                // destroy it here rather than letting createSwapchain reuse it as
+                // oldSwapchain. compatiblePresentModes is also surface-relative and
+                // must be re-queried by the next createSwapchain call.
+                if (deviceSwapchain != VkSwapchainKHR.Null)
+                {
+                    vkDestroySwapchainKHR(gd.Device, deviceSwapchain, null);
+                    deviceSwapchain = VkSwapchainKHR.Null;
+                }
+                compatiblePresentModes = null;
+
+                if (newPresentQueueIndex != presentQueueIndex)
+                {
+                    presentQueueIndex = newPresentQueueIndex;
+                    vkGetDeviceQueue(gd.Device, presentQueueIndex, 0, out presentQueue);
+                }
+
+                if (oldSurface != VkSurfaceKHR.Null)
+                    vkDestroySurfaceKHR(gd.Instance, oldSurface, null);
+
+                return true;
+            }
+            catch
+            {
+                return false;
             }
         }
 
         private bool createSwapchain(uint width, uint height)
         {
+            lastCreateSurfaceLost = false;
+
             // Obtain the surface capabilities first -- this will indicate whether the surface has been lost.
-            var result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(gd.PhysicalDevice, Surface, out var surfaceCapabilities);
-            if (result == VkResult.ErrorSurfaceLostKHR) throw new VeldridException("The Swapchain's underlying surface has been lost.");
+            var result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(gd.PhysicalDevice, surface, out var surfaceCapabilities);
+            if (result == VkResult.ErrorSurfaceLostKHR)
+            {
+                lastCreateSurfaceLost = true;
+                return false;
+            }
 
             if (surfaceCapabilities.minImageExtent.width == 0 && surfaceCapabilities.minImageExtent.height == 0
                                                               && surfaceCapabilities.maxImageExtent.width == 0 && surfaceCapabilities.maxImageExtent.height == 0)
@@ -234,10 +443,20 @@ namespace Veldrid.Vk
 
             currentImageIndex = 0;
             uint surfaceFormatCount = 0;
-            result = vkGetPhysicalDeviceSurfaceFormatsKHR(gd.PhysicalDevice, Surface, ref surfaceFormatCount, null);
+            result = vkGetPhysicalDeviceSurfaceFormatsKHR(gd.PhysicalDevice, surface, ref surfaceFormatCount, null);
+            if (result == VkResult.ErrorSurfaceLostKHR)
+            {
+                lastCreateSurfaceLost = true;
+                return false;
+            }
             CheckResult(result);
             var formats = new VkSurfaceFormatKHR[surfaceFormatCount];
-            result = vkGetPhysicalDeviceSurfaceFormatsKHR(gd.PhysicalDevice, Surface, ref surfaceFormatCount, out formats[0]);
+            result = vkGetPhysicalDeviceSurfaceFormatsKHR(gd.PhysicalDevice, surface, ref surfaceFormatCount, out formats[0]);
+            if (result == VkResult.ErrorSurfaceLostKHR)
+            {
+                lastCreateSurfaceLost = true;
+                return false;
+            }
             CheckResult(result);
 
             var desiredFormat = colorSrgb
@@ -268,10 +487,20 @@ namespace Veldrid.Vk
             }
 
             uint presentModeCount = 0;
-            result = vkGetPhysicalDeviceSurfacePresentModesKHR(gd.PhysicalDevice, Surface, ref presentModeCount, null);
+            result = vkGetPhysicalDeviceSurfacePresentModesKHR(gd.PhysicalDevice, surface, ref presentModeCount, null);
+            if (result == VkResult.ErrorSurfaceLostKHR)
+            {
+                lastCreateSurfaceLost = true;
+                return false;
+            }
             CheckResult(result);
             var presentModes = new VkPresentModeKHR[presentModeCount];
-            result = vkGetPhysicalDeviceSurfacePresentModesKHR(gd.PhysicalDevice, Surface, ref presentModeCount, out presentModes[0]);
+            result = vkGetPhysicalDeviceSurfacePresentModesKHR(gd.PhysicalDevice, surface, ref presentModeCount, out presentModes[0]);
+            if (result == VkResult.ErrorSurfaceLostKHR)
+            {
+                lastCreateSurfaceLost = true;
+                return false;
+            }
             CheckResult(result);
 
             var presentMode = choosePresentMode(presentModes, syncToVBlank, allowTearing);
@@ -290,7 +519,7 @@ namespace Veldrid.Vk
             uint imageCount = Math.Min(maxImageCount, surfaceCapabilities.minImageCount + 1);
 
             var swapchainCi = VkSwapchainCreateInfoKHR.New();
-            swapchainCi.surface = Surface;
+            swapchainCi.surface = surface;
             swapchainCi.presentMode = presentMode;
             swapchainCi.imageFormat = surfaceFormat.format;
             swapchainCi.imageColorSpace = surfaceFormat.colorSpace;
@@ -348,6 +577,12 @@ namespace Veldrid.Vk
                 }
 
                 result = vkCreateSwapchainKHR(gd.Device, ref swapchainCi, null, out deviceSwapchain);
+                if (result == VkResult.ErrorSurfaceLostKHR)
+                {
+                    lastCreateSurfaceLost = true;
+                    deviceSwapchain = oldSwapchain; // create failed, leave the old chain in place
+                    return false;
+                }
                 CheckResult(result);
             }
 
