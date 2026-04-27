@@ -1729,6 +1729,18 @@ namespace Veldrid.Vk
         private protected override void SwapBuffersCore(Swapchain swapchain)
         {
             var vkSc = Util.AssertSubtype<Swapchain, VkSwapchain>(swapchain);
+
+            // The previous frame couldn't (re)build the swapchain (transient zero-extent
+            // surface, lost-surface waiting on host re-create, etc.). Retry the create
+            // here instead of presenting against a stale image; the next acquire will
+            // do the real work. Skipping the vkQueuePresentKHR avoids feeding the
+            // driver a stale image index against a possibly-swapped-out swapchain.
+            if (vkSc.NeedsRecreation)
+            {
+                vkSc.RecreateAfterPresent();
+                return;
+            }
+
             var deviceSwapchain = vkSc.DeviceSwapchain;
             var presentInfo = VkPresentInfoKHR.New();
             presentInfo.swapchainCount = 1;
@@ -1779,18 +1791,23 @@ namespace Veldrid.Vk
             }
         }
 
-        // VK_ERROR_OUT_OF_DATE_KHR / VK_SUBOPTIMAL_KHR are expected on Android
-        // (rotation, fold, DeX attach, system bars showing/hiding). Treat them as
-        // a needs-rebuild signal rather than a hard failure: silently recreate
-        // and re-acquire. This avoids the per-rotate managed exception that the
-        // osu! framework retry loop would otherwise have to swallow every frame
-        // until the surface settled.
+        // VK_ERROR_OUT_OF_DATE_KHR / VK_SUBOPTIMAL_KHR / VK_ERROR_SURFACE_LOST_KHR are
+        // expected on Android (rotation, fold, DeX attach, system bars showing/hiding,
+        // surfaceDestroyed → surfaceCreated lifecycle). Treat them as a needs-rebuild
+        // signal rather than a hard failure: silently recreate (and on SURFACE_LOST,
+        // also recreate the underlying VkSurfaceKHR) and re-acquire. This avoids the
+        // per-rotate managed exception that the osu! framework retry loop would
+        // otherwise have to swallow every frame until the surface settled, and
+        // critically converts SURFACE_LOST from a permanent black-screen condition
+        // into a single recoverable frame stall.
         private static void handlePresentResult(VkSwapchain vkSc, VkResult result)
         {
             if (result == VkResult.Success)
                 return;
 
-            if (result == VkResult.ErrorOutOfDateKHR || result == VkResult.SuboptimalKHR)
+            if (result == VkResult.ErrorOutOfDateKHR
+                || result == VkResult.SuboptimalKHR
+                || result == VkResult.ErrorSurfaceLostKHR)
             {
                 vkSc.RecreateAfterPresent();
                 return;
@@ -1804,11 +1821,7 @@ namespace Veldrid.Vk
         private void acquireAndWaitNextImage(VkSwapchain vkSc)
         {
             if (vkSc.AcquireNextImage(device, VkSemaphore.Null, vkSc.ImageAvailableFence))
-            {
-                var fence = vkSc.ImageAvailableFence;
-                vkWaitForFences(device, 1, ref fence, true, ulong.MaxValue);
-                vkResetFences(device, 1, ref fence);
-            }
+                vkSc.WaitAndResetImageAvailableFence();
         }
 
         private protected override void WaitForIdleCore()
