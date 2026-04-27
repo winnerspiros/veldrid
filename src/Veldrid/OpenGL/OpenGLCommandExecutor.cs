@@ -40,6 +40,22 @@ namespace Veldrid.OpenGL
         // Cached GL state to skip redundant calls on pipeline activation.
         private OpenGLPipeline lastGraphicsPipeline;
 
+        // Cached redundancy-elimination state, mirroring the per-CommandList caches in
+        // VkCommandList (cachedViewports / scissorRects / currentFramebuffer) and D3D12CommandList.
+        // Reset in Begin() so out-of-band GL state changes between CommandList recordings (e.g. the
+        // swapchain-depth invalidation path that calls glBindFramebuffer(0) directly) cannot stale us.
+        // Within a single CommandList — which is where the win accumulates: per-frame draw loops set
+        // the same framebuffer / viewport / scissor on every draw node — repeated identical sets become
+        // free. Saves driver dispatch overhead per call (~50–100ns on mobile) and avoids redundant tile
+        // setup recalculation on Adreno/Mali, which is what osu's per-frame upload loop was bottlenecked on.
+        private bool hasCachedFramebuffer;
+        private Framebuffer cachedFramebuffer;
+        private Viewport[] cachedViewports = Array.Empty<Viewport>();
+        private bool[] cachedViewportValid = Array.Empty<bool>();
+        private (uint X, uint Y, uint Width, uint Height)[] cachedScissors
+            = Array.Empty<(uint, uint, uint, uint)>();
+        private bool[] cachedScissorValid = Array.Empty<bool>();
+
         public OpenGLCommandExecutor(OpenGLGraphicsDevice gd, OpenGLPlatformInfo platformInfo)
         {
             this.gd = gd;
@@ -53,6 +69,13 @@ namespace Veldrid.OpenGL
 
         public void Begin()
         {
+            // Reset per-CommandList state caches. Anything mutated by out-of-band GL paths
+            // (swap-buffer depth invalidation, async UpdateBuffer/UpdateTexture work items) is
+            // re-issued from scratch on the first SetFramebuffer / SetViewport / SetScissorRect.
+            hasCachedFramebuffer = false;
+            cachedFramebuffer = null;
+            Array.Clear(cachedViewportValid, 0, cachedViewportValid.Length);
+            Array.Clear(cachedScissorValid, 0, cachedScissorValid.Length);
         }
 
         public void ClearColorTarget(uint index, RgbaFloat clearColor)
@@ -298,6 +321,15 @@ namespace Veldrid.OpenGL
 
         public void SetFramebuffer(Framebuffer fb)
         {
+            // Skip the GL-side bind + sRGB toggle if this CommandList already bound the same FB.
+            // The swapchain-depth invalidation path (OpenGLGraphicsDevice.SwapBuffers worker) intentionally
+            // bypasses this cache by going through raw GL — Begin() will re-prime us on the next CL.
+            if (hasCachedFramebuffer && ReferenceEquals(cachedFramebuffer, fb))
+            {
+                this.fb = fb;
+                return;
+            }
+
             if (fb is OpenGLFramebuffer glFb)
             {
                 if (backend == GraphicsBackend.OpenGL || extensions.ExtSRGBWriteControl)
@@ -341,6 +373,8 @@ namespace Veldrid.OpenGL
                 throw new VeldridException("Invalid Framebuffer type: " + fb.GetType().Name);
 
             this.fb = fb;
+            cachedFramebuffer = fb;
+            hasCachedFramebuffer = true;
         }
 
         public void SetIndexBuffer(DeviceBuffer ib, IndexFormat format, uint offset)
@@ -507,6 +541,15 @@ namespace Veldrid.OpenGL
 
         public void SetScissorRect(uint index, uint x, uint y, uint width, uint height)
         {
+            // Per-CommandList redundancy check: osu's draw loop sets the same scissor on every draw
+            // node and on Adreno/Mali a redundant glScissor* triggers a tile-setup recalculation.
+            Util.EnsureArrayMinimumSize(ref cachedScissors, index + 1);
+            Util.EnsureArrayMinimumSize(ref cachedScissorValid, index + 1);
+            var newRect = (x, y, width, height);
+            if (cachedScissorValid[index] && cachedScissors[index] == newRect) return;
+            cachedScissors[index] = newRect;
+            cachedScissorValid[index] = true;
+
             if (backend == GraphicsBackend.OpenGL)
             {
                 glScissorIndexed(
@@ -546,6 +589,15 @@ namespace Veldrid.OpenGL
         public void SetViewport(uint index, ref Viewport viewport)
         {
             viewports[(int)index] = viewport;
+
+            // Per-CommandList redundancy check, mirroring VkCommandList.cachedViewports[]. Most apps set
+            // the same viewport every draw; on tilers a redundant glViewport / glDepthRange* can re-trigger
+            // tile-setup work in the driver. Viewport is IEquatable<> so this avoids boxing.
+            Util.EnsureArrayMinimumSize(ref cachedViewports, index + 1);
+            Util.EnsureArrayMinimumSize(ref cachedViewportValid, index + 1);
+            if (cachedViewportValid[index] && cachedViewports[index].Equals(viewport)) return;
+            cachedViewports[index] = viewport;
+            cachedViewportValid[index] = true;
 
             if (backend == GraphicsBackend.OpenGL)
             {
