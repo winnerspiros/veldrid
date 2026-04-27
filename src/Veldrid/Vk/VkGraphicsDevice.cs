@@ -132,8 +132,18 @@ namespace Veldrid.Vk
         private const int shared_command_pool_count = 4;
 
         // Staging Resources
-        private const uint min_staging_buffer_size = 64;
-        private const uint max_staging_buffer_size = 512;
+        // Defaults are intentionally generous: the historical 64 B / 512 B values
+        // from upstream Veldrid were vestigial and effectively bypassed the pool
+        // entirely for every realistic workload (any UpdateBuffer larger than 512 B
+        // was disposed instead of recycled). On Android-Vulkan in particular, the
+        // resulting allocator churn was a measurable contributor to the per-frame
+        // submission storm that starved vkQueuePresentKHR. Override via
+        // VulkanDeviceOptions.MinStagingBufferSize / MaxStagingBufferSize.
+        private const uint default_min_staging_buffer_size = 64 * 1024;
+        private const uint default_max_staging_buffer_size = 4 * 1024 * 1024;
+
+        private readonly uint minStagingBufferSize;
+        private readonly uint maxStagingBufferSize;
 
         private readonly Lock stagingResourcesLock = new Lock();
         private readonly List<VkTexture> availableStagingTextures = new List<VkTexture>();
@@ -147,6 +157,54 @@ namespace Veldrid.Vk
 
         private readonly Dictionary<VkCommandBuffer, SharedCommandPool> submittedSharedCommandPools
             = new Dictionary<VkCommandBuffer, SharedCommandPool>();
+
+        // Free-list of VkTextureUpdateBatch instances. A new batch is pushed back here on Dispose so per-frame
+        // BeginTextureUpdateBatch / using-block usage allocates no managed garbage after warmup.
+        private readonly Stack<VkTextureUpdateBatch> textureUpdateBatchPool = new Stack<VkTextureUpdateBatch>();
+
+        // Exposes the optimal alignment for vkCmdCopyBufferToImage's bufferOffset to internal callers (the
+        // texture-update batch needs it to pack many region uploads into one staging buffer correctly).
+        internal ulong OptimalBufferCopyOffsetAlignment => physicalDeviceProperties.limits.optimalBufferCopyOffsetAlignment;
+
+        // Internal accessors for VkTextureUpdateBatch: the batch lives in the same assembly so it goes straight
+        // through the existing private helpers rather than duplicating the staging-buffer / shared-command-pool
+        // bookkeeping. RentStagingBuffer / ReturnUnusedStagingBuffer mirror getFreeStagingBuffer plus the
+        // size-bounded recycle from completeFenceSubmission.
+        internal SharedCommandPool GetFreeCommandPool() => getFreeCommandPool();
+
+        internal VkBuffer RentStagingBuffer(uint size) => getFreeStagingBuffer(size);
+
+        internal void ReturnUnusedStagingBuffer(VkBuffer buffer)
+        {
+            if (buffer.SizeInBytes <= maxStagingBufferSize)
+                lock (stagingResourcesLock) availableStagingBuffers.Add(buffer);
+            else
+                buffer.Dispose();
+        }
+
+        internal void RegisterSubmittedStagingBuffer(VkCommandBuffer cb, VkBuffer buffer)
+        {
+            lock (stagingResourcesLock) submittedStagingBuffers.Add(cb, buffer);
+        }
+
+        internal void ReturnTextureUpdateBatch(VkTextureUpdateBatch batch)
+        {
+            lock (stagingResourcesLock) textureUpdateBatchPool.Push(batch);
+        }
+
+        public override TextureUpdateBatch BeginTextureUpdateBatch()
+        {
+            VkTextureUpdateBatch batch = null;
+            lock (stagingResourcesLock)
+            {
+                if (textureUpdateBatchPool.Count > 0) batch = textureUpdateBatchPool.Pop();
+            }
+
+            if (batch == null) return new VkTextureUpdateBatch(this);
+
+            batch.Reopen();
+            return batch;
+        }
 
         private readonly Lock submittedFencesLock = new Lock();
         private readonly ConcurrentQueue<Vulkan.VkFence> availableSubmissionFences = new ConcurrentQueue<Vulkan.VkFence>();
@@ -189,6 +247,10 @@ namespace Veldrid.Vk
 
         public VkGraphicsDevice(GraphicsDeviceOptions options, SwapchainDescription? scDesc, VulkanDeviceOptions vkOptions)
         {
+            minStagingBufferSize = vkOptions.MinStagingBufferSize ?? default_min_staging_buffer_size;
+            maxStagingBufferSize = vkOptions.MaxStagingBufferSize ?? default_max_staging_buffer_size;
+            if (maxStagingBufferSize < minStagingBufferSize) maxStagingBufferSize = minStagingBufferSize;
+
             createInstance(options.Debug, vkOptions);
 
             var surface = VkSurfaceKHR.Null;
@@ -794,7 +856,7 @@ namespace Veldrid.Vk
 
                 if (submittedStagingBuffers.Remove(completedCb, out var stagingBuffer))
                 {
-                    if (stagingBuffer.SizeInBytes <= max_staging_buffer_size)
+                    if (stagingBuffer.SizeInBytes <= maxStagingBufferSize)
                         availableStagingBuffers.Add(stagingBuffer);
                     else
                         stagingBuffer.Dispose();
@@ -1631,7 +1693,7 @@ namespace Veldrid.Vk
                 }
             }
 
-            uint newBufferSize = Math.Max(min_staging_buffer_size, size);
+            uint newBufferSize = Math.Max(minStagingBufferSize, size);
             var newBuffer = (VkBuffer)ResourceFactory.CreateBuffer(
                 new BufferDescription(newBufferSize, BufferUsage.Staging));
             return newBuffer;
@@ -1932,7 +1994,7 @@ namespace Veldrid.Vk
             VulkanUtil.CheckResult(tResult);
         }
 
-        private class SharedCommandPool
+        internal class SharedCommandPool
         {
             public bool IsCached { get; }
             private readonly VkGraphicsDevice gd;

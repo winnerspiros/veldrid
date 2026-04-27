@@ -29,6 +29,24 @@
         public byte[] PipelineCacheData;
 
         /// <summary>
+        ///     Optional override for the minimum size, in bytes, of buffers in the host-visible staging-buffer pool
+        ///     used by <see cref="GraphicsDevice.UpdateBuffer" /> and the texture-upload paths. Any newly allocated
+        ///     pooled staging buffer will be at least this large. Larger values reduce per-frame allocator churn at
+        ///     the cost of a higher floor on host-visible memory consumption. Pass <c>null</c> to use the backend
+        ///     default (64 KiB).
+        /// </summary>
+        public uint? MinStagingBufferSize;
+
+        /// <summary>
+        ///     Optional override for the maximum size, in bytes, that a returned staging buffer may have and still
+        ///     be recycled into the pool (rather than disposed) when its submission completes. Larger values keep
+        ///     bigger buffers available for reuse — important for workloads that upload many large textures per
+        ///     frame, such as font glyph atlases or sprite-sheet streaming — but hold onto more host-visible memory
+        ///     long-term. Pass <c>null</c> to use the backend default (4 MiB).
+        /// </summary>
+        public uint? MaxStagingBufferSize;
+
+        /// <summary>
         ///     Constructs a new VulkanDeviceOptions.
         /// </summary>
         /// <param name="instanceExtensions">
