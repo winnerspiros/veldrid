@@ -167,14 +167,23 @@ namespace Veldrid.Vk
                 System.Threading.Thread.Sleep(initial_create_retry_delay_ms);
             }
             if (!created)
+            {
+                // The swapchain never came up; clean up everything we constructed
+                // before throwing so we don't leak the surface/framebuffer/old chain.
+                framebuffer.Dispose();
+                if (deviceSwapchain != VkSwapchainKHR.Null)
+                    vkDestroySwapchainKHR(this.gd.Device, deviceSwapchain, null);
+                if (surface != VkSurfaceKHR.Null)
+                    vkDestroySurfaceKHR(this.gd.Instance, surface, null);
                 throw new VeldridException("The Vulkan surface was not ready in time; cannot create a swapchain.");
+            }
 
             var fenceCi = VkFenceCreateInfo.New();
             fenceCi.flags = VkFenceCreateFlags.None;
             vkCreateFence(this.gd.Device, ref fenceCi, null, out imageAvailableFence);
 
             if (AcquireNextImage(this.gd.Device, VkSemaphore.Null, imageAvailableFence))
-                waitAndResetImageAvailableFence();
+                WaitAndResetImageAvailableFence();
 
             RefCount = new ResourceRefCount(disposeCore);
         }
@@ -289,8 +298,6 @@ namespace Veldrid.Vk
             needsRecreation = true;
         }
 
-        private void waitAndResetImageAvailableFence() => WaitAndResetImageAvailableFence();
-
         // Replaces imageAvailableFence with a fresh, unsignaled fence. Safe to call
         // even when the original may still have an in-flight signal pending: the old
         // fence handle is destroyed, and the spec only forbids destruction while in
@@ -327,7 +334,7 @@ namespace Veldrid.Vk
             }
 
             if (AcquireNextImage(gd.Device, VkSemaphore.Null, imageAvailableFence))
-                waitAndResetImageAvailableFence();
+                WaitAndResetImageAvailableFence();
         }
 
         // Wraps createSwapchain with surface-lost recovery. If the surface has died,
