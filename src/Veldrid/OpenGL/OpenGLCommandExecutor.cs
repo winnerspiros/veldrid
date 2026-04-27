@@ -80,6 +80,30 @@ namespace Veldrid.OpenGL
 
         public void ClearColorTarget(uint index, RgbaFloat clearColor)
         {
+            // Fast path: glClearBufferfv (GL 3.0+ / GLES 3.0+) targets exactly one attachment without
+            // touching draw-buffer state, so we skip the glDrawBuffers(1)+glClear(COLOR)+glDrawBuffers(N)
+            // dance the legacy fallback below has to perform.
+            if (extensions.ClearBufferIndividual)
+            {
+                bool restoreScissor = graphicsPipeline != null && graphicsPipeline.RasterizerState.ScissorTestEnabled;
+                if (restoreScissor)
+                {
+                    glDisable(EnableCap.ScissorTest);
+                    CheckLastError();
+                }
+
+                float* color = stackalloc float[4] { clearColor.R, clearColor.G, clearColor.B, clearColor.A };
+                glClearBufferfv(ClearBuffer.Color, (int)index, color);
+                CheckLastError();
+
+                if (restoreScissor)
+                {
+                    glEnable(EnableCap.ScissorTest);
+                    CheckLastError();
+                }
+                return;
+            }
+
             if (!isSwapchainFb)
             {
                 var bufs = (DrawBuffersEnum)((uint)DrawBuffersEnum.ColorAttachment0 + index);
@@ -87,8 +111,8 @@ namespace Veldrid.OpenGL
                 CheckLastError();
             }
 
-            var color = clearColor;
-            glClearColor(color.R, color.G, color.B, color.A);
+            var color2 = clearColor;
+            glClearColor(color2.R, color2.G, color2.B, color2.A);
             CheckLastError();
 
             if (graphicsPipeline != null && graphicsPipeline.RasterizerState.ScissorTestEnabled)
@@ -118,6 +142,52 @@ namespace Veldrid.OpenGL
 
         public void ClearDepthStencil(float depth, byte stencil)
         {
+            // Fast path: glClearBufferfi (GL 3.0+ / GLES 3.0+) clears combined depth+stencil in one call,
+            // and unlike glClear honours its own value arguments, so we don't have to round-trip through
+            // glClearDepth+glClearStencil global state.
+            if (extensions.ClearBufferIndividual)
+            {
+                bool restoreDepthMask = graphicsPipeline != null && !graphicsPipeline.DepthStencilState.DepthWriteEnabled;
+                bool restoreStencilMask = graphicsPipeline != null && graphicsPipeline.DepthStencilState.StencilWriteMask != 0xFF;
+                bool restoreScissor = graphicsPipeline != null && graphicsPipeline.RasterizerState.ScissorTestEnabled;
+
+                if (restoreDepthMask)
+                {
+                    glDepthMask(true);
+                    CheckLastError();
+                }
+                if (restoreStencilMask)
+                {
+                    glStencilMask(0xFF);
+                    CheckLastError();
+                }
+                if (restoreScissor)
+                {
+                    glDisable(EnableCap.ScissorTest);
+                    CheckLastError();
+                }
+
+                glClearBufferfi(ClearBuffer.DepthStencil, 0, depth, stencil);
+                CheckLastError();
+
+                if (restoreDepthMask)
+                {
+                    glDepthMask(false);
+                    CheckLastError();
+                }
+                if (restoreStencilMask)
+                {
+                    glStencilMask(graphicsPipeline.DepthStencilState.StencilWriteMask);
+                    CheckLastError();
+                }
+                if (restoreScissor)
+                {
+                    glEnable(EnableCap.ScissorTest);
+                    CheckLastError();
+                }
+                return;
+            }
+
             if (graphicsPipeline != null)
             {
                 if (!graphicsPipeline.DepthStencilState.DepthWriteEnabled)

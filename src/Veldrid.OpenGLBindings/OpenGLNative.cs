@@ -50,6 +50,22 @@ namespace Veldrid.OpenGLBindings
         private static glClear_t p_glClear;
         public static void glClear(ClearBufferMask mask) => p_glClear(mask);
 
+        // glClearBufferfv (GL 3.0+ / GLES 3.0+) clears a single color attachment without touching
+        // the draw-buffer state, replacing the glDrawBuffers(1)+glClear(COLOR_BUFFER_BIT)+glDrawBuffers(N)
+        // dance in OpenGLCommandExecutor.ClearColorTarget.
+        [UnmanagedFunctionPointer(CallConv)]
+        private delegate void glClearBufferfv_t(ClearBuffer buffer, int drawBuffer, float* value);
+        private static glClearBufferfv_t p_glClearBufferfv;
+        public static void glClearBufferfv(ClearBuffer buffer, int drawBuffer, float* value)
+            => p_glClearBufferfv(buffer, drawBuffer, value);
+
+        // glClearBufferfi (GL 3.0+ / GLES 3.0+) clears combined depth+stencil in one call.
+        [UnmanagedFunctionPointer(CallConv)]
+        private delegate void glClearBufferfi_t(ClearBuffer buffer, int drawBuffer, float depth, int stencil);
+        private static glClearBufferfi_t p_glClearBufferfi;
+        public static void glClearBufferfi(ClearBuffer buffer, int drawBuffer, float depth, int stencil)
+            => p_glClearBufferfi(buffer, drawBuffer, depth, stencil);
+
         [UnmanagedFunctionPointer(CallConv)]
         private delegate void glClearDepth_t(double depth);
         private static glClearDepth_t p_glClearDepth;
@@ -1776,6 +1792,8 @@ namespace Veldrid.OpenGLBindings
             LoadFunction("glDrawBuffer", out p_glDrawBuffer);
             LoadFunction("glDrawBuffers", out p_glDrawBuffers);
             LoadFunction("glClear", out p_glClear);
+            LoadFunction("glClearBufferfv", out p_glClearBufferfv);
+            LoadFunction("glClearBufferfi", out p_glClearBufferfi);
             LoadFunction("glClearDepth", out p_glClearDepth);
             LoadFunction("glClearDepthf", out p_glClearDepthf);
             if (p_glClearDepthf != null) { p_glClearDepthf_Compat = p_glClearDepthf; }

@@ -693,6 +693,19 @@ namespace Veldrid
         }
 
         /// <summary>
+        ///     Begins a new <see cref="BufferUpdateBatch" /> that coalesces many small
+        ///     <see cref="UpdateBuffer(DeviceBuffer, uint, IntPtr, uint)" /> calls into a single staging-buffer
+        ///     copy and a single queue submission per <see cref="BufferUpdateBatch.Submit" />. The Vulkan
+        ///     backend overrides this; other backends fall back to a default implementation that forwards
+        ///     each <c>Add</c> straight to <c>UpdateBuffer</c>. See <see cref="BeginTextureUpdateBatch" />
+        ///     for thread-safety / lifetime guidance — the same conventions apply.
+        /// </summary>
+        public virtual BufferUpdateBatch BeginBufferUpdateBatch()
+        {
+            return DefaultBufferUpdateBatch.Acquire(this);
+        }
+
+        /// <summary>
         ///     Default <see cref="TextureUpdateBatch" /> implementation used by every backend that does not override
         ///     <see cref="BeginTextureUpdateBatch" />. Each <c>Add</c> is forwarded straight to <c>UpdateTextureCore</c>,
         ///     so the call still completes synchronously; <c>Submit</c> is a no-op. This keeps the public API portable
@@ -722,6 +735,37 @@ namespace Veldrid
             {
                 CheckOpen();
                 gd.UpdateTexture(texture, source, sizeInBytes, x, y, z, width, height, depth, mipLevel, arrayLayer);
+            }
+
+            public override void Submit() => CheckOpen();
+
+            protected override void ReleaseToPool()
+            {
+                gd = null;
+                lock (s_pool_lock) s_pool.Push(this);
+            }
+        }
+
+        private sealed class DefaultBufferUpdateBatch : BufferUpdateBatch
+        {
+            private static readonly Stack<DefaultBufferUpdateBatch> s_pool = new Stack<DefaultBufferUpdateBatch>();
+            private static readonly object s_pool_lock = new object();
+
+            private GraphicsDevice gd;
+
+            public static DefaultBufferUpdateBatch Acquire(GraphicsDevice device)
+            {
+                DefaultBufferUpdateBatch batch;
+                lock (s_pool_lock) batch = s_pool.Count > 0 ? s_pool.Pop() : new DefaultBufferUpdateBatch();
+                batch.gd = device;
+                batch.MarkOpen();
+                return batch;
+            }
+
+            public override void Add(DeviceBuffer buffer, uint bufferOffsetInBytes, IntPtr source, uint sizeInBytes)
+            {
+                CheckOpen();
+                gd.UpdateBuffer(buffer, bufferOffsetInBytes, source, sizeInBytes);
             }
 
             public override void Submit() => CheckOpen();

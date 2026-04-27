@@ -162,6 +162,9 @@ namespace Veldrid.Vk
         // BeginTextureUpdateBatch / using-block usage allocates no managed garbage after warmup.
         private readonly Stack<VkTextureUpdateBatch> textureUpdateBatchPool = new Stack<VkTextureUpdateBatch>();
 
+        // Free-list of VkBufferUpdateBatch instances; same pooling rationale as textureUpdateBatchPool.
+        private readonly Stack<VkBufferUpdateBatch> bufferUpdateBatchPool = new Stack<VkBufferUpdateBatch>();
+
         // Exposes the optimal alignment for vkCmdCopyBufferToImage's bufferOffset to internal callers (the
         // texture-update batch needs it to pack many region uploads into one staging buffer correctly).
         internal ulong OptimalBufferCopyOffsetAlignment => physicalDeviceProperties.limits.optimalBufferCopyOffsetAlignment;
@@ -192,6 +195,11 @@ namespace Veldrid.Vk
             lock (stagingResourcesLock) textureUpdateBatchPool.Push(batch);
         }
 
+        internal void ReturnBufferUpdateBatch(VkBufferUpdateBatch batch)
+        {
+            lock (stagingResourcesLock) bufferUpdateBatchPool.Push(batch);
+        }
+
         public override TextureUpdateBatch BeginTextureUpdateBatch()
         {
             VkTextureUpdateBatch batch = null;
@@ -201,6 +209,20 @@ namespace Veldrid.Vk
             }
 
             if (batch == null) return new VkTextureUpdateBatch(this);
+
+            batch.Reopen();
+            return batch;
+        }
+
+        public override BufferUpdateBatch BeginBufferUpdateBatch()
+        {
+            VkBufferUpdateBatch batch = null;
+            lock (stagingResourcesLock)
+            {
+                if (bufferUpdateBatchPool.Count > 0) batch = bufferUpdateBatchPool.Pop();
+            }
+
+            if (batch == null) return new VkBufferUpdateBatch(this);
 
             batch.Reopen();
             return batch;
