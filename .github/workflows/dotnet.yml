@@ -58,7 +58,7 @@ jobs:
     - name: Build Packages
       run: dotnet pack src -c Release
     - name: Upload package artifacts
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: nupkgs-${{ github.run_id }}-${{ github.sha }}
         path: bin\Packages\Release\ppy.*.nupkg

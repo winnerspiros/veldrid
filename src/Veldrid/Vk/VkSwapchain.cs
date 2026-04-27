@@ -364,12 +364,19 @@ namespace Veldrid.Vk
         {
             if (syncToVBlank)
             {
-                // Prefer MAILBOX over FIFO_RELAXED when vsync is requested: both avoid tearing
-                // under steady state, but MAILBOX replaces the queued frame instead of queueing it,
-                // cutting one full frame of input-to-photon latency. This is the canonical
-                // "low-latency vsync" choice on Android tilers.
-                if (Array.IndexOf(presentModes, VkPresentModeKHR.MailboxKHR) >= 0)
-                    return VkPresentModeKHR.MailboxKHR;
+                // Under vsync, prefer FIFO_RELAXED → FIFO. We deliberately do *not* prefer
+                // MAILBOX here, even though it would shave one frame of input-to-photon latency:
+                //   - On Qualcomm Adreno (notably 7xx-series) drivers MAILBOX has been observed
+                //     to stall vkAcquireNextImageKHR / vkQueuePresentKHR indefinitely under
+                //     heavy submission pressure (e.g. texture-upload bursts), producing ANR-style
+                //     black screens.
+                //   - MAILBOX requires an extra in-flight image (~33% more swapchain memory) and
+                //     an extra compositor round-trip; on tile-based mobile GPUs that translates
+                //     to back-pressure rather than reduced latency.
+                //   - Khronos guidance, Google's Android Vulkan samples, and ANGLE all default
+                //     to FIFO on Android.
+                // FIFO_RELAXED gives the lowest-latency tear-free option that's broadly safe;
+                // FIFO is mandatory per spec and is the universal fallback.
                 if (Array.IndexOf(presentModes, VkPresentModeKHR.FifoRelaxedKHR) >= 0)
                     return VkPresentModeKHR.FifoRelaxedKHR;
                 return VkPresentModeKHR.FifoKHR;
