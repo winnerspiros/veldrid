@@ -1168,10 +1168,10 @@ namespace Veldrid.Vk
 
             int i = 0;
 
-            foreach (uint _ in familyIndices)
+            foreach (uint queueFamilyIndex in familyIndices)
             {
                 var queueCreateInfo = VkDeviceQueueCreateInfo.New();
-                queueCreateInfo.queueFamilyIndex = GraphicsQueueIndex;
+                queueCreateInfo.queueFamilyIndex = queueFamilyIndex;
                 queueCreateInfo.queueCount = 1;
                 float priority = 1f;
                 queueCreateInfo.pQueuePriorities = &priority;
