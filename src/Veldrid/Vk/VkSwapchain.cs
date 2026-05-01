@@ -730,6 +730,20 @@ namespace Veldrid.Vk
 
             if (allowTearing && Array.IndexOf(presentModes, VkPresentModeKHR.ImmediateKHR) >= 0)
                 return VkPresentModeKHR.ImmediateKHR; // Lowest latency; tearing is acceptable.
+
+            // On Android, avoid MAILBOX even in non-vsync mode: Adreno (7xx-series) drivers
+            // stall vkAcquireNextImageKHR / vkQueuePresentKHR indefinitely under heavy
+            // submission pressure (texture-upload bursts, first-frame pipeline compilation)
+            // regardless of the syncToVBlank setting, producing ANR-style black screens.
+            // FIFO_RELAXED provides reduced-latency non-vsync behaviour without that risk;
+            // FIFO is the mandatory-per-spec universal fallback.
+            if (OperatingSystem.IsAndroid())
+            {
+                if (Array.IndexOf(presentModes, VkPresentModeKHR.FifoRelaxedKHR) >= 0)
+                    return VkPresentModeKHR.FifoRelaxedKHR;
+                return VkPresentModeKHR.FifoKHR;
+            }
+
             if (Array.IndexOf(presentModes, VkPresentModeKHR.MailboxKHR) >= 0)
                 return VkPresentModeKHR.MailboxKHR; // Low latency without tearing.
             if (Array.IndexOf(presentModes, VkPresentModeKHR.ImmediateKHR) >= 0)
