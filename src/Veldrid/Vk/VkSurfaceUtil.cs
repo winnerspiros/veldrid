@@ -143,9 +143,14 @@ namespace Veldrid.Vk
 
             try
             {
-                // Pre-configure buffer geometry to reduce driver overhead during swapchain creation.
-                // Passing 0 for width/height lets the native window decide, while format 1 = WINDOW_FORMAT_RGBA_8888.
-                AndroidRuntime.ANativeWindow_setBuffersGeometry(aNativeWindow, 0, 0, 1);
+                // Do NOT call ANativeWindow_setBuffersGeometry here.
+                // For Vulkan, the WSI driver negotiates the native window format through
+                // VkSurfaceFormatKHR / swapchain creation. Pre-configuring the buffer format
+                // to RGBA_8888 (format=1) can conflict with the compositor-negotiated format
+                // (e.g. RGB_565 on Adreno) and produce a permanently black, non-composited
+                // swapchain without surfacing a Vulkan error.
+                // EGL/OpenGL correctly uses ANativeWindow_setBuffersGeometry with EGL_NATIVE_VISUAL_ID
+                // (see OpenGLGraphicsDevice.initializeANativeWindow); that path is unchanged.
 
                 var androidSurfaceCi = VkAndroidSurfaceCreateInfoKHR.New();
                 androidSurfaceCi.window = (ANativeWindow*)aNativeWindow;
