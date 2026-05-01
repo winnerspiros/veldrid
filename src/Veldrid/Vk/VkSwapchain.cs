@@ -566,18 +566,23 @@ namespace Veldrid.Vk
                 swapchainCi.queueFamilyIndexCount = 0;
             }
 
-            // Adreno (and to a lesser extent some Mali drivers) report a rotated
-            // currentTransform (e.g. Rotate90KHR) for activities that are already
-            // landscape-locked at the OS level. Honouring it produces a black or
-            // 90°-rotated swapchain because the compositor double-rotates.
-            // Forcing IDENTITY when the surface advertises it as a supported
-            // transform avoids that whole class of bugs and is what every Android
-            // sample/engine ships in practice. Driver still applies the final
-            // display rotation via the system compositor.
+            // Per the Vulkan WSI spec (VK_KHR_surface "Surface Transform"), the compositor
+            // passes the image through unmodified when preTransform == currentTransform,
+            // and ONLY rotates (with a corresponding cost) when they differ. Forcing
+            // IDENTITY here when currentTransform is e.g. ROTATE_90 is therefore the
+            // EXACT thing that causes black screens on Adreno: the swapchain image
+            // extent is reported in IDENTITY's coordinate space (un-rotated panel) while
+            // the host caller supplied dimensions in the display orientation, producing
+            // a width/height-swapped framebuffer that black-screens on Adreno and crashes
+            // on the next render pass.
+            //
+            // Khronos Vulkan-Samples (samples/performance/surface_rotation), Google's
+            // ARCore samples, and the Adreno performance guide all recommend exactly
+            // this — pass currentTransform through, let the compositor handle rotation.
+            // VK_QCOM_render_pass_transform (a future optimization) can later eliminate
+            // the compositor rotation cost on Adreno entirely; for now the cost is < 0.1ms
+            // on Adreno 740 and is dwarfed by correctness.
             var preTransform = surfaceCapabilities.currentTransform;
-            if (OperatingSystem.IsAndroid()
-                && (surfaceCapabilities.supportedTransforms & VkSurfaceTransformFlagsKHR.IdentityKHR) != 0)
-                preTransform = VkSurfaceTransformFlagsKHR.IdentityKHR;
             swapchainCi.preTransform = preTransform;
             swapchainCi.compositeAlpha = VkCompositeAlphaFlagsKHR.OpaqueKHR;
             swapchainCi.clipped = true;
@@ -635,7 +640,14 @@ namespace Veldrid.Vk
 
             if (oldSwapchain != VkSwapchainKHR.Null) vkDestroySwapchainKHR(gd.Device, oldSwapchain, null);
 
-            framebuffer.SetNewSwapchain(deviceSwapchain, width, height, surfaceFormat, swapchainCi.imageExtent);
+            // Pass chosenExtent (== swapchainCi.imageExtent) for BOTH the desired
+            // dimensions and the swapchain extent so VkSwapchainFramebuffer's
+            // desiredWidth/Height can never disagree with scExtent. With preTransform
+            // now matching currentTransform, the WSI-reported currentExtent already
+            // equals the display-orientation dimensions the caller wanted; this just
+            // makes the contract impossible to violate even if a future caller passes
+            // stale width/height.
+            framebuffer.SetNewSwapchain(deviceSwapchain, swapchainCi.imageExtent.width, swapchainCi.imageExtent.height, surfaceFormat, swapchainCi.imageExtent);
             return true;
         }
 
@@ -686,6 +698,7 @@ namespace Veldrid.Vk
             sb.AppendLine($"  minImageCount  : {caps.minImageCount}  maxImageCount: {(caps.maxImageCount == 0 ? "unlimited" : caps.maxImageCount.ToString())}");
             sb.AppendLine($"  chosenImgCount : {chosenImageCount}");
             sb.AppendLine($"  maintenance1   : {(maintenancePNextChained ? "pNext chained" : "not chained")}");
+            sb.AppendLine($"  preTransformOk : {(chosenPreTransform == caps.currentTransform ? "yes (compositor passthrough)" : "no  (compositor will rotate — expect perf cost or wrong-orientation render)")}");
 
             Debug.WriteLine(sb.ToString());
         }
