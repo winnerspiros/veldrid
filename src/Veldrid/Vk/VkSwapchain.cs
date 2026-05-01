@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using Vulkan;
 using static Vulkan.VulkanNative;
 using static Veldrid.Vk.VulkanUtil;
@@ -523,9 +524,30 @@ namespace Veldrid.Vk
             swapchainCi.presentMode = presentMode;
             swapchainCi.imageFormat = surfaceFormat.format;
             swapchainCi.imageColorSpace = surfaceFormat.colorSpace;
-            uint clampedWidth = Util.Clamp(width, surfaceCapabilities.minImageExtent.width, surfaceCapabilities.maxImageExtent.width);
-            uint clampedHeight = Util.Clamp(height, surfaceCapabilities.minImageExtent.height, surfaceCapabilities.maxImageExtent.height);
-            swapchainCi.imageExtent = new VkExtent2D { width = clampedWidth, height = clampedHeight };
+
+            // The Vulkan spec defines currentExtent == (uint.MaxValue, uint.MaxValue) as the
+            // sentinel meaning "the surface has no fixed size; use your preferred extent".
+            // On Android (and most fixed-output surfaces) currentExtent holds the true pixel
+            // dimensions; we MUST use them exactly. Clamping a caller-supplied width/height
+            // against min/max when currentExtent is fixed produces the wrong extent and gives
+            // a permanently black swapchain without surfacing a Vulkan error.
+            VkExtent2D chosenExtent;
+            if (surfaceCapabilities.currentExtent.width != uint.MaxValue)
+            {
+                // Fixed (Android / display-output) surface: use currentExtent directly.
+                chosenExtent = surfaceCapabilities.currentExtent;
+            }
+            else
+            {
+                // Variable-size surface (most desktop platforms): clamp requested extent.
+                chosenExtent = new VkExtent2D
+                {
+                    width = Util.Clamp(width, surfaceCapabilities.minImageExtent.width, surfaceCapabilities.maxImageExtent.width),
+                    height = Util.Clamp(height, surfaceCapabilities.minImageExtent.height, surfaceCapabilities.maxImageExtent.height)
+                };
+            }
+
+            swapchainCi.imageExtent = chosenExtent;
             swapchainCi.minImageCount = imageCount;
             swapchainCi.imageArrayLayers = 1;
             swapchainCi.imageUsage = VkImageUsageFlags.ColorAttachment | VkImageUsageFlags.TransferDst;
@@ -563,6 +585,31 @@ namespace Veldrid.Vk
             var oldSwapchain = deviceSwapchain;
             swapchainCi.oldSwapchain = oldSwapchain;
 
+            // Diagnostic log: emit once per (re)create so runtime logs show exactly what
+            // the Vulkan WSI negotiated. Uses Debug.WriteLine so output appears in Android
+            // logcat (via the mono/.NET Android runtime) and in attached debuggers on all
+            // platforms. Gated to DEBUG builds on non-Android to keep release builds quiet.
+#if DEBUG
+            logSwapchainDiagnostics(
+                width, height,
+                surfaceCapabilities,
+                formats, surfaceFormat,
+                presentModes, presentMode,
+                preTransform,
+                imageCount,
+                compatiblePresentModes != null && compatiblePresentModes.Length > 1);
+#else
+            if (OperatingSystem.IsAndroid())
+                logSwapchainDiagnostics(
+                    width, height,
+                    surfaceCapabilities,
+                    formats, surfaceFormat,
+                    presentModes, presentMode,
+                    preTransform,
+                    imageCount,
+                    compatiblePresentModes != null && compatiblePresentModes.Length > 1);
+#endif
+
             // Pin compatible present modes for the duration of vkCreateSwapchainKHR. The
             // spec is explicit: pPresentModes must be valid only during the create call.
             fixed (VkPresentModeKHR* compatibleModesPtr = compatiblePresentModes)
@@ -590,6 +637,57 @@ namespace Veldrid.Vk
 
             framebuffer.SetNewSwapchain(deviceSwapchain, width, height, surfaceFormat, swapchainCi.imageExtent);
             return true;
+        }
+
+        // Logs the key WSI negotiation decisions to Debug output (logcat on Android).
+        // Called once per swapchain (re)create so runtime logs show the exact state
+        // rather than requiring a repro to attach a Vulkan validation layer.
+        private static void logSwapchainDiagnostics(
+            uint requestedWidth,
+            uint requestedHeight,
+            VkSurfaceCapabilitiesKHR caps,
+            VkSurfaceFormatKHR[] availableFormats,
+            VkSurfaceFormatKHR chosenFormat,
+            VkPresentModeKHR[] availablePresentModes,
+            VkPresentModeKHR chosenPresentMode,
+            VkSurfaceTransformFlagsKHR chosenPreTransform,
+            uint chosenImageCount,
+            bool maintenancePNextChained)
+        {
+            bool fixedExtent = caps.currentExtent.width != uint.MaxValue;
+            var chosen = fixedExtent ? caps.currentExtent
+                : new VkExtent2D
+                {
+                    width = Util.Clamp(requestedWidth, caps.minImageExtent.width, caps.maxImageExtent.width),
+                    height = Util.Clamp(requestedHeight, caps.minImageExtent.height, caps.maxImageExtent.height)
+                };
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("[Veldrid/VkSwapchain] createSwapchain diagnostics:");
+            sb.AppendLine($"  requested      : {requestedWidth}x{requestedHeight}");
+            sb.AppendLine($"  currentExtent  : {(fixedExtent ? $"{caps.currentExtent.width}x{caps.currentExtent.height} (fixed)" : "variable (sentinel)")}");
+            sb.AppendLine($"  minExtent      : {caps.minImageExtent.width}x{caps.minImageExtent.height}");
+            sb.AppendLine($"  maxExtent      : {caps.maxImageExtent.width}x{caps.maxImageExtent.height}");
+            sb.AppendLine($"  chosenExtent   : {chosen.width}x{chosen.height}");
+            sb.AppendLine($"  surfaceFormat  : {chosenFormat.format} / {chosenFormat.colorSpace}");
+            sb.Append(    $"  availFormats   :");
+            foreach (var f in availableFormats)
+                sb.Append($" {f.format}/{f.colorSpace}");
+            sb.AppendLine();
+            sb.AppendLine($"  presentMode    : {chosenPresentMode}");
+            sb.Append(    $"  availModes     :");
+            foreach (var m in availablePresentModes)
+                sb.Append($" {m}");
+            sb.AppendLine();
+            sb.AppendLine($"  currentXform   : {caps.currentTransform}");
+            sb.AppendLine($"  supportedXform : {caps.supportedTransforms}");
+            sb.AppendLine($"  chosenPreXform : {chosenPreTransform}");
+            sb.AppendLine($"  compositeAlpha : OpaqueKHR");
+            sb.AppendLine($"  minImageCount  : {caps.minImageCount}  maxImageCount: {(caps.maxImageCount == 0 ? "unlimited" : caps.maxImageCount.ToString())}");
+            sb.AppendLine($"  chosenImgCount : {chosenImageCount}");
+            sb.AppendLine($"  maintenance1   : {(maintenancePNextChained ? "pNext chained" : "not chained")}");
+
+            Debug.WriteLine(sb.ToString());
         }
 
         // Pure helper: maps (sync, tearing, available modes) → chosen VkPresentModeKHR.
