@@ -1351,6 +1351,7 @@ namespace Veldrid.Vk
             VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT swapchainMaintenance1Features;
             VkPhysicalDeviceSynchronization2Features synchronization2Features;
             VkPhysicalDeviceTimelineSemaphoreFeatures timelineSemaphoreFeatures;
+            VkPhysicalDeviceFragmentShadingRateFeaturesKHR fragmentShadingRateFeatures;
 
             if (hasDynamicRendering)
             {
@@ -1390,6 +1391,18 @@ namespace Veldrid.Vk
                 timelineSemaphoreFeatures.timelineSemaphore = true;
                 timelineSemaphoreFeatures.pNext = deviceCreateInfo.pNext;
                 deviceCreateInfo.pNext = &timelineSemaphoreFeatures;
+            }
+
+            // VK_KHR_fragment_shading_rate: explicitly request pipelineFragmentShadingRate.
+            // Without this pNext chain entry some Android drivers (e.g. Adreno) return a
+            // non-null but broken vkCmdSetFragmentShadingRateKHR stub that crashes on call
+            // (pc = 0x0, SIGSEGV on the draw thread).
+            if (hasFragmentShadingRate)
+            {
+                fragmentShadingRateFeatures = VkPhysicalDeviceFragmentShadingRateFeaturesKHR.New();
+                fragmentShadingRateFeatures.pipelineFragmentShadingRate = true;
+                fragmentShadingRateFeatures.pNext = deviceCreateInfo.pNext;
+                deviceCreateInfo.pNext = &fragmentShadingRateFeatures;
             }
 
             var layerNames = new StackList<IntPtr>();
