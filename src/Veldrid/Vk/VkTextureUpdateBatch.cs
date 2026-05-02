@@ -9,9 +9,11 @@ namespace Veldrid.Vk
 {
     /// <summary>
     ///     Vulkan implementation of <see cref="TextureUpdateBatch" />: stages every pending region into a single
-    ///     growable host-visible buffer, then on <see cref="Submit" /> records one command buffer that performs
-    ///     all the buffer→image copies and ends with a single <c>vkQueueSubmit</c>. Replaces the per-call
-    ///     <c>vkQueueSubmit</c> storm in <see cref="VkGraphicsDevice.UpdateTextureCore" /> for callers that opt in.
+    ///     growable host-visible buffer, then on <see cref="Submit" /> issues the buffer→image copies in sequential
+    ///     <c>vkQueueSubmit</c> calls capped at <c>MaxCopiesPerSubmit</c> copies each. Submitting very large batches
+    ///     in one call can stall the calling thread for several seconds on some drivers, so the work is split across
+    ///     multiple submissions while still collapsing the per-call <c>vkQueueSubmit</c> storm in
+    ///     <see cref="VkGraphicsDevice.UpdateTextureCore" /> for callers that opt in.
     ///
     ///     <para>
     ///         The fast paths from <c>UpdateTextureCore</c> (destination is itself a staging texture; or
@@ -119,54 +121,77 @@ namespace Veldrid.Vk
                 touchedSubresources.Add(key, vkTex.GetImageLayout(mipLevel, arrayLayer));
         }
 
+        // Maximum number of texture copies to include in a single vkQueueSubmit. Submitting very large batches
+        // in one call can block the calling thread for several seconds on some drivers (e.g. Adreno 740
+        // driver 512.676.73), causing watchdog timeouts. Splitting into smaller submissions keeps the
+        // GPU pipeline fed while bounding per-submit latency.
+        private const int MaxCopiesPerSubmit = 64;
+
         public override void Submit()
         {
             CheckOpen();
 
             if (pendingCopies.Count == 0) return;
 
-            // Acquire one shared command pool for the whole batch.
-            var pool = gd.GetFreeCommandPool();
-            var cb = pool.BeginNewCommandBuffer();
+            int total = pendingCopies.Count;
 
-            // Transition every touched subresource to TransferDstOptimal. We use the per-subresource transition
-            // helper rather than batching a single vkCmdPipelineBarrier because VkTexture maintains per-subresource
-            // layout state internally; this keeps that state consistent with no-batch UpdateTexture callers.
-            foreach (var kvp in touchedSubresources)
+            // Reuse a single set across chunks to collect unique subresources per chunk without re-allocating.
+            var chunkSubresources = new HashSet<SubresourceKey>();
+
+            for (int start = 0; start < total; start += MaxCopiesPerSubmit)
             {
-                var key = kvp.Key;
-                key.Texture.TransitionImageLayout(cb, key.MipLevel, 1, key.ArrayLayer, 1, VkImageLayout.TransferDstOptimal);
-            }
+                int end = Math.Min(start + MaxCopiesPerSubmit, total);
+                bool isLastChunk = end == total;
 
-            // Issue all the buffer→image copies. We don't bother grouping by image because vkCmdCopyBufferToImage
-            // already lets the driver schedule them freely and the per-call overhead of an already-recorded command
-            // buffer is negligible compared to the cost of submission (which is what we're collapsing).
-            foreach (var copy in pendingCopies)
-            {
-                var region = copy.Region;
-                vkCmdCopyBufferToImage(
-                    cb,
-                    stagingBuffer.DeviceBuffer,
-                    copy.Texture.OptimalDeviceImage,
-                    VkImageLayout.TransferDstOptimal,
-                    1,
-                    ref region);
-            }
+                // Collect distinct subresources touched by this chunk.
+                chunkSubresources.Clear();
+                for (int i = start; i < end; i++)
+                {
+                    var c = pendingCopies[i];
+                    chunkSubresources.Add(new SubresourceKey(c.Texture, c.MipLevel, c.ArrayLayer));
+                }
 
-            // Transition every touched subresource back to ShaderReadOnlyOptimal where appropriate, matching the
-            // single-call UpdateTextureCore semantics. Subresources on textures that aren't sampled keep their
-            // TransferDstOptimal layout (the existing code path does the same).
-            foreach (var kvp in touchedSubresources)
-            {
-                var key = kvp.Key;
-                if ((key.Texture.Usage & TextureUsage.Sampled) != 0)
-                    key.Texture.TransitionImageLayout(cb, key.MipLevel, 1, key.ArrayLayer, 1, VkImageLayout.ShaderReadOnlyOptimal);
-            }
+                var pool = gd.GetFreeCommandPool();
+                var cb = pool.BeginNewCommandBuffer();
 
-            // Single vkQueueSubmit for the entire batch. Register the staging buffer for fence-completion recycling
-            // via the existing submittedStagingBuffers mechanism; it will return to the pool once the fence signals.
-            pool.EndAndSubmit(cb);
-            gd.RegisterSubmittedStagingBuffer(cb, stagingBuffer);
+                // Transition each subresource in this chunk to TransferDstOptimal. VkTexture maintains
+                // per-subresource layout state internally; TransitionImageLayout reads that state, so
+                // subresources that appear in a later chunk will be transitioned from whatever layout the
+                // previous chunk left them in (ShaderReadOnlyOptimal for sampled, TransferDstOptimal otherwise).
+                foreach (var key in chunkSubresources)
+                    key.Texture.TransitionImageLayout(cb, key.MipLevel, 1, key.ArrayLayer, 1, VkImageLayout.TransferDstOptimal);
+
+                // Issue all buffer→image copies for this chunk.
+                for (int i = start; i < end; i++)
+                {
+                    var copy = pendingCopies[i];
+                    var region = copy.Region;
+                    vkCmdCopyBufferToImage(
+                        cb,
+                        stagingBuffer.DeviceBuffer,
+                        copy.Texture.OptimalDeviceImage,
+                        VkImageLayout.TransferDstOptimal,
+                        1,
+                        ref region);
+                }
+
+                // Transition sampled subresources back to ShaderReadOnlyOptimal, matching the single-call
+                // UpdateTextureCore semantics. Non-sampled subresources stay in TransferDstOptimal.
+                foreach (var key in chunkSubresources)
+                {
+                    if ((key.Texture.Usage & TextureUsage.Sampled) != 0)
+                        key.Texture.TransitionImageLayout(cb, key.MipLevel, 1, key.ArrayLayer, 1, VkImageLayout.ShaderReadOnlyOptimal);
+                }
+
+                pool.EndAndSubmit(cb);
+
+                // Register the staging buffer only with the last command buffer. All chunks share the same
+                // staging buffer (copies reference offsets within it), so it must not be recycled until every
+                // chunk has completed. Vulkan queue ordering guarantees that later submissions on the same
+                // queue complete after earlier ones, so the last fence signals only after all chunks finish.
+                if (isLastChunk)
+                    gd.RegisterSubmittedStagingBuffer(cb, stagingBuffer);
+            }
 
             stagingBuffer = null;
             stagingOffset = 0;
