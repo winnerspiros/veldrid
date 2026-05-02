@@ -566,23 +566,23 @@ namespace Veldrid.Vk
                 swapchainCi.queueFamilyIndexCount = 0;
             }
 
-            // Per the Vulkan WSI spec (VK_KHR_surface "Surface Transform"), the compositor
-            // passes the image through unmodified when preTransform == currentTransform,
-            // and ONLY rotates (with a corresponding cost) when they differ. Forcing
-            // IDENTITY here when currentTransform is e.g. ROTATE_90 is therefore the
-            // EXACT thing that causes black screens on Adreno: the swapchain image
-            // extent is reported in IDENTITY's coordinate space (un-rotated panel) while
-            // the host caller supplied dimensions in the display orientation, producing
-            // a width/height-swapped framebuffer that black-screens on Adreno and crashes
-            // on the next render pass.
+            // Always use IDENTITY preTransform and let the compositor handle surface rotation.
             //
-            // Khronos Vulkan-Samples (samples/performance/surface_rotation), Google's
-            // ARCore samples, and the Adreno performance guide all recommend exactly
-            // this — pass currentTransform through, let the compositor handle rotation.
-            // VK_QCOM_render_pass_transform (a future optimization) can later eliminate
-            // the compositor rotation cost on Adreno entirely; for now the cost is < 0.1ms
-            // on Adreno 740 and is dwarfed by correctness.
-            var preTransform = surfaceCapabilities.currentTransform;
+            // When preTransform == IDENTITY and currentTransform == ROTATE_90, the compositor applies
+            // the 90° rotation before presenting — transparent to the application, ~0.1 ms cost on
+            // Adreno 740, and the only correct approach without a full scene pre-rotation pipeline.
+            //
+            // DO NOT set preTransform = currentTransform without also applying the inverse rotation
+            // matrix to every render pass projection. Without that matrix, setting them equal means
+            // the compositor passes the swapchain image through unmodified, but the hardware display
+            // controller still rotates by currentTransform — producing the 90°-rotated, tiled, or
+            // duplicated display seen on Adreno 740 portrait devices in landscape mode.
+            //
+            // History: PR #18 set preTransform = currentTransform to fix an Adreno black screen.
+            // That black screen was actually caused by MAILBOX stalls (#19), oversized texture-update
+            // batches (#20), the fragment-shading-rate SIGSEGV (#21), and the push-descriptor null
+            // pointer (#22). All four are now fixed; IDENTITY is correct here.
+            var preTransform = VkSurfaceTransformFlagsKHR.IdentityKHR;
             swapchainCi.preTransform = preTransform;
             swapchainCi.compositeAlpha = VkCompositeAlphaFlagsKHR.OpaqueKHR;
             swapchainCi.clipped = true;
@@ -698,7 +698,7 @@ namespace Veldrid.Vk
             sb.AppendLine($"  minImageCount  : {caps.minImageCount}  maxImageCount: {(caps.maxImageCount == 0 ? "unlimited" : caps.maxImageCount.ToString())}");
             sb.AppendLine($"  chosenImgCount : {chosenImageCount}");
             sb.AppendLine($"  maintenance1   : {(maintenancePNextChained ? "pNext chained" : "not chained")}");
-            sb.AppendLine($"  preTransformOk : {(chosenPreTransform == caps.currentTransform ? "yes (compositor passthrough)" : "no  (compositor will rotate — expect perf cost or wrong-orientation render)")}");
+            sb.AppendLine($"  preTransform   : {chosenPreTransform}  (currentTransform={caps.currentTransform}{(chosenPreTransform == VkSurfaceTransformFlagsKHR.IdentityKHR ? ", compositor will rotate — correct for IDENTITY" : ", compositor passthrough — app must pre-rotate scene")})");
 
             Debug.WriteLine(sb.ToString());
         }
