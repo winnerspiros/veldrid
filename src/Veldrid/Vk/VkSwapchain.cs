@@ -643,10 +643,10 @@ namespace Veldrid.Vk
             // Pass chosenExtent (== swapchainCi.imageExtent) for BOTH the desired
             // dimensions and the swapchain extent so VkSwapchainFramebuffer's
             // desiredWidth/Height can never disagree with scExtent. With preTransform
-            // now matching currentTransform, the WSI-reported currentExtent already
-            // equals the display-orientation dimensions the caller wanted; this just
-            // makes the contract impossible to violate even if a future caller passes
-            // stale width/height.
+            // always IDENTITY, the compositor handles any surface rotation; the extent
+            // reflects the caller's requested dimensions directly. This makes the
+            // contract impossible to violate even if a future caller passes stale
+            // width/height.
             framebuffer.SetNewSwapchain(deviceSwapchain, swapchainCi.imageExtent.width, swapchainCi.imageExtent.height, surfaceFormat, swapchainCi.imageExtent);
             return true;
         }
