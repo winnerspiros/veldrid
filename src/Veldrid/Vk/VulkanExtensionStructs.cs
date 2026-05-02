@@ -237,6 +237,29 @@ namespace Veldrid.Vk
         public const uint MUL = 4;
     }
 
+    // VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR = 1000226003
+    // Must be chained in VkDeviceCreateInfo.pNext to actually activate the feature;
+    // without this some Android drivers return a non-null but broken function pointer
+    // for vkCmdSetFragmentShadingRateKHR that jumps to 0x0 (SIGSEGV).
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct VkPhysicalDeviceFragmentShadingRateFeaturesKHR
+    {
+        public const VkStructureType TYPE = (VkStructureType)1000226003;
+
+        public VkStructureType sType;
+        public void* pNext;
+        public VkBool32 pipelineFragmentShadingRate;
+        public VkBool32 primitiveFragmentShadingRate;
+        public VkBool32 attachmentFragmentShadingRate;
+
+        public static VkPhysicalDeviceFragmentShadingRateFeaturesKHR New()
+        {
+            var ret = default(VkPhysicalDeviceFragmentShadingRateFeaturesKHR);
+            ret.sType = TYPE;
+            return ret;
+        }
+    }
+
     internal unsafe delegate void VkCmdSetFragmentShadingRateT(VkCommandBuffer commandBuffer, VkExtent2D* pFragmentSize, uint* combinerOps);
 
     // --- VK_EXT_mesh_shader ---
