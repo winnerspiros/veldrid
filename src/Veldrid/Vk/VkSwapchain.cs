@@ -735,10 +735,16 @@ namespace Veldrid.Vk
             // stall vkAcquireNextImageKHR / vkQueuePresentKHR indefinitely under heavy
             // submission pressure (texture-upload bursts, first-frame pipeline compilation)
             // regardless of the syncToVBlank setting, producing ANR-style black screens.
-            // FIFO_RELAXED provides reduced-latency non-vsync behaviour without that risk;
-            // FIFO is the mandatory-per-spec universal fallback.
+            // When vsync is off, prefer IMMEDIATE for true uncapped rendering: it presents
+            // without waiting for a vblank boundary, so a 25 ms frame on a 120 Hz display
+            // isn't forced to the next vblank slot (avoiding the every-3rd-vblank ~40 fps
+            // drop that FIFO_RELAXED causes in that scenario).
+            // IMMEDIATE does not exhibit the same submission-pressure stall as MAILBOX.
+            // FIFO_RELAXED is the best-effort fallback; FIFO is the mandatory-per-spec last resort.
             if (OperatingSystem.IsAndroid())
             {
+                if (!syncToVBlank && Array.IndexOf(presentModes, VkPresentModeKHR.ImmediateKHR) >= 0)
+                    return VkPresentModeKHR.ImmediateKHR;
                 if (Array.IndexOf(presentModes, VkPresentModeKHR.FifoRelaxedKHR) >= 0)
                     return VkPresentModeKHR.FifoRelaxedKHR;
                 return VkPresentModeKHR.FifoKHR;
