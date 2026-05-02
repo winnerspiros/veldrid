@@ -936,7 +936,7 @@ namespace Veldrid.Vk
                     }
                 }
 
-                vkCmdPushDescriptorSetKHR(
+                gd.CmdPushDescriptorSet(
                     CommandBuffer,
                     bindPoint,
                     pipelineLayout,

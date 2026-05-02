@@ -73,6 +73,7 @@ namespace Veldrid.Vk
         // VK_KHR_push_descriptor
         public bool HasPushDescriptors { get; private set; }
         public uint MaxPushDescriptors { get; private set; }
+        public VkCmdPushDescriptorSetKHRT CmdPushDescriptorSet { get; private set; }
 
         // VK_KHR_dynamic_rendering
         public bool HasDynamicRendering { get; private set; }
@@ -1480,7 +1481,12 @@ namespace Veldrid.Vk
                 deviceProps2.pNext = &pushDescProps;
                 getPhysicalDeviceProperties2(PhysicalDevice, &deviceProps2);
                 MaxPushDescriptors = pushDescProps.maxPushDescriptors;
-                HasPushDescriptors = MaxPushDescriptors > 0;
+
+                // Load via getDeviceProcAddr so it works on Android — libvulkan.so does NOT
+                // export device extension functions via dlsym; ppy.Vk's VulkanNative.vkCmdPushDescriptorSetKHR
+                // loads via dlsym and returns IntPtr.Zero on Android, causing SIGSEGV PC=0 on the draw thread.
+                CmdPushDescriptorSet = getDeviceProcAddr<VkCmdPushDescriptorSetKHRT>("vkCmdPushDescriptorSetKHR"u8);
+                HasPushDescriptors = CmdPushDescriptorSet != null && MaxPushDescriptors > 0;
             }
 
             // VK_KHR_dynamic_rendering: load function pointers.
@@ -2133,6 +2139,15 @@ namespace Veldrid.Vk
     internal unsafe delegate void VkGetPhysicalDeviceProperties2T(VkPhysicalDevice physicalDevice, void* properties);
 
     internal unsafe delegate VkResult VkEnumerateInstanceVersionT(uint* pApiVersion);
+
+    // VK_KHR_push_descriptor
+    internal unsafe delegate void VkCmdPushDescriptorSetKHRT(
+        VkCommandBuffer commandBuffer,
+        VkPipelineBindPoint pipelineBindPoint,
+        VkPipelineLayout layout,
+        uint set,
+        uint descriptorWriteCount,
+        VkWriteDescriptorSet* pDescriptorWrites);
 
     // VK_EXT_metal_surface
 
