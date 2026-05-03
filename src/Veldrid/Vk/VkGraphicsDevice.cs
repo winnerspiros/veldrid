@@ -107,15 +107,28 @@ namespace Veldrid.Vk
         public bool HasSwapchainMaintenance1 { get; private set; }
         public VkGetPhysicalDeviceSurfaceCapabilities2KhrT GetPhysicalDeviceSurfaceCapabilities2 { get; private set; }
 
-        // VK_KHR_synchronization2 (core in Vulkan 1.3). Feature-detect + opt-in only;
-        // submission paths are unchanged. Surfaced so a follow-up PR can migrate the
-        // per-CL fence pool to vkQueueSubmit2 + timeline semaphores without re-touching
-        // device-creation code.
+        // VK_KHR_synchronization2 (core in Vulkan 1.3). Enabled at device creation;
+        // submission path uses vkQueueSubmit2 with per-semaphore stage masks when active.
         public bool HasSynchronization2 { get; private set; }
+
+        // vkQueueSubmit2 entry point, loaded when HasSynchronization2 is true.
+        // Null on Vulkan < 1.3 without the KHR extension; submitCommandBuffer falls
+        // back to legacy vkQueueSubmit in that case.
+        public VkQueueSubmit2T QueueSubmit2 { get; private set; }
 
         // VK_KHR_timeline_semaphore (core in Vulkan 1.2). Feature-detect + opt-in only;
         // see HasSynchronization2 for context.
         public bool HasTimelineSemaphore { get; private set; }
+
+        // VK_GOOGLE_display_timing: true when the extension is active and both
+        // vkGetRefreshCycleDurationGOOGLE and vkGetPastPresentationTimingGOOGLE loaded
+        // successfully. When true, VkSwapchain automatically chains
+        // VkPresentTimesInfoGOOGLE on every vkQueuePresentKHR call to target the next
+        // vblank boundary, minimising the time a rendered frame sits in the scanout
+        // buffer before the display shows it.
+        public bool HasDisplayTiming { get; private set; }
+        public VkGetRefreshCycleDurationGOOGLET GetRefreshCycleDurationGOOGLE { get; private set; }
+        public VkGetPastPresentationTimingGOOGLET GetPastPresentationTimingGOOGLE { get; private set; }
 
         /// <summary>
         ///     The Vulkan API version supported by the selected physical device.
@@ -793,16 +806,6 @@ namespace Veldrid.Vk
             checkSubmittedFences();
 
             bool useExtraFence = fence != null;
-            var si = VkSubmitInfo.New();
-            si.commandBufferCount = 1;
-            si.pCommandBuffers = &vkCb;
-            var waitDstStageMask = VkPipelineStageFlags.ColorAttachmentOutput;
-            si.pWaitDstStageMask = &waitDstStageMask;
-
-            si.pWaitSemaphores = waitSemaphoresPtr;
-            si.waitSemaphoreCount = waitSemaphoreCount;
-            si.pSignalSemaphores = signalSemaphoresPtr;
-            si.signalSemaphoreCount = signalSemaphoreCount;
 
             Vulkan.VkFence vkFence;
             Vulkan.VkFence submissionFence;
@@ -818,15 +821,76 @@ namespace Veldrid.Vk
                 submissionFence = vkFence;
             }
 
-            lock (graphicsQueueLock)
+            if (QueueSubmit2 != null)
             {
-                var result = vkQueueSubmit(graphicsQueue, 1, ref si, vkFence);
-                CheckResult(result);
+                // vkQueueSubmit2 path: per-semaphore pipeline stage masks, no shared
+                // pWaitDstStageMask array. Requires VK_KHR_synchronization2 / Vulkan 1.3.
+                var cbInfo = VkCommandBufferSubmitInfo.New();
+                cbInfo.commandBuffer = vkCb;
+                cbInfo.deviceMask = 0;
 
-                if (useExtraFence)
+                var waitInfos = stackalloc VkSemaphoreSubmitInfo[(int)waitSemaphoreCount];
+                for (uint i = 0; i < waitSemaphoreCount; i++)
                 {
-                    result = vkQueueSubmit(graphicsQueue, 0, null, submissionFence);
+                    waitInfos[i] = VkSemaphoreSubmitInfo.New();
+                    waitInfos[i].semaphore = waitSemaphoresPtr[i];
+                    // Mirror the legacy pWaitDstStageMask = ColorAttachmentOutput.
+                    waitInfos[i].stageMask = VkPipelineStageFlags2KHR.ColorAttachmentOutput;
+                }
+
+                var signalInfos = stackalloc VkSemaphoreSubmitInfo[(int)signalSemaphoreCount];
+                for (uint i = 0; i < signalSemaphoreCount; i++)
+                {
+                    signalInfos[i] = VkSemaphoreSubmitInfo.New();
+                    signalInfos[i].semaphore = signalSemaphoresPtr[i];
+                    signalInfos[i].stageMask = VkPipelineStageFlags2KHR.AllCommands;
+                }
+
+                var si2 = VkSubmitInfo2.New();
+                si2.waitSemaphoreInfoCount = waitSemaphoreCount;
+                si2.pWaitSemaphoreInfos = waitSemaphoreCount > 0 ? waitInfos : null;
+                si2.commandBufferInfoCount = 1;
+                si2.pCommandBufferInfos = &cbInfo;
+                si2.signalSemaphoreInfoCount = signalSemaphoreCount;
+                si2.pSignalSemaphoreInfos = signalSemaphoreCount > 0 ? signalInfos : null;
+
+                lock (graphicsQueueLock)
+                {
+                    var result = QueueSubmit2(graphicsQueue, 1, &si2, vkFence);
                     CheckResult(result);
+
+                    if (useExtraFence)
+                    {
+                        result = QueueSubmit2(graphicsQueue, 0, null, submissionFence);
+                        CheckResult(result);
+                    }
+                }
+            }
+            else
+            {
+                // Legacy vkQueueSubmit path: single pWaitDstStageMask shared across all
+                // wait semaphores. Used on Vulkan < 1.3 without VK_KHR_synchronization2.
+                var si = VkSubmitInfo.New();
+                si.commandBufferCount = 1;
+                si.pCommandBuffers = &vkCb;
+                var waitDstStageMask = VkPipelineStageFlags.ColorAttachmentOutput;
+                si.pWaitDstStageMask = &waitDstStageMask;
+
+                si.pWaitSemaphores = waitSemaphoresPtr;
+                si.waitSemaphoreCount = waitSemaphoreCount;
+                si.pSignalSemaphores = signalSemaphoresPtr;
+                si.signalSemaphoreCount = signalSemaphoreCount;
+
+                lock (graphicsQueueLock)
+                {
+                    var result = vkQueueSubmit(graphicsQueue, 1, ref si, vkFence);
+                    CheckResult(result);
+
+                    if (useExtraFence)
+                    {
+                        result = vkQueueSubmit(graphicsQueue, 0, null, submissionFence);
+                        CheckResult(result);
+                    }
                 }
             }
 
@@ -1199,6 +1263,7 @@ namespace Veldrid.Vk
             bool hasSwapchainMaintenance1 = false;
             bool hasSynchronization2 = DeviceApiVersion.IsAtLeast(1, 3); // Core in Vulkan 1.3
             bool hasTimelineSemaphore = DeviceApiVersion.IsAtLeast(1, 2); // Core in Vulkan 1.2
+            bool hasDisplayTiming = false; // VK_GOOGLE_display_timing (Android/Qualcomm)
             IntPtr[] activeExtensions = new IntPtr[props.Length];
             uint activeExtensionCount = 0;
 
@@ -1310,9 +1375,8 @@ namespace Veldrid.Vk
                         requiredInstanceExtensions.Remove(extensionName);
                         hasSwapchainMaintenance1 = true;
                     }
-                    // VK_KHR_synchronization2: foundation for vkQueueSubmit2 + per-stage
-                    // semaphore submit-info structs. Detection-only; submission paths still
-                    // use legacy vkQueueSubmit. Core in Vulkan 1.3.
+                    // VK_KHR_synchronization2: enables vkQueueSubmit2 with per-semaphore
+                    // stage masks. Core in Vulkan 1.3; also available as KHR extension.
                     else if (extensionName == "VK_KHR_synchronization2")
                     {
                         activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
@@ -1328,6 +1392,17 @@ namespace Veldrid.Vk
                         activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
                         requiredInstanceExtensions.Remove(extensionName);
                         hasTimelineSemaphore = true;
+                    }
+                    // VK_GOOGLE_display_timing: lets us schedule each present at a specific
+                    // vblank target (desiredPresentTime) to minimise the time a rendered
+                    // frame sits in the scanout buffer before it reaches the display. Used
+                    // by Android/Qualcomm drivers (incl. Adreno 7xx) to shave ~0.5–1 frame
+                    // of display-induced latency on FIFO / FIFO_RELAXED present modes.
+                    else if (extensionName == "VK_GOOGLE_display_timing")
+                    {
+                        activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        requiredInstanceExtensions.Remove(extensionName);
+                        hasDisplayTiming = true;
                     }
                     else if (requiredInstanceExtensions.Remove(extensionName)) activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
                 }
@@ -1540,10 +1615,29 @@ namespace Veldrid.Vk
             // our usage (only struct chaining at create- and present-time).
             HasSwapchainMaintenance1 = hasSwapchainMaintenance1;
 
-            // Detection-only foundation flags. The hot-path migration to vkQueueSubmit2
-            // and timeline-semaphore-based completion tracking is intentionally separate.
+            // VK_KHR_synchronization2: load vkQueueSubmit2. When the extension is the
+            // promoted-to-core Vulkan 1.3 variant no KHR suffix is needed; fall back to
+            // the KHR entry point for 1.2 drivers that expose only the extension form.
             HasSynchronization2 = hasSynchronization2;
+            if (hasSynchronization2)
+            {
+                QueueSubmit2 = getDeviceProcAddr<VkQueueSubmit2T>("vkQueueSubmit2"u8)
+                               ?? getDeviceProcAddr<VkQueueSubmit2T>("vkQueueSubmit2KHR"u8);
+            }
+
             HasTimelineSemaphore = hasTimelineSemaphore;
+
+            // VK_GOOGLE_display_timing: load function pointers used by VkSwapchain to
+            // query the display refresh cadence and schedule per-present vblank targets.
+            if (hasDisplayTiming)
+            {
+                GetRefreshCycleDurationGOOGLE =
+                    getDeviceProcAddr<VkGetRefreshCycleDurationGOOGLET>("vkGetRefreshCycleDurationGOOGLE"u8);
+                GetPastPresentationTimingGOOGLE =
+                    getDeviceProcAddr<VkGetPastPresentationTimingGOOGLET>("vkGetPastPresentationTimingGOOGLE"u8);
+                HasDisplayTiming = GetRefreshCycleDurationGOOGLE != null
+                                   && GetPastPresentationTimingGOOGLE != null;
+            }
         }
 
         // UTF-8 literal overloads: zero runtime encoding cost; 'u8' string literals are null-terminated.
@@ -1782,6 +1876,28 @@ namespace Veldrid.Vk
                 presentInfo.pNext = &presentModeInfo;
             }
 
+            // VK_GOOGLE_display_timing: target the next vblank slot to minimise the time
+            // the rendered image sits in the scanout buffer before the display shows it.
+            // desiredPresentTime = 0 is safe and lets the driver decide — used until
+            // at least one past present has been recorded by drainPastPresentationTimings.
+            // Stack-local structs remain valid for the duration of vkQueuePresentKHR.
+            VkPresentTimesInfoGOOGLE presentTimesInfo;
+            VkPresentTimeGOOGLE presentTime;
+            if (vkSc.HasDisplayTiming)
+            {
+                presentTime = new VkPresentTimeGOOGLE
+                {
+                    presentID = vkSc.NextPresentID,
+                    desiredPresentTime = vkSc.GetDesiredPresentTime()
+                };
+                presentTimesInfo = VkPresentTimesInfoGOOGLE.New();
+                presentTimesInfo.swapchainCount = 1;
+                presentTimesInfo.pTimes = &presentTime;
+                // Append after any existing pNext chain (e.g. maintenance1 mode info).
+                presentTimesInfo.pNext = presentInfo.pNext;
+                presentInfo.pNext = &presentTimesInfo;
+            }
+
             // VK_KHR_incremental_present is intentionally NOT chained here.
             // On Qualcomm/Adreno (vendorID 0x5143) it has been observed to deliver
             // stale tile contents after a surface rotation — the dirty-rect path
@@ -1795,6 +1911,14 @@ namespace Veldrid.Vk
                 lock (graphicsQueueLock)
                 {
                     presentResult = vkQueuePresentKHR(vkSc.PresentQueue, ref presentInfo);
+                    // Advance timing state on successful presents so the next frame's
+                    // desiredPresentTime targets the correct vblank slot.
+                    if (vkSc.HasDisplayTiming
+                        && (presentResult == VkResult.Success || presentResult == VkResult.SuboptimalKHR))
+                    {
+                        vkSc.AdvancePresentID();
+                        vkSc.DrainPastPresentationTimings();
+                    }
                     handlePresentResult(vkSc, presentResult);
                     acquireAndWaitNextImage(vkSc);
                 }
@@ -1804,6 +1928,12 @@ namespace Veldrid.Vk
                 lock (vkSc)
                 {
                     presentResult = vkQueuePresentKHR(vkSc.PresentQueue, ref presentInfo);
+                    if (vkSc.HasDisplayTiming
+                        && (presentResult == VkResult.Success || presentResult == VkResult.SuboptimalKHR))
+                    {
+                        vkSc.AdvancePresentID();
+                        vkSc.DrainPastPresentationTimings();
+                    }
                     handlePresentResult(vkSc, presentResult);
                     acquireAndWaitNextImage(vkSc);
                 }
