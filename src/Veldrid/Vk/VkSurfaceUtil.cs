@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using Veldrid.Android;
 using Veldrid.MetalBindings;
 using Vulkan;
@@ -143,14 +144,18 @@ namespace Veldrid.Vk
 
             try
             {
-                // Do NOT call ANativeWindow_setBuffersGeometry here.
-                // For Vulkan, the WSI driver negotiates the native window format through
-                // VkSurfaceFormatKHR / swapchain creation. Pre-configuring the buffer format
-                // to RGBA_8888 (format=1) can conflict with the compositor-negotiated format
-                // (e.g. RGB_565 on Adreno) and produce a permanently black, non-composited
-                // swapchain without surfacing a Vulkan error.
-                // EGL/OpenGL correctly uses ANativeWindow_setBuffersGeometry with EGL_NATIVE_VISUAL_ID
-                // (see OpenGLGraphicsDevice.initializeANativeWindow); that path is unchanged.
+                // Set the native window pixel format to RGBA_8888 (format=1) before creating
+                // the Vulkan surface. This is the standard Android Vulkan pattern: all Vulkan
+                // games call ANativeWindow_setBuffersGeometry before vkCreateAndroidSurfaceKHR
+                // so the WSI can negotiate RGBA/BGRA 8888 swapchain formats instead of being
+                // stuck with the Android SurfaceView default of RGB_565. This call does NOT
+                // trigger a SurfaceDestroyed/SurfaceCreated teardown (it's a direct NDK call,
+                // not a Java SurfaceHolder.setFormat call). The "Do NOT call" note that was here
+                // before was incorrect: the WSI negotiates *through* the native window format,
+                // not independently of it. Omitting this call is what caused the RGB565 swapchain.
+                int setFmtResult = AndroidRuntime.ANativeWindow_setBuffersGeometry(aNativeWindow, 0, 0, 1 /* WINDOW_FORMAT_RGBA_8888 */);
+                if (setFmtResult != 0)
+                    Debug.WriteLine($"[Veldrid] ANativeWindow_setBuffersGeometry(RGBA_8888) returned {setFmtResult} (non-fatal, continuing).");
 
                 var androidSurfaceCi = VkAndroidSurfaceCreateInfoKHR.New();
                 androidSurfaceCi.window = (ANativeWindow*)aNativeWindow;
