@@ -60,9 +60,8 @@ namespace Veldrid
 
         /// <summary>
         ///     Indicates whether the device supports VK_KHR_synchronization2 (core in Vulkan 1.3).
-        ///     Detection-only at present; submission paths still use legacy vkQueueSubmit. Surfaced so
-        ///     a follow-up change can migrate the per-CL fence pool to vkQueueSubmit2 + timeline
-        ///     semaphores without re-touching device-creation code.
+        ///     When true, the backend uses <c>vkQueueSubmit2</c> with per-semaphore stage masks
+        ///     instead of the legacy <c>vkQueueSubmit</c> path, reducing CPU overhead per frame.
         /// </summary>
         public bool HasSynchronization2 => gd.HasSynchronization2;
 
@@ -71,6 +70,26 @@ namespace Veldrid
         ///     See <see cref="HasSynchronization2" /> for context.
         /// </summary>
         public bool HasTimelineSemaphore => gd.HasTimelineSemaphore;
+
+        /// <summary>
+        ///     Indicates whether VK_GOOGLE_display_timing is active. When true, the backend
+        ///     automatically chains <c>VkPresentTimesInfoGOOGLE</c> on every
+        ///     <c>vkQueuePresentKHR</c> call to target the next optimal vblank boundary,
+        ///     minimising the time a rendered frame sits in the scanout buffer before the
+        ///     display shows it. Feedback from <c>vkGetPastPresentationTimingGOOGLE</c> is
+        ///     used to keep the target adaptive to the actual display cadence.
+        /// </summary>
+        public bool HasDisplayTiming => gd.HasDisplayTiming;
+
+        /// <summary>
+        ///     Indicates whether VK_EXT_pipeline_creation_cache_control is active (core in
+        ///     Vulkan 1.3). When true, pipeline-creation calls may pass
+        ///     <c>VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT</c> to avoid
+        ///     blocking the render thread on a shader-compilation miss, receiving
+        ///     <c>VK_PIPELINE_COMPILE_REQUIRED</c> instead and falling back to a simpler
+        ///     pipeline until the cache is warm. Eliminates compilation hitches in real-time use.
+        /// </summary>
+        public bool HasPipelineCreationCacheControl => gd.HasPipelineCreationCacheControl;
 
         /// <summary>
         ///     Returns the current contents of the device's <c>VkPipelineCache</c> as a serialised blob,

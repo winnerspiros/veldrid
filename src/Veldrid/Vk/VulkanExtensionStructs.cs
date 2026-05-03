@@ -415,11 +415,10 @@ namespace Veldrid.Vk
     }
 
     // --- VK_KHR_synchronization2 (core in Vulkan 1.3) ---
-    // Foundation for moving the per-CL fence pool to a timeline-semaphore-driven
-    // completion model. Detection-only at present; no function pointers loaded
-    // (call sites still use legacy vkQueueSubmit). Enabling the feature is cheap
-    // and lets future work flip to vkQueueSubmit2 / vkWaitSemaphores without
-    // re-touching device-creation code.
+    // Enables vkQueueSubmit2 with per-semaphore pipeline stage masks.
+    // VkPhysicalDeviceSynchronization2Features is chained at device creation to opt in;
+    // VkSubmitInfo2/VkCommandBufferSubmitInfo/VkSemaphoreSubmitInfo replace the legacy
+    // VkSubmitInfo on the submission hot-path.
 
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe struct VkPhysicalDeviceSynchronization2Features
@@ -437,6 +436,88 @@ namespace Veldrid.Vk
             return ret;
         }
     }
+
+    // One entry per command buffer in VkSubmitInfo2.pCommandBufferInfos.
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct VkCommandBufferSubmitInfo
+    {
+        public const VkStructureType TYPE = (VkStructureType)1000314006;
+
+        public VkStructureType sType;
+        public void* pNext;
+        public VkCommandBuffer commandBuffer;
+        public uint deviceMask; // 0 = use all devices in the group
+
+        public static VkCommandBufferSubmitInfo New()
+        {
+            var ret = default(VkCommandBufferSubmitInfo);
+            ret.sType = TYPE;
+            return ret;
+        }
+    }
+
+    // One entry per semaphore in VkSubmitInfo2.pWaitSemaphoreInfos /
+    // VkSubmitInfo2.pSignalSemaphoreInfos.
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct VkSemaphoreSubmitInfo
+    {
+        public const VkStructureType TYPE = (VkStructureType)1000314005;
+
+        public VkStructureType sType;
+        public void* pNext;
+        public VkSemaphore semaphore;
+        public ulong value;     // timeline counter value; 0 for binary semaphores
+        public ulong stageMask; // VkPipelineStageFlags2 (64-bit); see VkPipelineStageFlags2KHR constants below
+        public uint deviceIndex;
+
+        public static VkSemaphoreSubmitInfo New()
+        {
+            var ret = default(VkSemaphoreSubmitInfo);
+            ret.sType = TYPE;
+            return ret;
+        }
+    }
+
+    // Replaces VkSubmitInfo in vkQueueSubmit2 calls.
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct VkSubmitInfo2
+    {
+        public const VkStructureType TYPE = (VkStructureType)1000314004;
+
+        public VkStructureType sType;
+        public void* pNext;
+        public uint flags; // VkSubmitFlags; Protected bit = 0x1, never used here
+        public uint waitSemaphoreInfoCount;
+        public VkSemaphoreSubmitInfo* pWaitSemaphoreInfos;
+        public uint commandBufferInfoCount;
+        public VkCommandBufferSubmitInfo* pCommandBufferInfos;
+        public uint signalSemaphoreInfoCount;
+        public VkSemaphoreSubmitInfo* pSignalSemaphoreInfos;
+
+        public static VkSubmitInfo2 New()
+        {
+            var ret = default(VkSubmitInfo2);
+            ret.sType = TYPE;
+            return ret;
+        }
+    }
+
+    // VkPipelineStageFlags2 bit constants (64-bit) used in VkSemaphoreSubmitInfo.stageMask.
+    // Only the values needed in the current submission hot-path are listed.
+    internal static class VkPipelineStageFlags2KHR
+    {
+        // Equivalent to VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT in sync1.
+        public const ulong ColorAttachmentOutput = 0x0000_0000_0000_0400UL;
+        // Signal all prior commands on the queue have completed.
+        public const ulong AllCommands = 0x0000_0000_0001_0000UL;
+    }
+
+    // Function pointer type for vkQueueSubmit2 / vkQueueSubmit2KHR.
+    internal unsafe delegate VkResult VkQueueSubmit2T(
+        VkQueue queue,
+        uint submitCount,
+        VkSubmitInfo2* pSubmits,
+        Vulkan.VkFence fence);
 
     // --- VK_KHR_timeline_semaphore (core in Vulkan 1.2) ---
     // Foundation for replacing the availableSubmissionFences pool with a single
@@ -459,4 +540,100 @@ namespace Veldrid.Vk
             return ret;
         }
     }
+
+    // VK_EXT_pipeline_creation_cache_control (core in Vulkan 1.3).
+    // Enables VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT: callers can
+    // request a pipeline without blocking if it is not already in the cache, receiving
+    // VK_PIPELINE_COMPILE_REQUIRED instead of stalling the render thread for shader
+    // compilation. Essential for hitching-free real-time use on mobile.
+    internal unsafe struct VkPhysicalDevicePipelineCreationCacheControlFeatures
+    {
+        public const VkStructureType TYPE = (VkStructureType)1000297001;
+
+        public VkStructureType sType;
+        public void* pNext;
+        public VkBool32 pipelineCreationCacheControl;
+
+        public static VkPhysicalDevicePipelineCreationCacheControlFeatures New()
+        {
+            var ret = default(VkPhysicalDevicePipelineCreationCacheControlFeatures);
+            ret.sType = TYPE;
+            return ret;
+        }
+    }
+
+    // --- VK_GOOGLE_display_timing ---
+    // Allows scheduling presents at exact vblank offsets for minimum
+    // input-to-photon latency. Android / Qualcomm-supported since Android 7.
+    //
+    // Usage:
+    //   1. After swapchain creation, call vkGetRefreshCycleDurationGOOGLE to
+    //      learn the display's vblank cadence (nanoseconds per frame).
+    //   2. On each frame after a successful present, call
+    //      vkGetPastPresentationTimingGOOGLE and record the latest
+    //      earliestPresentTime from the returned results.
+    //   3. Chain VkPresentTimesInfoGOOGLE on VkPresentInfoKHR with
+    //      desiredPresentTime = lastEarliestPresentTime + refreshDuration,
+    //      targeting the next vblank boundary after the previous frame.
+    //      desiredPresentTime = 0 is safe and means "driver decides" — used
+    //      until at least one past timing result is available.
+
+    // No sType; plain output struct from vkGetRefreshCycleDurationGOOGLE.
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct VkRefreshCycleDurationGOOGLE
+    {
+        public ulong refreshDuration; // nanoseconds per display vblank cycle
+    }
+
+    // No sType; one element per returned past present in
+    // vkGetPastPresentationTimingGOOGLE.
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct VkPastPresentationTimingGOOGLE
+    {
+        public uint presentID;
+        public ulong desiredPresentTime;   // value originally requested
+        public ulong actualPresentTime;    // when the image was shown to the user
+        public ulong earliestPresentTime;  // earliest vblank the image could have hit
+        public ulong presentMargin;        // slack before the vblank deadline
+    }
+
+    // No sType; one element per swapchain in VkPresentTimesInfoGOOGLE.pTimes.
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct VkPresentTimeGOOGLE
+    {
+        public uint presentID;
+        // 0 = let driver decide; non-zero = target the vblank at or after this
+        // time (nanoseconds on the same clock as actualPresentTime).
+        public ulong desiredPresentTime;
+    }
+
+    // Chained on VkPresentInfoKHR.pNext to supply per-present timing targets.
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct VkPresentTimesInfoGOOGLE
+    {
+        public const VkStructureType TYPE = (VkStructureType)1000092000;
+
+        public VkStructureType sType;
+        public void* pNext;
+        public uint swapchainCount;
+        public VkPresentTimeGOOGLE* pTimes; // one per entry in VkPresentInfoKHR.pSwapchains
+
+        public static VkPresentTimesInfoGOOGLE New()
+        {
+            var ret = default(VkPresentTimesInfoGOOGLE);
+            ret.sType = TYPE;
+            return ret;
+        }
+    }
+
+    internal unsafe delegate VkResult VkGetRefreshCycleDurationGOOGLET(
+        VkDevice device,
+        VkSwapchainKHR swapchain,
+        VkRefreshCycleDurationGOOGLE* pDisplayTimingProperties);
+
+    internal unsafe delegate VkResult VkGetPastPresentationTimingGOOGLET(
+        VkDevice device,
+        VkSwapchainKHR swapchain,
+        uint* pPresentationTimingCount,
+        VkPastPresentationTimingGOOGLE* pPresentationTimings);
 }
