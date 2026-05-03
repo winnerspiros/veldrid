@@ -155,7 +155,7 @@ namespace Veldrid.Vk
                 // not independently of it. Omitting this call is what caused the RGB565 swapchain.
                 int setFmtResult = AndroidRuntime.ANativeWindow_setBuffersGeometry(aNativeWindow, 0, 0, 1 /* WINDOW_FORMAT_RGBA_8888 */);
                 if (setFmtResult != 0)
-                    Debug.WriteLine($"[Veldrid] ANativeWindow_setBuffersGeometry(RGBA8888) returned {setFmtResult} (non-fatal, continuing).");
+                    Debug.WriteLine($"[Veldrid] ANativeWindow_setBuffersGeometry(RGBA_8888) returned {setFmtResult} (non-fatal, continuing).");
 
                 var androidSurfaceCi = VkAndroidSurfaceCreateInfoKHR.New();
                 androidSurfaceCi.window = (ANativeWindow*)aNativeWindow;
