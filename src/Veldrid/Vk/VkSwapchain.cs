@@ -459,6 +459,23 @@ namespace Veldrid.Vk
                                                               && surfaceCapabilities.maxImageExtent.width == 0 && surfaceCapabilities.maxImageExtent.height == 0)
                 return false;
 
+            // Android dp-scale early-out: during SurfaceHolder.SetFormat transitions the
+            // ANativeWindow briefly reports dp-scaled dimensions. Bail out here — BEFORE
+            // vkDeviceWaitIdle — so the ~50ms GPU drain isn't paid on every retry cycle.
+            // (The late guard right before swapchainCi.imageExtent is belt-and-braces.)
+            if (OperatingSystem.IsAndroid()
+                && surfaceCapabilities.currentExtent.width != uint.MaxValue // fixed-extent surface
+                && width > 0 && height > 0)
+            {
+                ulong reqArea = (ulong)width * (ulong)height;
+                ulong extArea = (ulong)surfaceCapabilities.currentExtent.width * (ulong)surfaceCapabilities.currentExtent.height;
+                if (extArea > 0 && extArea <= reqArea / 4)
+                {
+                    Debug.WriteLine($"[Veldrid/VkSwapchain] dp-scale early-out: extent {surfaceCapabilities.currentExtent.width}x{surfaceCapabilities.currentExtent.height} <= 1/4 of requested {width}x{height}; skipping WaitForIdle.");
+                    return false;
+                }
+            }
+
             if (deviceSwapchain != VkSwapchainKHR.Null) gd.WaitForIdle();
 
             currentImageIndex = 0;
@@ -575,6 +592,23 @@ namespace Veldrid.Vk
                     width = Util.Clamp(width, surfaceCapabilities.minImageExtent.width, surfaceCapabilities.maxImageExtent.width),
                     height = Util.Clamp(height, surfaceCapabilities.minImageExtent.height, surfaceCapabilities.maxImageExtent.height)
                 };
+            }
+
+            // Android dp-scale guard: during SurfaceHolder.SetFormat transitions the ANativeWindow
+            // briefly reports dp-scaled dimensions (e.g. 1029×480 on a 3088×1440 3×-density device).
+            // If currentExtent.area ≤ ¼ × requestedArea the surface is mid-transition; return false
+            // so attemptRecreate retries in 10ms rather than baking a 1/9-scale swapchain.
+            if (OperatingSystem.IsAndroid()
+                && surfaceCapabilities.currentExtent.width != uint.MaxValue // fixed-extent surface
+                && width > 0 && height > 0)
+            {
+                ulong reqArea = (ulong)width * (ulong)height;
+                ulong extArea = (ulong)chosenExtent.width * (ulong)chosenExtent.height;
+                if (extArea > 0 && extArea <= reqArea / 4)
+                {
+                    Debug.WriteLine($"[Veldrid/VkSwapchain] dp-scale guard: extent {chosenExtent.width}x{chosenExtent.height} <= 1/4 of requested {width}x{height}; retrying.");
+                    return false;
+                }
             }
 
             swapchainCi.imageExtent = chosenExtent;
