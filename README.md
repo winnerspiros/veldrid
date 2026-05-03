@@ -1,129 +1,255 @@
-# ppy.Veldrid
+# winnerspiros/veldrid
 
-Veldrid is a cross-platform, graphics API-agnostic rendering and compute library for .NET. It provides a powerful, unified interface to a system's GPU and includes more advanced features than any other .NET library. Unlike other platform- or vendor-specific technologies, Veldrid can be used to create high-performance 3D applications that are truly portable.
+> **Cross-platform, graphics API-agnostic rendering & compute library for .NET**
 
-As of April 2024, this repository no longer tracks and is incompatible with the upstream [Veldrid](https://github.com/veldrid/veldrid) repository. This decision has been made to allow for more agile development without concerns of breaking changes.
+A high-performance fork of [ppy/veldrid](https://github.com/ppy/veldrid), aggressively optimized for low latency and maximum throughput across all backends. As of April 2024 this repository is intentionally **incompatible with upstream** to allow unrestricted modernization.
 
-## Changes from ppy fork
+---
 
-### New: Direct3D 12 Backend
-- Full D3D12 backend implementation (`GraphicsBackend.Direct3D12`) with 18+ source files
+## Supported Backends
+
+| Backend | Platforms | Notes |
+|---|---|---|
+| **Direct3D 12** | Windows | ✅ Full implementation — new in this fork |
+| **Direct3D 11** | Windows | ✅ Vortice 3.8.3, flip-discard, optimized |
+| **Vulkan** | Windows · Linux · Android | ✅ Dynamic rendering, push descriptors, optimized |
+| **Metal** | macOS · iOS | ✅ TBDR-aware, optimized |
+| **OpenGL 4.3+** | Windows · Linux · macOS | ✅ Pipeline cache, invalidation, optimized |
+| **OpenGL ES 3.0+** | Android · Linux | ✅ Full tiler optimizations |
+
+---
+
+## What's New
+
+### Direct3D 12 Backend
+
+A full D3D12 backend added from scratch.
+
 - Complete resource lifecycle: Buffer, Texture, TextureView, Sampler, Shader, Fence, ResourceLayout, ResourceSet, Framebuffer, Pipeline, Swapchain
-- D3D12CommandList with command allocator pooling for efficient multi-frame recording
-- D3D12DescriptorAllocator with thread-safe free-list descriptor heap management
-- D3D12CommandAllocatorPool with fence-gated allocator reuse
-- D3D12Pipeline with root signature generation (CBV/SRV/UAV + Sampler descriptor tables)
-- D3D12Swapchain with flip-discard model and tearing support
-- Public API: `GraphicsDevice.CreateD3D12()` factory methods, `BackendInfoD3D12`, `D3D12DeviceOptions`
-- `GraphicsDevice.IsBackendSupported(GraphicsBackend.Direct3D12)` support
-
-### Vortice.Windows Upgrade (2.4.2 → 3.8.3)
-- Native .NET 10 support (previously relied on compatibility shims)
-- Correct `uint` type mapping for C++ UINT types (was incorrectly `int`)
-- Improved `Span<T>` usage and marshalling in Vortice internals
-- AOT and trimming support
-- All D3D11 and D3D12 backend code updated for the new type mappings
-
-### Performance & Modernization
-- All backends now use `System.Threading.Lock` instead of `object` locks (including OpenGL `StagingMemoryPool`)
-- **Vulkan pipeline cache** — all graphics and compute pipeline creation now uses a shared `VkPipelineCache`, enabling driver-side caching and deduplication of compiled shaders (was `VkPipelineCache.Null` everywhere). The cache can also be **persisted across application launches**: pass a previously-saved blob via `VulkanDeviceOptions.PipelineCacheData` at device creation, and retrieve the current cache contents via `BackendInfoVulkan.GetPipelineCacheData()` for serialization. The driver header-validates the blob (vendor/device IDs, UUID, driver version) and silently discards stale data, so persisting is always safe.
-- Vulkan backend: push descriptors (`VK_KHR_push_descriptor`), dynamic rendering (`VK_KHR_dynamic_rendering`), memory budget (`VK_EXT_memory_budget`), host image copy (`VK_EXT_host_image_copy`)
-- Vulkan backend: `VK_EXT_descriptor_indexing` detection (core in Vulkan 1.2) — enables future bindless descriptor patterns
-- Vulkan backend: `stackalloc` for descriptor sets and dynamic offsets in hot paths
-- Vulkan backend: UTF-8 `u8` string literals for all proc address lookups (zero runtime encoding)
-- **Vulkan memory allocator** — block split on allocation now updates in-place instead of RemoveAt+Insert, eliminating O(n) array shifts in the memory allocation hot path
-- **D3D12 command list** — redundant state tracking for scissor rects, blend factors, viewports, and framebuffers; skips GPU calls when state is unchanged (matching Vulkan backend's proven pattern)
-- **D3D12 staging buffer pool** — swap-remove O(1) instead of RemoveAt O(n) for staging buffer reuse
-- **D3D11 resource binding** — merged four sequential base-offset accumulation loops into a single pass per resource set activation, improving cache locality and reducing per-draw overhead; removed superseded dead code
-- **D3D11 staging buffer pool** — swap-remove O(1) instead of foreach+Remove O(n²) for staging buffer lookup
-- **OpenGL/ES pipeline state caching** — skips all blend, depth, stencil, rasterizer, and shader program GL calls when the same pipeline is re-activated (eliminates 30–50 redundant GL calls per draw in typical scenes)
-- **OpenGL/ES resource set clear** — only clears used resource set slots instead of the full array on every draw call
-- **Metal resource binding** — merged three per-resource O(n) layout offset loops (buffer, texture, sampler) into a single pass per resource set activation; hoisted vertex buffer index calculation to avoid redundant per-VB evaluation
-- Vulkan backend: pre-sized sampled image list (capacity 32) to avoid hot-path reallocations during draw/dispatch
-- D3D11 backend: pre-allocated arrays for vertex strides/offsets in draw calls, deferred context command recording
-- Target framework upgraded to `net10.0` with `LangVersion 14.0`
-- **`HashHelper` upgraded to `System.HashCode`** — all `GetHashCode` implementations across every description/key struct now delegate to `System.HashCode.Combine` (uses xxHash3/Marvin32 under the hood), replacing a hand-rolled 5-bit rotation XOR that produced poor distribution for small integer sequences. `HashHelper.Array<T>` now uses `HashCode.Add` in a loop instead of the old recursive `Combine` chain, which both improves distribution and eliminates the cascaded virtual dispatch. All call-sites unchanged.
-- **Switch expressions throughout format tables** — all simple `switch`/`return` conversion tables in `VkFormats`, `D3D11Formats`, `D3D12Formats`, `OpenGLFormats`, and `MTLFormats` (≈50 functions) converted to C# switch expressions, giving the JIT clearer value-propagation opportunities and reducing branch-prediction pressure.
-- **`Array.Empty<T>()` for zero-length viewport/scissor arrays** — `D3D11CommandList` now initialises `viewports` and `scissors` fields with `Array.Empty<T>()` instead of `new T[0]`, eliminating two small heap allocations per command list.
-- **String interpolation for all error/debug messages** — all remaining `"..." + x` string concatenation in exception/debug strings replaced with `$"..."` interpolation across every backend, eliminating intermediate `string.Concat` allocations on the (rare) error path.
-
-### Mobile / Android Optimizations (Adreno / Mali / PowerVR tilers)
-The following changes target tile-based mobile GPUs. They are also harmless (or beneficial) on desktop GPUs, so they're enabled unconditionally where the relevant API/extension is present.
-
-- **Vulkan tile-only / lazily-allocated swapchain depth (`TextureUsage.Transient`).** New public flag `TextureUsage.Transient` opts a texture out of the default transfer-usage and into `VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT` + `VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT` memory on tile-based GPUs. The Vulkan swapchain framebuffer applies it automatically to its depth/stencil target — meaning at 1440×3088×D32S8 (S23 Ultra), the ~35.6 MB depth buffer occupies **zero physical memory** and lives entirely in tile RAM. Implementation:
-  - `TextureUsage.Transient = 1 << 7` in `src/Veldrid/TextureUsage.cs`. Mutually exclusive with `Sampled`, `Storage`, `Staging`, `GenerateMipmaps` (the texture cannot be sampled, copied, mapped, or persisted).
-  - `VkFormats.VdToVkTextureUsage` strips `TransferSrc | TransferDst | Sampled | Storage` when Transient is set and adds `VkImageUsageFlags.TransientAttachment` (the only Vulkan-spec-legal combination with `TRANSIENT_ATTACHMENT_BIT`).
-  - `VkTexture` uses `VkImageLayout.Undefined` as the initial layout for transient images (the `Preinitialized` layout requires host-visible memory) and probes `TryFindMemoryType` for a `DeviceLocal | LazilyAllocated` type before requesting it — falling back cleanly to plain `DeviceLocal` on devices that don't expose lazy memory (i.e. desktop GPUs). No behavioural change off-tiler.
-  - `VkSwapchainFramebuffer.createDepthTexture` now passes `TextureUsage.DepthStencil | TextureUsage.Transient`.
-  - Other backends (D3D11, D3D12, Metal, OpenGL) silently ignore the flag — none of them model lazy allocation.
-- **Vulkan swapchain present-mode preference** — under `SwapchainDescription.SyncToVerticalBlank=true`, the swapchain prefers `VK_PRESENT_MODE_FIFO_RELAXED_KHR` and falls back to the spec-mandatory `VK_PRESENT_MODE_FIFO_KHR`. `MAILBOX` is **not** preferred under vsync: on Qualcomm Adreno (notably 7xx-series) drivers it has been observed to stall `vkAcquireNextImageKHR` / `vkQueuePresentKHR` indefinitely under heavy submission pressure (texture-upload bursts → black-screen ANR). It also requires an extra in-flight image (~33% more swapchain memory) and an extra compositor round-trip — on tile-based mobile GPUs that creates back-pressure rather than reducing latency. Khronos guidance, Google's Android Vulkan samples, and ANGLE all default to FIFO on Android for the same reason. `FIFO_RELAXED` gives the lowest-latency tear-free option that's broadly safe. See `src/Veldrid/Vk/VkSwapchain.cs`.
-- **OpenGL/GLES dithering disabled at context init** — `glDisable(GL_DITHER)` is issued in `OpenGLGraphicsDevice.init()`. Dither is on by default in the GL spec, costs fragment-shader cycles on tilers, and produces no perceptible difference on the ≥8-bpc color targets every modern display uses. Recommended by both Arm (Mali Best Practices) and Qualcomm (Adreno OpenGL ES Developer Guide). See `src/Veldrid/OpenGL/OpenGLGraphicsDevice.cs`.
-- **OpenGL/GLES tile-store skip via `glInvalidateFramebuffer` at swap time** — when the swapchain has a depth attachment and the context exposes `glInvalidateFramebuffer` (core in GL 4.3+ / GLES 3.0+), the depth and stencil attachments of the default framebuffer are invalidated immediately before `SwapBuffers`. On tile-based GPUs this allows the driver to drop the per-tile depth/stencil writeback to main memory entirely. At 1440×3088×120 Hz (S23 Ultra), this saves on the order of 2 GB/s of DRAM bandwidth — directly reducing power draw, thermal throttling, and (transitively) sustained frame rate. The optimization is unconditionally safe: the GL spec leaves the default framebuffer's depth/stencil contents undefined across `SwapBuffers`, so any caller depending on them across frames would already be broken on every tiler. Implementation:
-  - `glInvalidateFramebuffer` binding added to `Veldrid.OpenGLBindings.OpenGLNative` (single-pointer, GL 4.3+ / GLES 3.0+ core; no `EXT_discard_framebuffer` fallback path).
-  - Capability flag `OpenGLExtensions.InvalidateFramebuffer` (`GLVersion(4, 3) || GLESVersion(3, 0)`).
-  - `OpenGLGraphicsDevice.invalidateSwapchainDepthOnSwap` set during `init()` when `SwapchainDepthFormat != null` and the capability is present; the `WorkItemType.SwapBuffers` handler in the GL execution thread binds default FB and invalidates `Depth`+`Stencil` before the platform `swapBuffers()` call.
-  - Color is **not** invalidated — that's what we're presenting.
-- **Vulkan present-mode hot-swap (`VK_EXT_swapchain_maintenance1`, promoted to `VK_KHR_swapchain_maintenance1` in Vulkan 1.4)** — toggling `SyncToVerticalBlank` or `AllowTearing` previously forced a full swapchain rebuild plus image reacquire (a multi-millisecond stall plus one dropped frame). When the device exposes the maintenance1 trio (`VK_KHR_get_surface_capabilities2` + `VK_EXT_surface_maintenance1` + `VK_EXT_swapchain_maintenance1`), Veldrid now creates the swapchain with the full *compatibility set* of present modes (queried via `VkSurfacePresentModeCompatibilityEXT`) and chains a per-present `VkSwapchainPresentModeInfoEXT` to apply the new mode at `vkQueuePresentKHR` time — no rebuild, no dropped frame. This makes runtime "low-latency mode" toggles essentially free on Adreno 740 / recent Mali / NVIDIA / Intel / Mesa. Falls back transparently to the recreate-and-reacquire path on devices without the extension. Implementation in `src/Veldrid/Vk/VkSwapchain.cs` (compat-set query + `VkSwapchainPresentModesCreateInfoEXT` chain) and `src/Veldrid/Vk/VkGraphicsDevice.cs` (`HasSwapchainMaintenance1` detection + per-present mode chain in `SwapBuffersCore`). **No new public API** — the existing `Swapchain.SyncToVerticalBlank` / `GraphicsDevice.AllowTearing` setters just got faster.
-
-- **OpenGL/GLES tile-store skip via `glInvalidateFramebuffer` for offscreen FBOs** — when switching away from a named FBO (via `CommandList.SetFramebuffer`), any attachment whose texture was created without `TextureUsage.Sampled` or `TextureUsage.Storage` is invalidated via `glInvalidateFramebuffer` (same GL function as the swapchain depth path, core in GL 4.3+ / GLES 3.0+). On tile-based GPUs this tells the driver to skip the per-tile writeback to main memory for those attachments, saving DRAM bandwidth across every offscreen render pass. Per-attachment safety is enforced statically via `TextureUsage` flags: depth attachments with `Sampled` (shadow maps) and color attachments with `Sampled` (ping-pong render targets) are never invalidated — only attachments that cannot be read by a shader are eligible. Implementation:
-  - `invalidateOffscreenFboAttachments` private helper added to `OpenGLCommandExecutor`, called from `SetFramebuffer` immediately before rebinding, while the outgoing FBO is still current.
-  - Depth-only formats use `DepthAttachment`; combined depth+stencil formats use `DepthStencilAttachment`; color slots use `ColorAttachment0 + i`.
-  - Gated on `OpenGLExtensions.InvalidateFramebuffer` (`GLVersion(4, 3) || GLESVersion(3, 0)`), identical to the swapchain depth path.
+- `D3D12CommandList` with command allocator pooling for efficient multi-frame recording
+- `D3D12DescriptorAllocator` — thread-safe free-list descriptor heap management
+- `D3D12CommandAllocatorPool` — fence-gated allocator reuse
+- `D3D12Pipeline` — root signature generation (CBV/SRV/UAV + Sampler descriptor tables)
+- `D3D12Swapchain` — flip-discard model, tearing support
+- Public API: `GraphicsDevice.CreateD3D12()`, `BackendInfoD3D12`, `D3D12DeviceOptions`
+- `GraphicsDevice.IsBackendSupported(GraphicsBackend.Direct3D12)`
 
 ### Variable Rate Shading (VRS)
-- Cross-backend per-draw shading rate control via `CommandList.SetShadingRate(ShadingRate)`
-- **D3D12**: Uses `ID3D12GraphicsCommandList5.RSSetShadingRate` (requires Options6, Tier 1+)
-- **Vulkan**: Uses `VK_KHR_fragment_shading_rate` / `vkCmdSetFragmentShadingRateKHR`
-- Rates from 1×1 (default) through 4×4 (sixteenth-rate) — reduce fragment shader workload for non-critical regions
-- Feature detection: `GraphicsDeviceFeatures.VariableRateShading`
+
+Cross-backend per-draw shading rate control via `CommandList.SetShadingRate(ShadingRate)`.
+
+| Backend | Implementation |
+|---|---|
+| D3D12 | `ID3D12GraphicsCommandList5.RSSetShadingRate` (Options6, Tier 1+) |
+| Vulkan | `VK_KHR_fragment_shading_rate` / `vkCmdSetFragmentShadingRateKHR` |
+
+Rates: `1×1` (full-rate, default) → `4×4` (sixteenth-rate). Feature detection: `GraphicsDeviceFeatures.VariableRateShading`.
 
 ### Mesh Shader Dispatch
-- Cross-backend mesh shader dispatch via `CommandList.DispatchMesh(groupCountX, groupCountY, groupCountZ)`
-- **D3D12**: Uses `ID3D12GraphicsCommandList6.DispatchMesh` (requires Options7, Tier 1+)
-- **Vulkan**: Uses `VK_EXT_mesh_shader` / `vkCmdDrawMeshTasksEXT`
-- New shader stages: `ShaderStages.Task` (amplification) and `ShaderStages.Mesh`
-- Feature detection: `GraphicsDeviceFeatures.MeshShader`
 
-### GPU Hardware Capability Detection
-- **D3D12 Enhanced Barriers** (Options12) — detected at device creation, exposed via `BackendInfoD3D12.SupportsEnhancedBarriers`
-- **D3D12 Mesh Shaders** (Options7) — `BackendInfoD3D12.SupportsMeshShaders`
-- **D3D12 Variable Rate Shading** (Options6) — `BackendInfoD3D12.SupportsVariableRateShading`
-- **D3D12 DXR Raytracing** (Options5) — `BackendInfoD3D12.SupportsRaytracing`
-- **Vulkan Descriptor Indexing** — `VkGraphicsDevice.HasDescriptorIndexing` (bindless descriptors)
-- **Vulkan Fragment Shading Rate** — `BackendInfoVulkan.HasFragmentShadingRate`
-- **Vulkan Mesh Shaders** — `BackendInfoVulkan.HasMeshShader`
-- **Vulkan Swapchain Maintenance 1** — `VkGraphicsDevice.HasSwapchainMaintenance1` (present-mode hot-swap; auto-applied by `Swapchain.SyncToVerticalBlank` / `GraphicsDevice.AllowTearing` setters)
+Cross-backend mesh shader support via `CommandList.DispatchMesh(groupCountX, groupCountY, groupCountZ)`.
 
-### Bug Fixes from Upstream Issues & PRs
-- **Vulkan: Remove `[Conditional("DEBUG")]` from `VulkanUtil.CheckResult`** — was silently swallowing Vulkan errors in release builds, causing untraceable segfaults ([ppy#61](https://github.com/ppy/veldrid/issues/61))
-- **Vulkan: Fix depth texture copy** — `CopyTexture` between depth/stencil textures was using `VkImageAspectFlags.Color` instead of `Depth|Stencil`, causing validation errors or silent failures ([veldrid#462](https://github.com/veldrid/veldrid/pull/462))
-- **`DisposeWhenIdle` now flushes on `SubmitCommands`** — previously resources passed to `DisposeWhenIdle` were only disposed when `WaitForIdle` was called, causing memory leaks in apps that never call `WaitForIdle` ([veldrid#476](https://github.com/veldrid/veldrid/issues/476))
-- **Metal: Fix depth test when disabled** — `DepthComparison` forced to `Always` when `DepthTestEnabled` is false, preventing fragments from being incorrectly rejected ([ppy#75](https://github.com/ppy/veldrid/pull/75))
-- **OpenGL: Fix `ClearDepthStencil` mask mutation** — was leaving stencil mask and depth write in incorrect state after clear, preventing `SetPipeline` from restoring them ([veldrid#481](https://github.com/veldrid/veldrid/pull/481))
-- **Vulkan: Fix `CommandBufferCompleted` race condition** — `submittedCommandBuffers.Add` in `End()` now protected by the same lock as `CommandBufferCompleted` ([veldrid#495](https://github.com/veldrid/veldrid/pull/495))
-- **D3D11: FlipDiscard swapchain** — uses modern flip model on DXGI 1.4+, reducing frame latency ([veldrid#484](https://github.com/veldrid/veldrid/pull/484), [veldrid#515](https://github.com/veldrid/veldrid/issues/515))
-- **GLES: Stencil buffer init + 64-bit eglGetDisplay** — GLES now properly initializes stencil buffers and uses `IntPtr` for `eglGetDisplay` on 64-bit targets ([ppy#71](https://github.com/ppy/veldrid/pull/71))
-- **Vulkan: Fix `VkTexture.clearIfRenderTarget` spec violation for transient textures** — transient images are created with only `VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT` (no `TRANSFER_DST_BIT`), yet `clearIfRenderTarget` was calling `vkCmdClearDepthStencilImage`/`vkCmdClearColorImage` which require `TRANSFER_DST_BIT` (spec §19.1). The initialisation clear is now skipped for transient images; the first render pass with `loadOp=Clear` + `initialLayout=Undefined` handles it correctly on tile-based GPUs.
+| Backend | Implementation |
+|---|---|
+| D3D12 | `ID3D12GraphicsCommandList6.DispatchMesh` (Options7, Tier 1+) |
+| Vulkan | `VK_EXT_mesh_shader` / `vkCmdDrawMeshTasksEXT` |
 
-### CI / Build
-- CI workflow updated to .NET 10 SDK
-- Multi-platform CI: Windows, Linux, and macOS build verification
-- 0 errors, 0 warnings across all 3 projects in the solution
-- Artifact name uses `${{ github.run_id }}-${{ github.sha }}` (PR builds set `github.ref_name` to e.g. `4/merge`, which contains a `/` — disallowed in artifact names).
-- Push to default branch publishes prereleases to GitHub Packages via `GITHUB_TOKEN`; tagged refs publish to nuget.org and create a GitHub Release named `Veldrid <tag>`. All publish steps use `--skip-duplicate` for idempotency.
-- `actions/cache@v5` for `~/.nuget/packages` on all 3 OS jobs; `concurrency:` group cancels superseded non-tag runs.
-- **One-click manual publish** — `.github/workflows/publish.yml` exposes a `workflow_dispatch` job (Actions → *Publish NuGet Packages* → *Run workflow*) with three inputs:
-  - `destination`: `github` (default) / `nuget.org` / `both`
-  - `create_release`: attach `.nupkg` files to a GitHub Release (most useful with a tag ref)
-  - `dry_run`: build + pack only, skip every push step (verifies the Nerdbank.GitVersioning-computed version before committing to a publish)
-  - Always uploads `.nupkg` files as workflow artifacts (30-day retention) regardless of publish outcome. `GITHUB_TOKEN` is sufficient for GitHub Packages; `NUGET_API_KEY` is only needed for `nuget.org`/`both`.
+New shader stages: `ShaderStages.Task` (amplification) and `ShaderStages.Mesh`. Feature detection: `GraphicsDeviceFeatures.MeshShader`.
 
-### Supported Backends
-| Backend | Platforms | Status |
-|---------|-----------|--------|
-| **Direct3D 12** | Windows | ✅ New |
-| **Direct3D 11** | Windows | ✅ Updated (Vortice 3.8.3) |
-| **Vulkan** | Windows, Linux, Android | ✅ Optimized (push descriptors, dynamic rendering) |
-| **Metal** | macOS, iOS | ✅ Maintained |
-| **OpenGL** | Windows, Linux, macOS | ✅ Updated (modern locks) |
-| **OpenGL ES** | Android, Linux | ✅ Maintained |
+### Hardware Capability Detection
+
+| Capability | API |
+|---|---|
+| D3D12 Enhanced Barriers (Options12) | `BackendInfoD3D12.SupportsEnhancedBarriers` |
+| D3D12 DXR Raytracing (Options5) | `BackendInfoD3D12.SupportsRaytracing` |
+| D3D12 Variable Rate Shading (Options6) | `BackendInfoD3D12.SupportsVariableRateShading` |
+| D3D12 Mesh Shaders (Options7) | `BackendInfoD3D12.SupportsMeshShaders` |
+| Vulkan Descriptor Indexing (bindless) | `VkGraphicsDevice.HasDescriptorIndexing` |
+| Vulkan Fragment Shading Rate | `BackendInfoVulkan.HasFragmentShadingRate` |
+| Vulkan Mesh Shaders | `BackendInfoVulkan.HasMeshShader` |
+| Vulkan Swapchain Maintenance 1 | `VkGraphicsDevice.HasSwapchainMaintenance1` |
+| Vulkan Synchronization2 (core 1.3) | `BackendInfoVulkan.HasSynchronization2` |
+| Vulkan Timeline Semaphores (core 1.2) | `BackendInfoVulkan.HasTimelineSemaphore` |
+
+### Vortice.Windows Upgrade (2.4.2 → 3.8.3)
+
+- Native .NET 10 support — no compatibility shims
+- Correct `uint` mapping for C++ `UINT` (was `int`)
+- Improved `Span<T>` usage, AOT and trimming support
+- All D3D11 and D3D12 backend code updated for new type mappings
+
+---
+
+## Performance Optimizations
+
+### Cross-Backend
+
+| Change | Impact |
+|---|---|
+| `System.Threading.Lock` everywhere (was `object`) | Lower lock overhead, better diagnostics |
+| `System.HashCode` (xxHash3/Marvin32) for all description structs | Better hash distribution, no custom code |
+| Switch expressions for all ≈50 format conversion tables | Clearer JIT value-propagation, less branch pressure |
+| `Array.Empty<T>()` instead of `new T[0]` | Eliminates allocation per command list |
+| `$""` string interpolation throughout | No intermediate `string.Concat` allocs on error paths |
+| Staging buffer pool floors: 64 KiB min / 4 MiB max-recycle | Reuses buffers across frames, reduces allocator churn |
+
+### Vulkan
+
+<details>
+<summary>Expand details</summary>
+
+- **Pipeline cache** — all graphics/compute pipeline creation uses a shared `VkPipelineCache`. Cache can be **persisted across launches**: supply a blob via `VulkanDeviceOptions.PipelineCacheData`; retrieve it via `BackendInfoVulkan.GetPipelineCacheData()`. Driver validates the blob automatically — always safe to pass stale data.
+- **Vertex & index buffer caching** — `vkCmdBindVertexBuffers` and `vkCmdBindIndexBuffer` are skipped when the same buffer+offset is already bound in that slot. This eliminates a significant fraction of driver dispatch overhead in typical draw-heavy scenes.
+- **Dynamic rendering** (`VK_KHR_dynamic_rendering`) — replaces `VkRenderPass` objects with inline `vkCmdBeginRendering` calls. Depth store op set to `DontCare` for transient targets, avoiding DRAM flush on TBDR GPUs.
+- **Push descriptors** (`VK_KHR_push_descriptor`) — resource sets written inline into the command buffer for frequently-changing bindings.
+- **Memory allocator** — block-split on allocation updates in-place (no `RemoveAt + Insert`), eliminating O(n) shifts.
+- **Staging buffer pool** — swap-remove O(1) instead of `List.Remove` O(n) when recycling used buffers.
+- **Pre-sized sampled image list** (capacity 32) — no hot-path reallocation during draw/dispatch.
+- `stackalloc` for descriptor sets and dynamic offsets in hot paths.
+- UTF-8 `u8` string literals for all proc address lookups — zero runtime encoding overhead.
+- Extension detection: `VK_EXT_memory_budget`, `VK_EXT_host_image_copy`, `VK_EXT_descriptor_indexing`.
+
+</details>
+
+### Direct3D 12
+
+<details>
+<summary>Expand details</summary>
+
+- **Redundant state tracking** — `SetViewport`, `SetScissorRect`, `SetBlendFactor`, `SetStencilRef`, `SetFramebuffer` all check against cached state and skip the GPU call when unchanged.
+- **Staging buffer pool** — swap-remove O(1) instead of `RemoveAt` O(n).
+
+</details>
+
+### Direct3D 11
+
+<details>
+<summary>Expand details</summary>
+
+- **Resource binding** — four sequential base-offset accumulation loops merged into a single pass per resource-set activation, improving cache locality and reducing per-draw overhead; dead code removed.
+- **Pipeline state caching** — blend state, depth/stencil state, rasterizer state, primitive topology, input layout, all five shader stages, and index buffer checked before issuing driver calls.
+- **Uniform buffer & texture view caching** — vertex and fragment stage bindings tracked and skipped when unchanged (slots 0–14 for UBOs, 0–15 for SRVs, 0–3 for samplers).
+- **Staging buffer pool** — swap-remove O(1) instead of `foreach + Remove` O(n²).
+- **Vertex buffer arrays** — pre-allocated stride/offset arrays, no per-draw allocation.
+- **Deferred context command recording** — `ID3D11DeviceContext1` feature used for partial constant-buffer updates.
+- **FlipDiscard swapchain** — modern DXGI flip model on 1.4+, lower frame latency.
+
+</details>
+
+### Metal
+
+<details>
+<summary>Expand details</summary>
+
+- **Framebuffer short-circuit** — `SetFramebufferCore` skips encoder tear-down when the same framebuffer is rebound and the encoder has seen at least one draw. Preserves the render encoder, preventing a tile flush on TBDR GPUs.
+- **Resource binding** — three per-resource O(n) layout offset loops (buffer, texture, sampler) merged into a single pass; vertex buffer index calculation hoisted to avoid redundant per-VB evaluation.
+- **Staging buffer pool** — swap-remove O(1) instead of `List.Remove` O(n). 64 KiB floor / 4 MiB recycle ceiling mirrors Vulkan defaults.
+
+</details>
+
+### OpenGL / OpenGL ES
+
+<details>
+<summary>Expand details</summary>
+
+- **Pipeline state cache** — all blend, depth, stencil, rasterizer, and shader-program GL calls skipped when the same pipeline is re-activated. Eliminates 30–50 redundant GL calls per draw in typical scenes.
+- **Per-command-list redundancy caches** — `SetFramebuffer`, `SetViewport`, and `SetScissorRect` all maintain per-recording caches and early-return on repeated identical calls. Cleared in `Begin()` so out-of-band GL state changes (swap-time `glBindFramebuffer(0)`, async `UpdateBuffer`/`UpdateTexture`) cannot produce stale hits.
+- **Resource set clear** — only used slots cleared on draw, not the full array.
+- **`glClearBufferfv` / `glClearBufferfi` fast paths** — `ClearColorTarget` and `ClearDepthStencil` use single-attachment clear calls (GL 3.0+ / GLES 3.0+) instead of the `glDrawBuffers + glClear + glDrawBuffers` save/restore dance.
+- **Dithering disabled** — `glDisable(GL_DITHER)` at context init. On by default in the spec; costs fragment cycles on tilers; imperceptible on ≥8 bpc targets.
+- **`BufferStorage` detection** (`GL_ARB_buffer_storage` / `GL_EXT_buffer_storage` / GL 4.4+) — capability flag available for persistent-mapped buffer paths.
+
+</details>
+
+---
+
+## Mobile / Tiler Optimizations
+
+These changes specifically target tile-based GPUs (Adreno, Mali, PowerVR). Most are also beneficial on desktop and enabled unconditionally when the relevant API/extension is available.
+
+### `TextureUsage.Transient` — Zero-Cost Depth Buffers
+
+New public flag `TextureUsage.Transient` marks a texture as attachment-only. On Vulkan, the backend allocates it with `VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT` + `VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT`, so it lives entirely in tile RAM and occupies **zero physical memory**. At 1440×3088 D32S8 (Samsung S23 Ultra), this saves ~35.6 MB of LPDDR.
+
+The Vulkan swapchain framebuffer sets this flag automatically on its depth/stencil target. Other backends (D3D11, D3D12, Metal, OpenGL) silently ignore it.
+
+`Transient` is mutually exclusive with `Sampled`, `Storage`, `Staging`, and `GenerateMipmaps`.
+
+### Vulkan: Swapchain Present-Mode Selection
+
+Under `SyncToVerticalBlank = true`, the swapchain prefers `FIFO_RELAXED` and falls back to `FIFO`. **`MAILBOX` is intentionally skipped** even when advertised: on Adreno 7xx drivers it stalls `vkAcquireNextImageKHR`/`vkQueuePresentKHR` under submission pressure (texture-upload bursts → black-screen ANR). It also requires an extra in-flight image and an extra compositor round-trip — net negative on tilers. Matches Khronos guidance, Google's Android Vulkan samples, and ANGLE.
+
+### Vulkan: Present-Mode Hot-Swap
+
+Toggling `SyncToVerticalBlank` or `AllowTearing` previously required a full swapchain rebuild (multi-ms stall, one dropped frame). When `VK_EXT_swapchain_maintenance1` is available, Veldrid creates the swapchain with the full compatibility set of present modes and chains a per-present `VkSwapchainPresentModeInfoEXT` to switch modes at `vkQueuePresentKHR` time — **no rebuild, no dropped frame**. Transparent fallback to recreate-and-reacquire on older devices.
+
+Works today on Adreno 740, recent Mali, NVIDIA, Intel, and Mesa. No new public API required.
+
+### OpenGL/GLES: Swapchain Depth Invalidation
+
+Before `SwapBuffers`, the depth and stencil attachments of the default framebuffer are invalidated via `glInvalidateFramebuffer` (GL 4.3+ / GLES 3.0+). On tilers this drops the per-tile depth/stencil writeback to main memory entirely. Color is not invalidated — that's what gets presented.
+
+At 1440×3088×120 Hz this saves ~2 GB/s of DRAM bandwidth, directly reducing power draw and thermal throttling.
+
+### OpenGL/GLES: Offscreen FBO Invalidation
+
+When `CommandList.SetFramebuffer` switches away from a named FBO, attachments without `TextureUsage.Sampled` or `TextureUsage.Storage` are automatically invalidated. On tilers this skips the tile-store writeback for purely transient render targets (depth prepass buffers, intermediate compositing targets).
+
+Safety is enforced statically: shadow-map depth targets (`Sampled | DepthStencil`) and ping-pong color targets (`Sampled | RenderTarget`) are never invalidated.
+
+---
+
+## Bug Fixes
+
+| Fix | Ref |
+|---|---|
+| Vulkan: `[Conditional("DEBUG")]` removed from `CheckResult` — was silently swallowing errors in release builds | [ppy#61](https://github.com/ppy/veldrid/issues/61) |
+| Vulkan: `CopyTexture` between depth/stencil textures used wrong aspect flags (`Color` instead of `Depth\|Stencil`) | [veldrid#462](https://github.com/veldrid/veldrid/pull/462) |
+| Vulkan: `CommandBufferCompleted` race — `submittedCommandBuffers.Add` in `End()` now inside the same lock | [veldrid#495](https://github.com/veldrid/veldrid/pull/495) |
+| Vulkan: `clearIfRenderTarget` spec violation for transient images — no longer calls `vkCmdClearDepthStencilImage` on images without `TRANSFER_DST_BIT` | — |
+| `DisposeWhenIdle` now flushes on `SubmitCommands` — previously leaked resources in apps that never call `WaitForIdle` | [veldrid#476](https://github.com/veldrid/veldrid/issues/476) |
+| D3D11: FlipDiscard swapchain on DXGI 1.4+ | [veldrid#484](https://github.com/veldrid/veldrid/pull/484) |
+| Metal: `DepthComparison` forced to `Always` when depth test is disabled | [ppy#75](https://github.com/ppy/veldrid/pull/75) |
+| OpenGL: `ClearDepthStencil` was leaving stencil mask and depth-write in incorrect state | [veldrid#481](https://github.com/veldrid/veldrid/pull/481) |
+| GLES: Stencil buffer init + `IntPtr` for `eglGetDisplay` on 64-bit | [ppy#71](https://github.com/ppy/veldrid/pull/71) |
+
+---
+
+## CI / Build / Publishing
+
+- **.NET 10 SDK** with `LangVersion 14.0`; multi-platform CI (Windows · Linux · macOS)
+- **Zero warnings** across all three projects in the solution
+- `actions/cache@v5` for `~/.nuget/packages`; `concurrency:` group cancels superseded non-tag runs
+- **Automatic publishing** — push to default branch → prerelease to GitHub Packages; tagged ref → release to nuget.org + GitHub Release
+- **One-click manual publish** via `workflow_dispatch` (Actions → *Publish NuGet Packages* → *Run workflow*):
+  - `destination`: `github` · `nuget.org` · `both`
+  - `create_release`: attach `.nupkg` files to a GitHub Release
+  - `dry_run`: build + pack only, skip all push steps
+  - `.nupkg` artifacts uploaded regardless of publish outcome (30-day retention)
+
+---
+
+## Batch Upload APIs
+
+Two coalescing upload helpers reduce driver overhead for scenes that upload many resources per frame.
+
+### `TextureUpdateBatch`
+
+```csharp
+using var batch = device.BeginTextureUpdateBatch();
+batch.UpdateTexture(tex1, data1, ...);
+batch.UpdateTexture(tex2, data2, ...);
+batch.Submit(); // single vkQueueSubmit on Vulkan
+```
+
+### `BufferUpdateBatch`
+
+```csharp
+using var batch = device.BeginBufferUpdateBatch();
+batch.UpdateBuffer(buf1, 0, data1);
+batch.UpdateBuffer(buf2, 0, data2);
+batch.Submit(); // single vkQueueSubmit on Vulkan
+```
+
+Both are pooled per device. Persistent-mapped buffer destinations bypass the batch and write directly into the mapped pointer. Default implementations forward to `UpdateTexture`/`UpdateBuffer` with a no-op `Submit` on non-Vulkan backends.
+
