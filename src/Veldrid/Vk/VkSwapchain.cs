@@ -577,6 +577,23 @@ namespace Veldrid.Vk
                 };
             }
 
+            // Android dp-scale guard: during SurfaceHolder.SetFormat transitions the ANativeWindow
+            // briefly reports dp-scaled dimensions (e.g. 1029×480 on a 3088×1440 3×-density device).
+            // If currentExtent.area ≤ ¼ × requestedArea the surface is mid-transition; return false
+            // so attemptRecreate retries in 10ms rather than baking a 1/9-scale swapchain.
+            if (OperatingSystem.IsAndroid()
+                && surfaceCapabilities.currentExtent.width != uint.MaxValue // fixed-extent surface
+                && width > 0 && height > 0)
+            {
+                ulong reqArea = (ulong)width * (ulong)height;
+                ulong extArea = (ulong)chosenExtent.width * (ulong)chosenExtent.height;
+                if (extArea > 0 && extArea <= reqArea / 4)
+                {
+                    Debug.WriteLine($"[Veldrid/VkSwapchain] dp-scale guard: extent {chosenExtent.width}×{chosenExtent.height} ≤ ¼ of requested {width}×{height}; retrying.");
+                    return false;
+                }
+            }
+
             swapchainCi.imageExtent = chosenExtent;
             swapchainCi.minImageCount = imageCount;
             swapchainCi.imageArrayLayers = 1;
