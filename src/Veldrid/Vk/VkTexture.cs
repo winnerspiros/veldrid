@@ -426,10 +426,19 @@ namespace Veldrid.Vk
 
         private void clearIfRenderTarget()
         {
+            // Transient images carry only VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT — no
+            // TRANSFER_DST_BIT. vkCmdClearDepthStencilImage/vkCmdClearColorImage both
+            // require TRANSFER_DST_BIT (Vulkan spec §19.1). Skip the initialisation clear;
+            // the first render pass uses loadOp=Clear (initialLayout=Undefined) and handles
+            // this correctly on tile-based GPUs.
+            if ((Usage & TextureUsage.Transient) != 0)
+                return;
+
             // If the image is going to be used as a render target, we need to clear the data before its first use.
             if ((Usage & TextureUsage.RenderTarget) != 0)
                 gd.ClearColorTexture(this, new VkClearColorValue(0, 0, 0, 0));
-            else if ((Usage & TextureUsage.DepthStencil) != 0) gd.ClearDepthTexture(this, new VkClearDepthStencilValue(0, 0));
+            else if ((Usage & TextureUsage.DepthStencil) != 0)
+                gd.ClearDepthTexture(this, new VkClearDepthStencilValue(0, 0));
         }
 
         private void transitionIfSampled()

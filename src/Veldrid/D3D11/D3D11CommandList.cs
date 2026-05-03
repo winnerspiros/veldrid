@@ -61,8 +61,8 @@ namespace Veldrid.D3D11
         private bool disposed;
         private ID3D11CommandList commandList;
 
-        private Viewport[] viewports = new Viewport[0];
-        private RawRect[] scissors = new RawRect[0];
+        private Viewport[] viewports = Array.Empty<Viewport>();
+        private RawRect[] scissors = Array.Empty<RawRect>();
         private bool viewportsChanged;
         private bool scissorRectsChanged;
 

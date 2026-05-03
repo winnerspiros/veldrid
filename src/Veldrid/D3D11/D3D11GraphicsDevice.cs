@@ -140,7 +140,7 @@ namespace Veldrid.D3D11
 
                 var desc = dxgiAdapter.Description;
                 DeviceName = desc.Description;
-                VendorName = "id:" + ((uint)desc.VendorId).ToString("x8");
+                VendorName = $"id:{(uint)desc.VendorId:x8}";
                 DeviceId = (int)desc.DeviceId;
             }
 

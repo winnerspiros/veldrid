@@ -6,245 +6,97 @@ namespace Veldrid.MTL
     {
         internal static MTLPixelFormat VdToMtlPixelFormat(PixelFormat format, bool depthFormat)
         {
-            switch (format)
+            return format switch
             {
-                case PixelFormat.R8UNorm:
-                    return MTLPixelFormat.R8Unorm;
-
-                case PixelFormat.R8SNorm:
-                    return MTLPixelFormat.R8Snorm;
-
-                case PixelFormat.R8UInt:
-                    return MTLPixelFormat.R8Uint;
-
-                case PixelFormat.R8SInt:
-                    return MTLPixelFormat.R8Sint;
-
-                case PixelFormat.R16UNorm:
-                    return depthFormat ? MTLPixelFormat.Depth16Unorm : MTLPixelFormat.R16Unorm;
-
-                case PixelFormat.R16SNorm:
-                    return MTLPixelFormat.R16Snorm;
-
-                case PixelFormat.R16UInt:
-                    return MTLPixelFormat.R16Uint;
-
-                case PixelFormat.R16SInt:
-                    return MTLPixelFormat.R16Sint;
-
-                case PixelFormat.R16Float:
-                    return MTLPixelFormat.R16Float;
-
-                case PixelFormat.R32UInt:
-                    return MTLPixelFormat.R32Uint;
-
-                case PixelFormat.R32SInt:
-                    return MTLPixelFormat.R32Sint;
-
-                case PixelFormat.R32Float:
-                    return depthFormat ? MTLPixelFormat.Depth32Float : MTLPixelFormat.R32Float;
-
-                case PixelFormat.R8G8UNorm:
-                    return MTLPixelFormat.RG8Unorm;
-
-                case PixelFormat.R8G8SNorm:
-                    return MTLPixelFormat.RG8Snorm;
-
-                case PixelFormat.R8G8UInt:
-                    return MTLPixelFormat.RG8Uint;
-
-                case PixelFormat.R8G8SInt:
-                    return MTLPixelFormat.RG8Sint;
-
-                case PixelFormat.R16G16UNorm:
-                    return MTLPixelFormat.RG16Unorm;
-
-                case PixelFormat.R16G16SNorm:
-                    return MTLPixelFormat.RG16Snorm;
-
-                case PixelFormat.R16G16UInt:
-                    return MTLPixelFormat.RG16Uint;
-
-                case PixelFormat.R16G16SInt:
-                    return MTLPixelFormat.RG16Sint;
-
-                case PixelFormat.R16G16Float:
-                    return MTLPixelFormat.RG16Float;
-
-                case PixelFormat.R32G32UInt:
-                    return MTLPixelFormat.RG32Uint;
-
-                case PixelFormat.R32G32SInt:
-                    return MTLPixelFormat.RG32Sint;
-
-                case PixelFormat.R32G32Float:
-                    return MTLPixelFormat.RG32Float;
-
-                case PixelFormat.R8G8B8A8UNorm:
-                    return MTLPixelFormat.RGBA8Unorm;
-
-                case PixelFormat.R8G8B8A8UNormSRgb:
-                    return MTLPixelFormat.RGBA8Unorm_sRGB;
-
-                case PixelFormat.B8G8R8A8UNorm:
-                    return MTLPixelFormat.BGRA8Unorm;
-
-                case PixelFormat.B8G8R8A8UNormSRgb:
-                    return MTLPixelFormat.BGRA8Unorm_sRGB;
-
-                case PixelFormat.R8G8B8A8SNorm:
-                    return MTLPixelFormat.RGBA8Snorm;
-
-                case PixelFormat.R8G8B8A8UInt:
-                    return MTLPixelFormat.RGBA8Uint;
-
-                case PixelFormat.R8G8B8A8SInt:
-                    return MTLPixelFormat.RGBA8Sint;
-
-                case PixelFormat.R16G16B16A16UNorm:
-                    return MTLPixelFormat.RGBA16Unorm;
-
-                case PixelFormat.R16G16B16A16SNorm:
-                    return MTLPixelFormat.RGBA16Snorm;
-
-                case PixelFormat.R16G16B16A16UInt:
-                    return MTLPixelFormat.RGBA16Uint;
-
-                case PixelFormat.R16G16B16A16SInt:
-                    return MTLPixelFormat.RGBA16Sint;
-
-                case PixelFormat.R16G16B16A16Float:
-                    return MTLPixelFormat.RGBA16Float;
-
-                case PixelFormat.R32G32B32A32UInt:
-                    return MTLPixelFormat.RGBA32Uint;
-
-                case PixelFormat.R32G32B32A32SInt:
-                    return MTLPixelFormat.RGBA32Sint;
-
-                case PixelFormat.R32G32B32A32Float:
-                    return MTLPixelFormat.RGBA32Float;
-
-                case PixelFormat.Bc1RgbUNorm:
-                case PixelFormat.Bc1RgbaUNorm:
-                    return MTLPixelFormat.BC1_RGBA;
-
-                case PixelFormat.Bc1RgbUNormSRgb:
-                case PixelFormat.Bc1RgbaUNormSRgb:
-                    return MTLPixelFormat.BC1_RGBA_sRGB;
-
-                case PixelFormat.Bc2UNorm:
-                    return MTLPixelFormat.BC2_RGBA;
-
-                case PixelFormat.Bc2UNormSRgb:
-                    return MTLPixelFormat.BC2_RGBA_sRGB;
-
-                case PixelFormat.Bc3UNorm:
-                    return MTLPixelFormat.BC3_RGBA;
-
-                case PixelFormat.Bc3UNormSRgb:
-                    return MTLPixelFormat.BC3_RGBA_sRGB;
-
-                case PixelFormat.Bc4UNorm:
-                    return MTLPixelFormat.BC4_RUnorm;
-
-                case PixelFormat.Bc4SNorm:
-                    return MTLPixelFormat.BC4_RSnorm;
-
-                case PixelFormat.Bc5UNorm:
-                    return MTLPixelFormat.BC5_RGUnorm;
-
-                case PixelFormat.Bc5SNorm:
-                    return MTLPixelFormat.BC5_RGSnorm;
-
-                case PixelFormat.Bc7UNorm:
-                    return MTLPixelFormat.BC7_RGBAUnorm;
-
-                case PixelFormat.Bc7UNormSRgb:
-                    return MTLPixelFormat.BC7_RGBAUnorm_sRGB;
-
-                case PixelFormat.Etc2R8G8B8UNorm:
-                    return MTLPixelFormat.ETC2_RGB8;
-
-                case PixelFormat.Etc2R8G8B8A1UNorm:
-                    return MTLPixelFormat.ETC2_RGB8A1;
-
-                case PixelFormat.Etc2R8G8B8A8UNorm:
-                    return MTLPixelFormat.EAC_RGBA8;
-
-                case PixelFormat.D24UNormS8UInt:
-                    return MTLPixelFormat.Depth24Unorm_Stencil8;
-
-                case PixelFormat.D32FloatS8UInt:
-                    return MTLPixelFormat.Depth32Float_Stencil8;
-
-                case PixelFormat.R10G10B10A2UNorm:
-                    return MTLPixelFormat.RGB10A2Unorm;
-
-                case PixelFormat.R10G10B10A2UInt:
-                    return MTLPixelFormat.RGB10A2Uint;
-
-                case PixelFormat.R11G11B10Float:
-                    return MTLPixelFormat.RG11B10Float;
-
-                default:
-                    throw Illegal.Value<PixelFormat>();
-            }
+                PixelFormat.R8UNorm => MTLPixelFormat.R8Unorm,
+                PixelFormat.R8SNorm => MTLPixelFormat.R8Snorm,
+                PixelFormat.R8UInt => MTLPixelFormat.R8Uint,
+                PixelFormat.R8SInt => MTLPixelFormat.R8Sint,
+                PixelFormat.R16UNorm => depthFormat ? MTLPixelFormat.Depth16Unorm : MTLPixelFormat.R16Unorm,
+                PixelFormat.R16SNorm => MTLPixelFormat.R16Snorm,
+                PixelFormat.R16UInt => MTLPixelFormat.R16Uint,
+                PixelFormat.R16SInt => MTLPixelFormat.R16Sint,
+                PixelFormat.R16Float => MTLPixelFormat.R16Float,
+                PixelFormat.R32UInt => MTLPixelFormat.R32Uint,
+                PixelFormat.R32SInt => MTLPixelFormat.R32Sint,
+                PixelFormat.R32Float => depthFormat ? MTLPixelFormat.Depth32Float : MTLPixelFormat.R32Float,
+                PixelFormat.R8G8UNorm => MTLPixelFormat.RG8Unorm,
+                PixelFormat.R8G8SNorm => MTLPixelFormat.RG8Snorm,
+                PixelFormat.R8G8UInt => MTLPixelFormat.RG8Uint,
+                PixelFormat.R8G8SInt => MTLPixelFormat.RG8Sint,
+                PixelFormat.R16G16UNorm => MTLPixelFormat.RG16Unorm,
+                PixelFormat.R16G16SNorm => MTLPixelFormat.RG16Snorm,
+                PixelFormat.R16G16UInt => MTLPixelFormat.RG16Uint,
+                PixelFormat.R16G16SInt => MTLPixelFormat.RG16Sint,
+                PixelFormat.R16G16Float => MTLPixelFormat.RG16Float,
+                PixelFormat.R32G32UInt => MTLPixelFormat.RG32Uint,
+                PixelFormat.R32G32SInt => MTLPixelFormat.RG32Sint,
+                PixelFormat.R32G32Float => MTLPixelFormat.RG32Float,
+                PixelFormat.R8G8B8A8UNorm => MTLPixelFormat.RGBA8Unorm,
+                PixelFormat.R8G8B8A8UNormSRgb => MTLPixelFormat.RGBA8Unorm_sRGB,
+                PixelFormat.B8G8R8A8UNorm => MTLPixelFormat.BGRA8Unorm,
+                PixelFormat.B8G8R8A8UNormSRgb => MTLPixelFormat.BGRA8Unorm_sRGB,
+                PixelFormat.R8G8B8A8SNorm => MTLPixelFormat.RGBA8Snorm,
+                PixelFormat.R8G8B8A8UInt => MTLPixelFormat.RGBA8Uint,
+                PixelFormat.R8G8B8A8SInt => MTLPixelFormat.RGBA8Sint,
+                PixelFormat.R16G16B16A16UNorm => MTLPixelFormat.RGBA16Unorm,
+                PixelFormat.R16G16B16A16SNorm => MTLPixelFormat.RGBA16Snorm,
+                PixelFormat.R16G16B16A16UInt => MTLPixelFormat.RGBA16Uint,
+                PixelFormat.R16G16B16A16SInt => MTLPixelFormat.RGBA16Sint,
+                PixelFormat.R16G16B16A16Float => MTLPixelFormat.RGBA16Float,
+                PixelFormat.R32G32B32A32UInt => MTLPixelFormat.RGBA32Uint,
+                PixelFormat.R32G32B32A32SInt => MTLPixelFormat.RGBA32Sint,
+                PixelFormat.R32G32B32A32Float => MTLPixelFormat.RGBA32Float,
+                PixelFormat.Bc1RgbUNorm or PixelFormat.Bc1RgbaUNorm => MTLPixelFormat.BC1_RGBA,
+                PixelFormat.Bc1RgbUNormSRgb or PixelFormat.Bc1RgbaUNormSRgb => MTLPixelFormat.BC1_RGBA_sRGB,
+                PixelFormat.Bc2UNorm => MTLPixelFormat.BC2_RGBA,
+                PixelFormat.Bc2UNormSRgb => MTLPixelFormat.BC2_RGBA_sRGB,
+                PixelFormat.Bc3UNorm => MTLPixelFormat.BC3_RGBA,
+                PixelFormat.Bc3UNormSRgb => MTLPixelFormat.BC3_RGBA_sRGB,
+                PixelFormat.Bc4UNorm => MTLPixelFormat.BC4_RUnorm,
+                PixelFormat.Bc4SNorm => MTLPixelFormat.BC4_RSnorm,
+                PixelFormat.Bc5UNorm => MTLPixelFormat.BC5_RGUnorm,
+                PixelFormat.Bc5SNorm => MTLPixelFormat.BC5_RGSnorm,
+                PixelFormat.Bc7UNorm => MTLPixelFormat.BC7_RGBAUnorm,
+                PixelFormat.Bc7UNormSRgb => MTLPixelFormat.BC7_RGBAUnorm_sRGB,
+                PixelFormat.Etc2R8G8B8UNorm => MTLPixelFormat.ETC2_RGB8,
+                PixelFormat.Etc2R8G8B8A1UNorm => MTLPixelFormat.ETC2_RGB8A1,
+                PixelFormat.Etc2R8G8B8A8UNorm => MTLPixelFormat.EAC_RGBA8,
+                PixelFormat.D24UNormS8UInt => MTLPixelFormat.Depth24Unorm_Stencil8,
+                PixelFormat.D32FloatS8UInt => MTLPixelFormat.Depth32Float_Stencil8,
+                PixelFormat.R10G10B10A2UNorm => MTLPixelFormat.RGB10A2Unorm,
+                PixelFormat.R10G10B10A2UInt => MTLPixelFormat.RGB10A2Uint,
+                PixelFormat.R11G11B10Float => MTLPixelFormat.RG11B10Float,
+                _ => throw Illegal.Value<PixelFormat>(),
+            };
         }
 
         internal static bool IsFormatSupported(PixelFormat format, TextureUsage usage, MtlFeatureSupport metalFeatures)
         {
-            switch (format)
+            return format switch
             {
-                case PixelFormat.Bc1RgbUNorm:
-                case PixelFormat.Bc1RgbUNormSRgb:
-                case PixelFormat.Bc1RgbaUNorm:
-                case PixelFormat.Bc1RgbaUNormSRgb:
-                case PixelFormat.Bc2UNorm:
-                case PixelFormat.Bc2UNormSRgb:
-                case PixelFormat.Bc3UNorm:
-                case PixelFormat.Bc3UNormSRgb:
-                case PixelFormat.Bc4UNorm:
-                case PixelFormat.Bc4SNorm:
-                case PixelFormat.Bc5UNorm:
-                case PixelFormat.Bc5SNorm:
-                case PixelFormat.Bc7UNorm:
-                case PixelFormat.Bc7UNormSRgb:
-                    return metalFeatures.IsSupported(MTLFeatureSet.macOS_GPUFamily1_v1)
-                           || metalFeatures.IsSupported(MTLFeatureSet.macOS_GPUFamily1_v2)
-                           || metalFeatures.IsSupported(MTLFeatureSet.macOS_GPUFamily1_v3);
-
-                case PixelFormat.Etc2R8G8B8UNorm:
-                case PixelFormat.Etc2R8G8B8A1UNorm:
-                case PixelFormat.Etc2R8G8B8A8UNorm:
-                    return metalFeatures.IsSupported(MTLFeatureSet.iOS_GPUFamily1_v1)
-                           || metalFeatures.IsSupported(MTLFeatureSet.iOS_GPUFamily2_v1)
-                           || metalFeatures.IsSupported(MTLFeatureSet.iOS_GPUFamily3_v1)
-                           || metalFeatures.IsSupported(MTLFeatureSet.iOS_GPUFamily4_v1);
-
-                case PixelFormat.R16UNorm:
-                    return (usage & TextureUsage.DepthStencil) == 0
-                           || metalFeatures.IsSupported(MTLFeatureSet.macOS_GPUFamily1_v2)
-                           || metalFeatures.IsSupported(MTLFeatureSet.macOS_GPUFamily1_v3);
-
-                default:
-                    return true;
-            }
+                PixelFormat.Bc1RgbUNorm or PixelFormat.Bc1RgbUNormSRgb or PixelFormat.Bc1RgbaUNorm or PixelFormat.Bc1RgbaUNormSRgb or PixelFormat.Bc2UNorm or PixelFormat.Bc2UNormSRgb or PixelFormat.Bc3UNorm or PixelFormat.Bc3UNormSRgb or PixelFormat.Bc4UNorm or PixelFormat.Bc4SNorm or PixelFormat.Bc5UNorm or PixelFormat.Bc5SNorm or PixelFormat.Bc7UNorm or PixelFormat.Bc7UNormSRgb => metalFeatures.IsSupported(MTLFeatureSet.macOS_GPUFamily1_v1)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         || metalFeatures.IsSupported(MTLFeatureSet.macOS_GPUFamily1_v2)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         || metalFeatures.IsSupported(MTLFeatureSet.macOS_GPUFamily1_v3),
+                PixelFormat.Etc2R8G8B8UNorm or PixelFormat.Etc2R8G8B8A1UNorm or PixelFormat.Etc2R8G8B8A8UNorm => metalFeatures.IsSupported(MTLFeatureSet.iOS_GPUFamily1_v1)
+                                                                                                                   || metalFeatures.IsSupported(MTLFeatureSet.iOS_GPUFamily2_v1)
+                                                                                                                   || metalFeatures.IsSupported(MTLFeatureSet.iOS_GPUFamily3_v1)
+                                                                                                                   || metalFeatures.IsSupported(MTLFeatureSet.iOS_GPUFamily4_v1),
+                PixelFormat.R16UNorm => (usage & TextureUsage.DepthStencil) == 0
+                                        || metalFeatures.IsSupported(MTLFeatureSet.macOS_GPUFamily1_v2)
+                                        || metalFeatures.IsSupported(MTLFeatureSet.macOS_GPUFamily1_v3),
+                _ => true,
+            };
         }
 
         internal static MTLTriangleFillMode VdToMtlFillMode(PolygonFillMode fillMode)
         {
-            switch (fillMode)
+            return fillMode switch
             {
-                case PolygonFillMode.Solid:
-                    return MTLTriangleFillMode.Fill;
-
-                case PolygonFillMode.Wireframe:
-                    return MTLTriangleFillMode.Lines;
-
-                default:
-                    throw Illegal.Value<PolygonFillMode>();
-            }
+                PolygonFillMode.Solid => MTLTriangleFillMode.Fill,
+                PolygonFillMode.Wireframe => MTLTriangleFillMode.Lines,
+                _ => throw Illegal.Value<PolygonFillMode>(),
+            };
         }
 
         internal static MTLWinding VdVoMtlFrontFace(FrontFace frontFace)
@@ -347,71 +199,35 @@ namespace Veldrid.MTL
 
         internal static MTLBlendFactor VdToMtlBlendFactor(BlendFactor vdFactor)
         {
-            switch (vdFactor)
+            return vdFactor switch
             {
-                case BlendFactor.Zero:
-                    return MTLBlendFactor.Zero;
-
-                case BlendFactor.One:
-                    return MTLBlendFactor.One;
-
-                case BlendFactor.SourceAlpha:
-                    return MTLBlendFactor.SourceAlpha;
-
-                case BlendFactor.InverseSourceAlpha:
-                    return MTLBlendFactor.OneMinusSourceAlpha;
-
-                case BlendFactor.DestinationAlpha:
-                    return MTLBlendFactor.DestinationAlpha;
-
-                case BlendFactor.InverseDestinationAlpha:
-                    return MTLBlendFactor.OneMinusDestinationAlpha;
-
-                case BlendFactor.SourceColor:
-                    return MTLBlendFactor.SourceColor;
-
-                case BlendFactor.InverseSourceColor:
-                    return MTLBlendFactor.OneMinusSourceColor;
-
-                case BlendFactor.DestinationColor:
-                    return MTLBlendFactor.DestinationColor;
-
-                case BlendFactor.InverseDestinationColor:
-                    return MTLBlendFactor.OneMinusDestinationColor;
-
-                case BlendFactor.BlendFactor:
-                    return MTLBlendFactor.BlendColor;
-
-                case BlendFactor.InverseBlendFactor:
-                    return MTLBlendFactor.OneMinusBlendColor;
-
-                default:
-                    throw Illegal.Value<BlendFactor>();
-            }
+                BlendFactor.Zero => MTLBlendFactor.Zero,
+                BlendFactor.One => MTLBlendFactor.One,
+                BlendFactor.SourceAlpha => MTLBlendFactor.SourceAlpha,
+                BlendFactor.InverseSourceAlpha => MTLBlendFactor.OneMinusSourceAlpha,
+                BlendFactor.DestinationAlpha => MTLBlendFactor.DestinationAlpha,
+                BlendFactor.InverseDestinationAlpha => MTLBlendFactor.OneMinusDestinationAlpha,
+                BlendFactor.SourceColor => MTLBlendFactor.SourceColor,
+                BlendFactor.InverseSourceColor => MTLBlendFactor.OneMinusSourceColor,
+                BlendFactor.DestinationColor => MTLBlendFactor.DestinationColor,
+                BlendFactor.InverseDestinationColor => MTLBlendFactor.OneMinusDestinationColor,
+                BlendFactor.BlendFactor => MTLBlendFactor.BlendColor,
+                BlendFactor.InverseBlendFactor => MTLBlendFactor.OneMinusBlendColor,
+                _ => throw Illegal.Value<BlendFactor>(),
+            };
         }
 
         internal static MTLBlendOperation VdToMtlBlendOp(BlendFunction vdFunction)
         {
-            switch (vdFunction)
+            return vdFunction switch
             {
-                case BlendFunction.Add:
-                    return MTLBlendOperation.Add;
-
-                case BlendFunction.Maximum:
-                    return MTLBlendOperation.Max;
-
-                case BlendFunction.Minimum:
-                    return MTLBlendOperation.Min;
-
-                case BlendFunction.ReverseSubtract:
-                    return MTLBlendOperation.ReverseSubtract;
-
-                case BlendFunction.Subtract:
-                    return MTLBlendOperation.Subtract;
-
-                default:
-                    throw Illegal.Value<BlendFunction>();
-            }
+                BlendFunction.Add => MTLBlendOperation.Add,
+                BlendFunction.Maximum => MTLBlendOperation.Max,
+                BlendFunction.Minimum => MTLBlendOperation.Min,
+                BlendFunction.ReverseSubtract => MTLBlendOperation.ReverseSubtract,
+                BlendFunction.Subtract => MTLBlendOperation.Subtract,
+                _ => throw Illegal.Value<BlendFunction>(),
+            };
         }
 
         internal static MTLColorWriteMask VdToMtlColorWriteMask(ColorWriteMask vdMask)
@@ -432,148 +248,80 @@ namespace Veldrid.MTL
 
         internal static MTLDataType VdVoMtlShaderConstantType(ShaderConstantType type)
         {
-            switch (type)
+            return type switch
             {
-                case ShaderConstantType.Bool:
-                    return MTLDataType.Bool;
-
-                case ShaderConstantType.UInt16:
-                    return MTLDataType.UShort;
-
-                case ShaderConstantType.Int16:
-                    return MTLDataType.Short;
-
-                case ShaderConstantType.UInt32:
-                    return MTLDataType.UInt;
-
-                case ShaderConstantType.Int32:
-                    return MTLDataType.Int;
-
-                case ShaderConstantType.Float:
-                    return MTLDataType.Float;
-
-                case ShaderConstantType.UInt64:
-                case ShaderConstantType.Int64:
-                case ShaderConstantType.Double:
-                    throw new VeldridException("Metal does not support 64-bit shader constants.");
-
-                default:
-                    throw Illegal.Value<ShaderConstantType>();
-            }
+                ShaderConstantType.Bool => MTLDataType.Bool,
+                ShaderConstantType.UInt16 => MTLDataType.UShort,
+                ShaderConstantType.Int16 => MTLDataType.Short,
+                ShaderConstantType.UInt32 => MTLDataType.UInt,
+                ShaderConstantType.Int32 => MTLDataType.Int,
+                ShaderConstantType.Float => MTLDataType.Float,
+                ShaderConstantType.UInt64 or ShaderConstantType.Int64 or ShaderConstantType.Double => throw new VeldridException("Metal does not support 64-bit shader constants."),
+                _ => throw Illegal.Value<ShaderConstantType>(),
+            };
         }
 
         internal static MTLCompareFunction VdToMtlCompareFunction(ComparisonKind comparisonKind)
         {
-            switch (comparisonKind)
+            return comparisonKind switch
             {
-                case ComparisonKind.Always:
-                    return MTLCompareFunction.Always;
-
-                case ComparisonKind.Equal:
-                    return MTLCompareFunction.Equal;
-
-                case ComparisonKind.Greater:
-                    return MTLCompareFunction.Greater;
-
-                case ComparisonKind.GreaterEqual:
-                    return MTLCompareFunction.GreaterEqual;
-
-                case ComparisonKind.Less:
-                    return MTLCompareFunction.Less;
-
-                case ComparisonKind.LessEqual:
-                    return MTLCompareFunction.LessEqual;
-
-                case ComparisonKind.Never:
-                    return MTLCompareFunction.Never;
-
-                case ComparisonKind.NotEqual:
-                    return MTLCompareFunction.NotEqual;
-
-                default:
-                    throw Illegal.Value<ComparisonKind>();
-            }
+                ComparisonKind.Always => MTLCompareFunction.Always,
+                ComparisonKind.Equal => MTLCompareFunction.Equal,
+                ComparisonKind.Greater => MTLCompareFunction.Greater,
+                ComparisonKind.GreaterEqual => MTLCompareFunction.GreaterEqual,
+                ComparisonKind.Less => MTLCompareFunction.Less,
+                ComparisonKind.LessEqual => MTLCompareFunction.LessEqual,
+                ComparisonKind.Never => MTLCompareFunction.Never,
+                ComparisonKind.NotEqual => MTLCompareFunction.NotEqual,
+                _ => throw Illegal.Value<ComparisonKind>(),
+            };
         }
 
         internal static MTLCullMode VdToMtlCullMode(FaceCullMode cullMode)
         {
-            switch (cullMode)
+            return cullMode switch
             {
-                case FaceCullMode.Front:
-                    return MTLCullMode.Front;
-
-                case FaceCullMode.Back:
-                    return MTLCullMode.Back;
-
-                case FaceCullMode.None:
-                    return MTLCullMode.None;
-
-                default:
-                    throw Illegal.Value<FaceCullMode>();
-            }
+                FaceCullMode.Front => MTLCullMode.Front,
+                FaceCullMode.Back => MTLCullMode.Back,
+                FaceCullMode.None => MTLCullMode.None,
+                _ => throw Illegal.Value<FaceCullMode>(),
+            };
         }
 
         internal static MTLSamplerBorderColor VdToMtlBorderColor(SamplerBorderColor borderColor)
         {
-            switch (borderColor)
+            return borderColor switch
             {
-                case SamplerBorderColor.TransparentBlack:
-                    return MTLSamplerBorderColor.TransparentBlack;
-
-                case SamplerBorderColor.OpaqueBlack:
-                    return MTLSamplerBorderColor.OpaqueBlack;
-
-                case SamplerBorderColor.OpaqueWhite:
-                    return MTLSamplerBorderColor.OpaqueWhite;
-
-                default:
-                    throw Illegal.Value<SamplerBorderColor>();
-            }
+                SamplerBorderColor.TransparentBlack => MTLSamplerBorderColor.TransparentBlack,
+                SamplerBorderColor.OpaqueBlack => MTLSamplerBorderColor.OpaqueBlack,
+                SamplerBorderColor.OpaqueWhite => MTLSamplerBorderColor.OpaqueWhite,
+                _ => throw Illegal.Value<SamplerBorderColor>(),
+            };
         }
 
         internal static MTLSamplerAddressMode VdToMtlAddressMode(SamplerAddressMode mode)
         {
-            switch (mode)
+            return mode switch
             {
-                case SamplerAddressMode.Border:
-                    return MTLSamplerAddressMode.ClampToBorderColor;
-
-                case SamplerAddressMode.Clamp:
-                    return MTLSamplerAddressMode.ClampToEdge;
-
-                case SamplerAddressMode.Mirror:
-                    return MTLSamplerAddressMode.MirrorRepeat;
-
-                case SamplerAddressMode.Wrap:
-                    return MTLSamplerAddressMode.Repeat;
-
-                default:
-                    throw Illegal.Value<SamplerAddressMode>();
-            }
+                SamplerAddressMode.Border => MTLSamplerAddressMode.ClampToBorderColor,
+                SamplerAddressMode.Clamp => MTLSamplerAddressMode.ClampToEdge,
+                SamplerAddressMode.Mirror => MTLSamplerAddressMode.MirrorRepeat,
+                SamplerAddressMode.Wrap => MTLSamplerAddressMode.Repeat,
+                _ => throw Illegal.Value<SamplerAddressMode>(),
+            };
         }
 
         internal static MTLPrimitiveType VdToMtlPrimitiveTopology(PrimitiveTopology primitiveTopology)
         {
-            switch (primitiveTopology)
+            return primitiveTopology switch
             {
-                case PrimitiveTopology.LineList:
-                    return MTLPrimitiveType.Line;
-
-                case PrimitiveTopology.LineStrip:
-                    return MTLPrimitiveType.LineStrip;
-
-                case PrimitiveTopology.TriangleList:
-                    return MTLPrimitiveType.Triangle;
-
-                case PrimitiveTopology.TriangleStrip:
-                    return MTLPrimitiveType.TriangleStrip;
-
-                case PrimitiveTopology.PointList:
-                    return MTLPrimitiveType.Point;
-
-                default:
-                    throw Illegal.Value<PrimitiveTopology>();
-            }
+                PrimitiveTopology.LineList => MTLPrimitiveType.Line,
+                PrimitiveTopology.LineStrip => MTLPrimitiveType.LineStrip,
+                PrimitiveTopology.TriangleList => MTLPrimitiveType.Triangle,
+                PrimitiveTopology.TriangleStrip => MTLPrimitiveType.TriangleStrip,
+                PrimitiveTopology.PointList => MTLPrimitiveType.Point,
+                _ => throw Illegal.Value<PrimitiveTopology>(),
+            };
         }
 
         internal static MTLTextureUsage VdToMtlTextureUsage(TextureUsage usage)
@@ -593,104 +341,41 @@ namespace Veldrid.MTL
 
         internal static MTLVertexFormat VdToMtlVertexFormat(VertexElementFormat format)
         {
-            switch (format)
+            return format switch
             {
-                case VertexElementFormat.Byte2Norm:
-                    return MTLVertexFormat.uchar2Normalized;
-
-                case VertexElementFormat.Byte2:
-                    return MTLVertexFormat.uchar2;
-
-                case VertexElementFormat.Byte4Norm:
-                    return MTLVertexFormat.uchar4Normalized;
-
-                case VertexElementFormat.Byte4:
-                    return MTLVertexFormat.uchar4;
-
-                case VertexElementFormat.SByte2Norm:
-                    return MTLVertexFormat.char2Normalized;
-
-                case VertexElementFormat.SByte2:
-                    return MTLVertexFormat.char2;
-
-                case VertexElementFormat.SByte4Norm:
-                    return MTLVertexFormat.char4Normalized;
-
-                case VertexElementFormat.SByte4:
-                    return MTLVertexFormat.char4;
-
-                case VertexElementFormat.UShort2Norm:
-                    return MTLVertexFormat.ushort2Normalized;
-
-                case VertexElementFormat.UShort2:
-                    return MTLVertexFormat.ushort2;
-
-                case VertexElementFormat.Short2Norm:
-                    return MTLVertexFormat.short2Normalized;
-
-                case VertexElementFormat.Short2:
-                    return MTLVertexFormat.short2;
-
-                case VertexElementFormat.UShort4Norm:
-                    return MTLVertexFormat.ushort4Normalized;
-
-                case VertexElementFormat.UShort4:
-                    return MTLVertexFormat.ushort4;
-
-                case VertexElementFormat.Short4Norm:
-                    return MTLVertexFormat.short4Normalized;
-
-                case VertexElementFormat.Short4:
-                    return MTLVertexFormat.short4;
-
-                case VertexElementFormat.UInt1:
-                    return MTLVertexFormat.@uint;
-
-                case VertexElementFormat.UInt2:
-                    return MTLVertexFormat.uint2;
-
-                case VertexElementFormat.UInt3:
-                    return MTLVertexFormat.uint3;
-
-                case VertexElementFormat.UInt4:
-                    return MTLVertexFormat.uint4;
-
-                case VertexElementFormat.Int1:
-                    return MTLVertexFormat.@int;
-
-                case VertexElementFormat.Int2:
-                    return MTLVertexFormat.int2;
-
-                case VertexElementFormat.Int3:
-                    return MTLVertexFormat.int3;
-
-                case VertexElementFormat.Int4:
-                    return MTLVertexFormat.int4;
-
-                case VertexElementFormat.Float1:
-                    return MTLVertexFormat.@float;
-
-                case VertexElementFormat.Float2:
-                    return MTLVertexFormat.float2;
-
-                case VertexElementFormat.Float3:
-                    return MTLVertexFormat.float3;
-
-                case VertexElementFormat.Float4:
-                    return MTLVertexFormat.float4;
-
-                case VertexElementFormat.Half1:
-                    return MTLVertexFormat.half;
-
-                case VertexElementFormat.Half2:
-                    return MTLVertexFormat.half2;
-
-                case VertexElementFormat.Half4:
-                    return MTLVertexFormat.half4;
-
-                default:
-                    throw Illegal.Value<VertexElementFormat>();
-            }
+                VertexElementFormat.Byte2Norm => MTLVertexFormat.uchar2Normalized,
+                VertexElementFormat.Byte2 => MTLVertexFormat.uchar2,
+                VertexElementFormat.Byte4Norm => MTLVertexFormat.uchar4Normalized,
+                VertexElementFormat.Byte4 => MTLVertexFormat.uchar4,
+                VertexElementFormat.SByte2Norm => MTLVertexFormat.char2Normalized,
+                VertexElementFormat.SByte2 => MTLVertexFormat.char2,
+                VertexElementFormat.SByte4Norm => MTLVertexFormat.char4Normalized,
+                VertexElementFormat.SByte4 => MTLVertexFormat.char4,
+                VertexElementFormat.UShort2Norm => MTLVertexFormat.ushort2Normalized,
+                VertexElementFormat.UShort2 => MTLVertexFormat.ushort2,
+                VertexElementFormat.Short2Norm => MTLVertexFormat.short2Normalized,
+                VertexElementFormat.Short2 => MTLVertexFormat.short2,
+                VertexElementFormat.UShort4Norm => MTLVertexFormat.ushort4Normalized,
+                VertexElementFormat.UShort4 => MTLVertexFormat.ushort4,
+                VertexElementFormat.Short4Norm => MTLVertexFormat.short4Normalized,
+                VertexElementFormat.Short4 => MTLVertexFormat.short4,
+                VertexElementFormat.UInt1 => MTLVertexFormat.@uint,
+                VertexElementFormat.UInt2 => MTLVertexFormat.uint2,
+                VertexElementFormat.UInt3 => MTLVertexFormat.uint3,
+                VertexElementFormat.UInt4 => MTLVertexFormat.uint4,
+                VertexElementFormat.Int1 => MTLVertexFormat.@int,
+                VertexElementFormat.Int2 => MTLVertexFormat.int2,
+                VertexElementFormat.Int3 => MTLVertexFormat.int3,
+                VertexElementFormat.Int4 => MTLVertexFormat.int4,
+                VertexElementFormat.Float1 => MTLVertexFormat.@float,
+                VertexElementFormat.Float2 => MTLVertexFormat.float2,
+                VertexElementFormat.Float3 => MTLVertexFormat.float3,
+                VertexElementFormat.Float4 => MTLVertexFormat.float4,
+                VertexElementFormat.Half1 => MTLVertexFormat.half,
+                VertexElementFormat.Half2 => MTLVertexFormat.half2,
+                VertexElementFormat.Half4 => MTLVertexFormat.half4,
+                _ => throw Illegal.Value<VertexElementFormat>(),
+            };
         }
 
         internal static MTLIndexType VdToMtlIndexFormat(IndexFormat format)
@@ -700,137 +385,51 @@ namespace Veldrid.MTL
 
         internal static MTLStencilOperation VdToMtlStencilOperation(StencilOperation op)
         {
-            switch (op)
+            return op switch
             {
-                case StencilOperation.Keep:
-                    return MTLStencilOperation.Keep;
-
-                case StencilOperation.Zero:
-                    return MTLStencilOperation.Zero;
-
-                case StencilOperation.Replace:
-                    return MTLStencilOperation.Replace;
-
-                case StencilOperation.IncrementAndClamp:
-                    return MTLStencilOperation.IncrementClamp;
-
-                case StencilOperation.DecrementAndClamp:
-                    return MTLStencilOperation.DecrementClamp;
-
-                case StencilOperation.Invert:
-                    return MTLStencilOperation.Invert;
-
-                case StencilOperation.IncrementAndWrap:
-                    return MTLStencilOperation.IncrementWrap;
-
-                case StencilOperation.DecrementAndWrap:
-                    return MTLStencilOperation.DecrementWrap;
-
-                default:
-                    throw Illegal.Value<StencilOperation>();
-            }
+                StencilOperation.Keep => MTLStencilOperation.Keep,
+                StencilOperation.Zero => MTLStencilOperation.Zero,
+                StencilOperation.Replace => MTLStencilOperation.Replace,
+                StencilOperation.IncrementAndClamp => MTLStencilOperation.IncrementClamp,
+                StencilOperation.DecrementAndClamp => MTLStencilOperation.DecrementClamp,
+                StencilOperation.Invert => MTLStencilOperation.Invert,
+                StencilOperation.IncrementAndWrap => MTLStencilOperation.IncrementWrap,
+                StencilOperation.DecrementAndWrap => MTLStencilOperation.DecrementWrap,
+                _ => throw Illegal.Value<StencilOperation>(),
+            };
         }
 
         internal static uint GetMaxTexture1DWidth(MTLFeatureSet fs)
         {
-            switch (fs)
+            return fs switch
             {
-                case MTLFeatureSet.iOS_GPUFamily1_v1:
-                case MTLFeatureSet.iOS_GPUFamily2_v1:
-                    return 4096;
-
-                case MTLFeatureSet.iOS_GPUFamily1_v2:
-                case MTLFeatureSet.iOS_GPUFamily2_v2:
-                case MTLFeatureSet.iOS_GPUFamily1_v3:
-                case MTLFeatureSet.iOS_GPUFamily2_v3:
-                case MTLFeatureSet.iOS_GPUFamily1_v4:
-                case MTLFeatureSet.iOS_GPUFamily2_v4:
-                case MTLFeatureSet.tvOS_GPUFamily1_v1:
-                case MTLFeatureSet.tvOS_GPUFamily1_v2:
-                case MTLFeatureSet.tvOS_GPUFamily1_v3:
-                    return 8192;
-
-                case MTLFeatureSet.iOS_GPUFamily3_v1:
-                case MTLFeatureSet.iOS_GPUFamily3_v2:
-                case MTLFeatureSet.iOS_GPUFamily3_v3:
-                case MTLFeatureSet.iOS_GPUFamily4_v1:
-                case MTLFeatureSet.tvOS_GPUFamily2_v1:
-                case MTLFeatureSet.macOS_GPUFamily1_v1:
-                case MTLFeatureSet.macOS_GPUFamily1_v2:
-                case MTLFeatureSet.macOS_GPUFamily1_v3:
-                    return 16384;
-
-                default:
-                    return 4096;
-            }
+                MTLFeatureSet.iOS_GPUFamily1_v1 or MTLFeatureSet.iOS_GPUFamily2_v1 => 4096,
+                MTLFeatureSet.iOS_GPUFamily1_v2 or MTLFeatureSet.iOS_GPUFamily2_v2 or MTLFeatureSet.iOS_GPUFamily1_v3 or MTLFeatureSet.iOS_GPUFamily2_v3 or MTLFeatureSet.iOS_GPUFamily1_v4 or MTLFeatureSet.iOS_GPUFamily2_v4 or MTLFeatureSet.tvOS_GPUFamily1_v1 or MTLFeatureSet.tvOS_GPUFamily1_v2 or MTLFeatureSet.tvOS_GPUFamily1_v3 => 8192,
+                MTLFeatureSet.iOS_GPUFamily3_v1 or MTLFeatureSet.iOS_GPUFamily3_v2 or MTLFeatureSet.iOS_GPUFamily3_v3 or MTLFeatureSet.iOS_GPUFamily4_v1 or MTLFeatureSet.tvOS_GPUFamily2_v1 or MTLFeatureSet.macOS_GPUFamily1_v1 or MTLFeatureSet.macOS_GPUFamily1_v2 or MTLFeatureSet.macOS_GPUFamily1_v3 => 16384,
+                _ => 4096,
+            };
         }
 
         internal static uint GetMaxTexture2DDimensions(MTLFeatureSet fs)
         {
-            switch (fs)
+            return fs switch
             {
-                case MTLFeatureSet.iOS_GPUFamily1_v1:
-                case MTLFeatureSet.iOS_GPUFamily2_v1:
-                    return 4096;
-
-                case MTLFeatureSet.iOS_GPUFamily1_v2:
-                case MTLFeatureSet.iOS_GPUFamily2_v2:
-                case MTLFeatureSet.iOS_GPUFamily1_v3:
-                case MTLFeatureSet.iOS_GPUFamily2_v3:
-                case MTLFeatureSet.iOS_GPUFamily1_v4:
-                case MTLFeatureSet.iOS_GPUFamily2_v4:
-                case MTLFeatureSet.tvOS_GPUFamily1_v1:
-                case MTLFeatureSet.tvOS_GPUFamily1_v2:
-                case MTLFeatureSet.tvOS_GPUFamily1_v3:
-                    return 8192;
-
-                case MTLFeatureSet.iOS_GPUFamily3_v1:
-                case MTLFeatureSet.iOS_GPUFamily3_v2:
-                case MTLFeatureSet.iOS_GPUFamily3_v3:
-                case MTLFeatureSet.iOS_GPUFamily4_v1:
-                case MTLFeatureSet.tvOS_GPUFamily2_v1:
-                case MTLFeatureSet.macOS_GPUFamily1_v1:
-                case MTLFeatureSet.macOS_GPUFamily1_v2:
-                case MTLFeatureSet.macOS_GPUFamily1_v3:
-                    return 16384;
-
-                default:
-                    return 4096;
-            }
+                MTLFeatureSet.iOS_GPUFamily1_v1 or MTLFeatureSet.iOS_GPUFamily2_v1 => 4096,
+                MTLFeatureSet.iOS_GPUFamily1_v2 or MTLFeatureSet.iOS_GPUFamily2_v2 or MTLFeatureSet.iOS_GPUFamily1_v3 or MTLFeatureSet.iOS_GPUFamily2_v3 or MTLFeatureSet.iOS_GPUFamily1_v4 or MTLFeatureSet.iOS_GPUFamily2_v4 or MTLFeatureSet.tvOS_GPUFamily1_v1 or MTLFeatureSet.tvOS_GPUFamily1_v2 or MTLFeatureSet.tvOS_GPUFamily1_v3 => 8192,
+                MTLFeatureSet.iOS_GPUFamily3_v1 or MTLFeatureSet.iOS_GPUFamily3_v2 or MTLFeatureSet.iOS_GPUFamily3_v3 or MTLFeatureSet.iOS_GPUFamily4_v1 or MTLFeatureSet.tvOS_GPUFamily2_v1 or MTLFeatureSet.macOS_GPUFamily1_v1 or MTLFeatureSet.macOS_GPUFamily1_v2 or MTLFeatureSet.macOS_GPUFamily1_v3 => 16384,
+                _ => 4096,
+            };
         }
 
         internal static uint GetMaxTextureCubeDimensions(MTLFeatureSet fs)
         {
-            switch (fs)
+            return fs switch
             {
-                case MTLFeatureSet.iOS_GPUFamily1_v1:
-                case MTLFeatureSet.iOS_GPUFamily2_v1:
-                    return 4096;
-
-                case MTLFeatureSet.iOS_GPUFamily1_v2:
-                case MTLFeatureSet.iOS_GPUFamily2_v2:
-                case MTLFeatureSet.iOS_GPUFamily1_v3:
-                case MTLFeatureSet.iOS_GPUFamily2_v3:
-                case MTLFeatureSet.iOS_GPUFamily1_v4:
-                case MTLFeatureSet.iOS_GPUFamily2_v4:
-                case MTLFeatureSet.tvOS_GPUFamily1_v1:
-                case MTLFeatureSet.tvOS_GPUFamily1_v2:
-                case MTLFeatureSet.tvOS_GPUFamily1_v3:
-                    return 8192;
-
-                case MTLFeatureSet.iOS_GPUFamily3_v1:
-                case MTLFeatureSet.iOS_GPUFamily3_v2:
-                case MTLFeatureSet.iOS_GPUFamily3_v3:
-                case MTLFeatureSet.iOS_GPUFamily4_v1:
-                case MTLFeatureSet.tvOS_GPUFamily2_v1:
-                case MTLFeatureSet.macOS_GPUFamily1_v1:
-                case MTLFeatureSet.macOS_GPUFamily1_v2:
-                case MTLFeatureSet.macOS_GPUFamily1_v3:
-                    return 16384;
-
-                default:
-                    return 4096;
-            }
+                MTLFeatureSet.iOS_GPUFamily1_v1 or MTLFeatureSet.iOS_GPUFamily2_v1 => 4096,
+                MTLFeatureSet.iOS_GPUFamily1_v2 or MTLFeatureSet.iOS_GPUFamily2_v2 or MTLFeatureSet.iOS_GPUFamily1_v3 or MTLFeatureSet.iOS_GPUFamily2_v3 or MTLFeatureSet.iOS_GPUFamily1_v4 or MTLFeatureSet.iOS_GPUFamily2_v4 or MTLFeatureSet.tvOS_GPUFamily1_v1 or MTLFeatureSet.tvOS_GPUFamily1_v2 or MTLFeatureSet.tvOS_GPUFamily1_v3 => 8192,
+                MTLFeatureSet.iOS_GPUFamily3_v1 or MTLFeatureSet.iOS_GPUFamily3_v2 or MTLFeatureSet.iOS_GPUFamily3_v3 or MTLFeatureSet.iOS_GPUFamily4_v1 or MTLFeatureSet.tvOS_GPUFamily2_v1 or MTLFeatureSet.macOS_GPUFamily1_v1 or MTLFeatureSet.macOS_GPUFamily1_v2 or MTLFeatureSet.macOS_GPUFamily1_v3 => 16384,
+                _ => 4096,
+            };
         }
 
         internal static uint GetMaxTextureVolume(MTLFeatureSet fs)

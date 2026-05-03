@@ -18,9 +18,9 @@ namespace Veldrid.D3D11
             set
             {
                 name = value;
-                for (int i = 0; i < RenderTargetViews.Length; i++) RenderTargetViews[i].DebugName = value + "_RTV" + i;
+                for (int i = 0; i < RenderTargetViews.Length; i++) RenderTargetViews[i].DebugName = $"{value}_RTV{i}";
 
-                if (DepthStencilView != null) DepthStencilView.DebugName = value + "_DSV";
+                if (DepthStencilView != null) DepthStencilView.DebugName = $"{value}_DSV";
             }
         }
 

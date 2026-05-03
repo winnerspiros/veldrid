@@ -848,7 +848,7 @@ namespace Veldrid.OpenGL
             contextAttribs[1] = 3;
             contextAttribs[2] = EGL_NONE;
             IntPtr context = eglCreateContext(display, bestConfig, IntPtr.Zero, contextAttribs);
-            if (context == IntPtr.Zero) throw new VeldridException("Failed to create an EGLContext: " + eglGetError());
+            if (context == IntPtr.Zero) throw new VeldridException($"Failed to create an EGLContext: {eglGetError()}");
 
             Action<IntPtr> makeCurrentFunc = ctx =>
             {
@@ -859,7 +859,7 @@ namespace Veldrid.OpenGL
 
             Action clearContext = () =>
             {
-                if (eglMakeCurrent(display, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero) == 0) throw new VeldridException("Failed to clear the current EGLContext: " + eglGetError());
+                if (eglMakeCurrent(display, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero) == 0) throw new VeldridException($"Failed to clear the current EGLContext: {eglGetError()}");
             };
 
             // EGL_ANDROID_presentation_time + EGL_ANDROID_get_frame_timestamps:
@@ -873,13 +873,13 @@ namespace Veldrid.OpenGL
             Action swapBuffersFunc = () =>
             {
                 eglTiming?.BeforeSwap();
-                if (eglSwapBuffers(display, eglWindowSurface) == 0) throw new VeldridException("Failed to swap buffers: " + eglGetError());
+                if (eglSwapBuffers(display, eglWindowSurface) == 0) throw new VeldridException($"Failed to swap buffers: {eglGetError()}");
                 eglTiming?.AfterSwap();
             };
 
             Action<bool> setSync = vsync =>
             {
-                if (eglSwapInterval(display, vsync ? 1 : 0) == 0) throw new VeldridException("Failed to set the swap interval: " + eglGetError());
+                if (eglSwapInterval(display, vsync ? 1 : 0) == 0) throw new VeldridException($"Failed to set the swap interval: {eglGetError()}");
             };
 
             // Set the desired initial state.
@@ -1394,7 +1394,7 @@ namespace Veldrid.OpenGL
                             break;
 
                         default:
-                            throw new InvalidOperationException("Invalid command type: " + workItem.Type);
+                            throw new InvalidOperationException($"Invalid command type: {workItem.Type}");
                     }
                 }
                 catch (Exception e) when (!Debugger.IsAttached)

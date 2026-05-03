@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using Veldrid.OpenGLBindings;
 
 namespace Veldrid.OpenGL
@@ -7,451 +7,150 @@ namespace Veldrid.OpenGL
     {
         internal static DrawElementsType VdToGLDrawElementsType(IndexFormat format)
         {
-            switch (format)
+            return format switch
             {
-                case IndexFormat.UInt16:
-                    return DrawElementsType.UnsignedShort;
-
-                case IndexFormat.UInt32:
-                    return DrawElementsType.UnsignedInt;
-
-                default:
-                    throw Illegal.Value<IndexFormat>();
-            }
+                IndexFormat.UInt16 => DrawElementsType.UnsignedShort,
+                IndexFormat.UInt32 => DrawElementsType.UnsignedInt,
+                _ => throw Illegal.Value<IndexFormat>(),
+            };
         }
 
         internal static ShaderType VdToGLShaderType(ShaderStages stage)
         {
-            switch (stage)
+            return stage switch
             {
-                case ShaderStages.Vertex:
-                    return ShaderType.VertexShader;
-
-                case ShaderStages.Geometry:
-                    return ShaderType.GeometryShader;
-
-                case ShaderStages.TessellationControl:
-                    return ShaderType.TessControlShader;
-
-                case ShaderStages.TessellationEvaluation:
-                    return ShaderType.TessEvaluationShader;
-
-                case ShaderStages.Fragment:
-                    return ShaderType.FragmentShader;
-
-                case ShaderStages.Compute:
-                    return ShaderType.ComputeShader;
-
-                default:
-                    throw Illegal.Value<ShaderStages>();
-            }
+                ShaderStages.Vertex => ShaderType.VertexShader,
+                ShaderStages.Geometry => ShaderType.GeometryShader,
+                ShaderStages.TessellationControl => ShaderType.TessControlShader,
+                ShaderStages.TessellationEvaluation => ShaderType.TessEvaluationShader,
+                ShaderStages.Fragment => ShaderType.FragmentShader,
+                ShaderStages.Compute => ShaderType.ComputeShader,
+                _ => throw Illegal.Value<ShaderStages>(),
+            };
         }
 
         internal static PixelInternalFormat VdToGLPixelInternalFormat(PixelFormat format)
         {
-            switch (format)
+            return format switch
             {
-                case PixelFormat.R8UNorm:
-                    return PixelInternalFormat.R8;
-
-                case PixelFormat.R8SNorm:
-                    return PixelInternalFormat.R8Snorm;
-
-                case PixelFormat.R8UInt:
-                    return PixelInternalFormat.R8ui;
-
-                case PixelFormat.R8SInt:
-                    return PixelInternalFormat.R8i;
-
-                case PixelFormat.R16UNorm:
-                    return PixelInternalFormat.R16;
-
-                case PixelFormat.R16SNorm:
-                    return PixelInternalFormat.R16Snorm;
-
-                case PixelFormat.R16UInt:
-                    return PixelInternalFormat.R16ui;
-
-                case PixelFormat.R16SInt:
-                    return PixelInternalFormat.R16i;
-
-                case PixelFormat.R16Float:
-                    return PixelInternalFormat.R16f;
-
-                case PixelFormat.R32UInt:
-                    return PixelInternalFormat.R32ui;
-
-                case PixelFormat.R32SInt:
-                    return PixelInternalFormat.R32i;
-
-                case PixelFormat.R32Float:
-                    return PixelInternalFormat.R32f;
-
-                case PixelFormat.R8G8UNorm:
-                    return PixelInternalFormat.Rg8;
-
-                case PixelFormat.R8G8SNorm:
-                    return PixelInternalFormat.Rg8Snorm;
-
-                case PixelFormat.R8G8UInt:
-                    return PixelInternalFormat.Rg8ui;
-
-                case PixelFormat.R8G8SInt:
-                    return PixelInternalFormat.Rg8i;
-
-                case PixelFormat.R16G16UNorm:
-                    return PixelInternalFormat.Rg16;
-
-                case PixelFormat.R16G16SNorm:
-                    return PixelInternalFormat.Rg16Snorm;
-
-                case PixelFormat.R16G16UInt:
-                    return PixelInternalFormat.Rg16ui;
-
-                case PixelFormat.R16G16SInt:
-                    return PixelInternalFormat.Rg16i;
-
-                case PixelFormat.R16G16Float:
-                    return PixelInternalFormat.Rg16f;
-
-                case PixelFormat.R32G32UInt:
-                    return PixelInternalFormat.Rg32ui;
-
-                case PixelFormat.R32G32SInt:
-                    return PixelInternalFormat.Rg32i;
-
-                case PixelFormat.R32G32Float:
-                    return PixelInternalFormat.Rg32f;
-
-                case PixelFormat.R8G8B8A8UNorm:
-                    return PixelInternalFormat.Rgba8;
-
-                case PixelFormat.R8G8B8A8UNormSRgb:
-                    return PixelInternalFormat.Srgb8Alpha8;
-
-                case PixelFormat.R8G8B8A8SNorm:
-                    return PixelInternalFormat.Rgba8Snorm;
-
-                case PixelFormat.R8G8B8A8UInt:
-                    return PixelInternalFormat.Rgba8ui;
-
-                case PixelFormat.R8G8B8A8SInt:
-                    return PixelInternalFormat.Rgba8i;
-
-                case PixelFormat.R16G16B16A16UNorm:
-                    return PixelInternalFormat.Rgba16;
-
-                case PixelFormat.R16G16B16A16SNorm:
-                    return PixelInternalFormat.Rgba16Snorm;
-
-                case PixelFormat.R16G16B16A16UInt:
-                    return PixelInternalFormat.Rgba16ui;
-
-                case PixelFormat.R16G16B16A16SInt:
-                    return PixelInternalFormat.Rgba16i;
-
-                case PixelFormat.R16G16B16A16Float:
-                    return PixelInternalFormat.Rgba16f;
-
-                case PixelFormat.R32G32B32A32Float:
-                    return PixelInternalFormat.Rgba32f;
-
-                case PixelFormat.R32G32B32A32UInt:
-                    return PixelInternalFormat.Rgba32ui;
-
-                case PixelFormat.R32G32B32A32SInt:
-                    return PixelInternalFormat.Rgba32i;
-
-                case PixelFormat.B8G8R8A8UNorm:
-                    return PixelInternalFormat.Rgba;
-
-                case PixelFormat.B8G8R8A8UNormSRgb:
-                    return PixelInternalFormat.Srgb8Alpha8;
-
-                case PixelFormat.Bc1RgbUNorm:
-                    return PixelInternalFormat.CompressedRgbS3tcDxt1Ext;
-
-                case PixelFormat.Bc1RgbUNormSRgb:
-                    return PixelInternalFormat.CompressedSrgbS3tcDxt1Ext;
-
-                case PixelFormat.Bc1RgbaUNorm:
-                    return PixelInternalFormat.CompressedRgbaS3tcDxt1Ext;
-
-                case PixelFormat.Bc1RgbaUNormSRgb:
-                    return PixelInternalFormat.CompressedSrgbAlphaS3tcDxt1Ext;
-
-                case PixelFormat.Bc2UNorm:
-                    return PixelInternalFormat.CompressedRgbaS3tcDxt3Ext;
-
-                case PixelFormat.Bc2UNormSRgb:
-                    return PixelInternalFormat.CompressedSrgbAlphaS3tcDxt3Ext;
-
-                case PixelFormat.Bc3UNorm:
-                    return PixelInternalFormat.CompressedRgbaS3tcDxt5Ext;
-
-                case PixelFormat.Bc3UNormSRgb:
-                    return PixelInternalFormat.CompressedSrgbAlphaS3tcDxt5Ext;
-
-                case PixelFormat.Bc4UNorm:
-                    return PixelInternalFormat.CompressedRedRgtc1;
-
-                case PixelFormat.Bc4SNorm:
-                    return PixelInternalFormat.CompressedSignedRedRgtc1;
-
-                case PixelFormat.Bc5UNorm:
-                    return PixelInternalFormat.CompressedRgRgtc2;
-
-                case PixelFormat.Bc5SNorm:
-                    return PixelInternalFormat.CompressedSignedRgRgtc2;
-
-                case PixelFormat.Bc7UNorm:
-                    return PixelInternalFormat.CompressedRgbaBptcUnorm;
-
-                case PixelFormat.Bc7UNormSRgb:
-                    return PixelInternalFormat.CompressedSrgbAlphaBptcUnorm;
-
-                case PixelFormat.Etc2R8G8B8UNorm:
-                    return PixelInternalFormat.CompressedRgb8Etc2;
-
-                case PixelFormat.Etc2R8G8B8A1UNorm:
-                    return PixelInternalFormat.CompressedRgb8PunchthroughAlpha1Etc2;
-
-                case PixelFormat.Etc2R8G8B8A8UNorm:
-                    return PixelInternalFormat.CompressedRgba8Etc2Eac;
-
-                case PixelFormat.D32FloatS8UInt:
-                    return PixelInternalFormat.Depth32fStencil8;
-
-                case PixelFormat.D24UNormS8UInt:
-                    return PixelInternalFormat.Depth24Stencil8;
-
-                case PixelFormat.R10G10B10A2UNorm:
-                    return PixelInternalFormat.Rgb10A2;
-
-                case PixelFormat.R10G10B10A2UInt:
-                    return PixelInternalFormat.Rgb10A2ui;
-
-                case PixelFormat.R11G11B10Float:
-                    return PixelInternalFormat.R11fG11fB10f;
-
-                default:
-                    throw Illegal.Value<PixelFormat>();
-            }
+                PixelFormat.R8UNorm => PixelInternalFormat.R8,
+                PixelFormat.R8SNorm => PixelInternalFormat.R8Snorm,
+                PixelFormat.R8UInt => PixelInternalFormat.R8ui,
+                PixelFormat.R8SInt => PixelInternalFormat.R8i,
+                PixelFormat.R16UNorm => PixelInternalFormat.R16,
+                PixelFormat.R16SNorm => PixelInternalFormat.R16Snorm,
+                PixelFormat.R16UInt => PixelInternalFormat.R16ui,
+                PixelFormat.R16SInt => PixelInternalFormat.R16i,
+                PixelFormat.R16Float => PixelInternalFormat.R16f,
+                PixelFormat.R32UInt => PixelInternalFormat.R32ui,
+                PixelFormat.R32SInt => PixelInternalFormat.R32i,
+                PixelFormat.R32Float => PixelInternalFormat.R32f,
+                PixelFormat.R8G8UNorm => PixelInternalFormat.Rg8,
+                PixelFormat.R8G8SNorm => PixelInternalFormat.Rg8Snorm,
+                PixelFormat.R8G8UInt => PixelInternalFormat.Rg8ui,
+                PixelFormat.R8G8SInt => PixelInternalFormat.Rg8i,
+                PixelFormat.R16G16UNorm => PixelInternalFormat.Rg16,
+                PixelFormat.R16G16SNorm => PixelInternalFormat.Rg16Snorm,
+                PixelFormat.R16G16UInt => PixelInternalFormat.Rg16ui,
+                PixelFormat.R16G16SInt => PixelInternalFormat.Rg16i,
+                PixelFormat.R16G16Float => PixelInternalFormat.Rg16f,
+                PixelFormat.R32G32UInt => PixelInternalFormat.Rg32ui,
+                PixelFormat.R32G32SInt => PixelInternalFormat.Rg32i,
+                PixelFormat.R32G32Float => PixelInternalFormat.Rg32f,
+                PixelFormat.R8G8B8A8UNorm => PixelInternalFormat.Rgba8,
+                PixelFormat.R8G8B8A8UNormSRgb => PixelInternalFormat.Srgb8Alpha8,
+                PixelFormat.R8G8B8A8SNorm => PixelInternalFormat.Rgba8Snorm,
+                PixelFormat.R8G8B8A8UInt => PixelInternalFormat.Rgba8ui,
+                PixelFormat.R8G8B8A8SInt => PixelInternalFormat.Rgba8i,
+                PixelFormat.R16G16B16A16UNorm => PixelInternalFormat.Rgba16,
+                PixelFormat.R16G16B16A16SNorm => PixelInternalFormat.Rgba16Snorm,
+                PixelFormat.R16G16B16A16UInt => PixelInternalFormat.Rgba16ui,
+                PixelFormat.R16G16B16A16SInt => PixelInternalFormat.Rgba16i,
+                PixelFormat.R16G16B16A16Float => PixelInternalFormat.Rgba16f,
+                PixelFormat.R32G32B32A32Float => PixelInternalFormat.Rgba32f,
+                PixelFormat.R32G32B32A32UInt => PixelInternalFormat.Rgba32ui,
+                PixelFormat.R32G32B32A32SInt => PixelInternalFormat.Rgba32i,
+                PixelFormat.B8G8R8A8UNorm => PixelInternalFormat.Rgba,
+                PixelFormat.B8G8R8A8UNormSRgb => PixelInternalFormat.Srgb8Alpha8,
+                PixelFormat.Bc1RgbUNorm => PixelInternalFormat.CompressedRgbS3tcDxt1Ext,
+                PixelFormat.Bc1RgbUNormSRgb => PixelInternalFormat.CompressedSrgbS3tcDxt1Ext,
+                PixelFormat.Bc1RgbaUNorm => PixelInternalFormat.CompressedRgbaS3tcDxt1Ext,
+                PixelFormat.Bc1RgbaUNormSRgb => PixelInternalFormat.CompressedSrgbAlphaS3tcDxt1Ext,
+                PixelFormat.Bc2UNorm => PixelInternalFormat.CompressedRgbaS3tcDxt3Ext,
+                PixelFormat.Bc2UNormSRgb => PixelInternalFormat.CompressedSrgbAlphaS3tcDxt3Ext,
+                PixelFormat.Bc3UNorm => PixelInternalFormat.CompressedRgbaS3tcDxt5Ext,
+                PixelFormat.Bc3UNormSRgb => PixelInternalFormat.CompressedSrgbAlphaS3tcDxt5Ext,
+                PixelFormat.Bc4UNorm => PixelInternalFormat.CompressedRedRgtc1,
+                PixelFormat.Bc4SNorm => PixelInternalFormat.CompressedSignedRedRgtc1,
+                PixelFormat.Bc5UNorm => PixelInternalFormat.CompressedRgRgtc2,
+                PixelFormat.Bc5SNorm => PixelInternalFormat.CompressedSignedRgRgtc2,
+                PixelFormat.Bc7UNorm => PixelInternalFormat.CompressedRgbaBptcUnorm,
+                PixelFormat.Bc7UNormSRgb => PixelInternalFormat.CompressedSrgbAlphaBptcUnorm,
+                PixelFormat.Etc2R8G8B8UNorm => PixelInternalFormat.CompressedRgb8Etc2,
+                PixelFormat.Etc2R8G8B8A1UNorm => PixelInternalFormat.CompressedRgb8PunchthroughAlpha1Etc2,
+                PixelFormat.Etc2R8G8B8A8UNorm => PixelInternalFormat.CompressedRgba8Etc2Eac,
+                PixelFormat.D32FloatS8UInt => PixelInternalFormat.Depth32fStencil8,
+                PixelFormat.D24UNormS8UInt => PixelInternalFormat.Depth24Stencil8,
+                PixelFormat.R10G10B10A2UNorm => PixelInternalFormat.Rgb10A2,
+                PixelFormat.R10G10B10A2UInt => PixelInternalFormat.Rgb10A2ui,
+                PixelFormat.R11G11B10Float => PixelInternalFormat.R11fG11fB10f,
+                _ => throw Illegal.Value<PixelFormat>(),
+            };
         }
 
         internal static TextureWrapMode VdToGLTextureWrapMode(SamplerAddressMode mode)
         {
-            switch (mode)
+            return mode switch
             {
-                case SamplerAddressMode.Wrap:
-                    return TextureWrapMode.Repeat;
-
-                case SamplerAddressMode.Mirror:
-                    return TextureWrapMode.MirroredRepeat;
-
-                case SamplerAddressMode.Clamp:
-                    return TextureWrapMode.ClampToEdge;
-
-                case SamplerAddressMode.Border:
-                    return TextureWrapMode.ClampToBorder;
-
-                default:
-                    throw Illegal.Value<SamplerAddressMode>();
-            }
+                SamplerAddressMode.Wrap => TextureWrapMode.Repeat,
+                SamplerAddressMode.Mirror => TextureWrapMode.MirroredRepeat,
+                SamplerAddressMode.Clamp => TextureWrapMode.ClampToEdge,
+                SamplerAddressMode.Border => TextureWrapMode.ClampToBorder,
+                _ => throw Illegal.Value<SamplerAddressMode>(),
+            };
         }
 
         internal static GLPixelFormat VdToGLPixelFormat(PixelFormat format)
         {
-            switch (format)
+            return format switch
             {
-                case PixelFormat.R8UNorm:
-                case PixelFormat.R16UNorm:
-                case PixelFormat.R16Float:
-                case PixelFormat.R32Float:
-                case PixelFormat.Bc4UNorm:
-                    return GLPixelFormat.Red;
-
-                case PixelFormat.R8SNorm:
-                case PixelFormat.R8UInt:
-                case PixelFormat.R8SInt:
-                case PixelFormat.R16SNorm:
-                case PixelFormat.R16UInt:
-                case PixelFormat.R16SInt:
-                case PixelFormat.R32UInt:
-                case PixelFormat.R32SInt:
-                case PixelFormat.Bc4SNorm:
-                    return GLPixelFormat.RedInteger;
-
-                case PixelFormat.R8G8UNorm:
-                case PixelFormat.R16G16UNorm:
-                case PixelFormat.R16G16Float:
-                case PixelFormat.R32G32Float:
-                case PixelFormat.Bc5UNorm:
-                    return GLPixelFormat.Rg;
-
-                case PixelFormat.R8G8SNorm:
-                case PixelFormat.R8G8UInt:
-                case PixelFormat.R8G8SInt:
-                case PixelFormat.R16G16SNorm:
-                case PixelFormat.R16G16UInt:
-                case PixelFormat.R16G16SInt:
-                case PixelFormat.R32G32UInt:
-                case PixelFormat.R32G32SInt:
-                case PixelFormat.Bc5SNorm:
-                    return GLPixelFormat.RgInteger;
-
-                case PixelFormat.R8G8B8A8UNorm:
-                case PixelFormat.R8G8B8A8UNormSRgb:
-                case PixelFormat.R16G16B16A16UNorm:
-                case PixelFormat.R16G16B16A16Float:
-                case PixelFormat.R32G32B32A32Float:
-                    return GLPixelFormat.Rgba;
-
-                case PixelFormat.B8G8R8A8UNorm:
-                case PixelFormat.B8G8R8A8UNormSRgb:
-                    return GLPixelFormat.Bgra;
-
-                case PixelFormat.R8G8B8A8SNorm:
-                case PixelFormat.R8G8B8A8UInt:
-                case PixelFormat.R8G8B8A8SInt:
-                case PixelFormat.R16G16B16A16SNorm:
-                case PixelFormat.R16G16B16A16UInt:
-                case PixelFormat.R16G16B16A16SInt:
-                case PixelFormat.R32G32B32A32UInt:
-                case PixelFormat.R32G32B32A32SInt:
-                    return GLPixelFormat.RgbaInteger;
-
-                case PixelFormat.Bc1RgbUNorm:
-                case PixelFormat.Bc1RgbUNormSRgb:
-                case PixelFormat.Etc2R8G8B8UNorm:
-                    return GLPixelFormat.Rgb;
-
-                case PixelFormat.Bc1RgbaUNorm:
-                case PixelFormat.Bc1RgbaUNormSRgb:
-                case PixelFormat.Bc2UNorm:
-                case PixelFormat.Bc2UNormSRgb:
-                case PixelFormat.Bc3UNorm:
-                case PixelFormat.Bc3UNormSRgb:
-                case PixelFormat.Bc7UNorm:
-                case PixelFormat.Bc7UNormSRgb:
-                case PixelFormat.Etc2R8G8B8A1UNorm:
-                case PixelFormat.Etc2R8G8B8A8UNorm:
-                    return GLPixelFormat.Rgba;
-
-                case PixelFormat.D24UNormS8UInt:
-                    return GLPixelFormat.DepthStencil;
-
-                case PixelFormat.D32FloatS8UInt:
-                    return GLPixelFormat.DepthStencil;
-
-                case PixelFormat.R10G10B10A2UNorm:
-                    return GLPixelFormat.Rgba;
-
-                case PixelFormat.R10G10B10A2UInt:
-                    return GLPixelFormat.RgbaInteger;
-
-                case PixelFormat.R11G11B10Float:
-                    return GLPixelFormat.Rgb;
-
-                default:
-                    throw Illegal.Value<PixelFormat>();
-            }
+                PixelFormat.R8UNorm or PixelFormat.R16UNorm or PixelFormat.R16Float or PixelFormat.R32Float or PixelFormat.Bc4UNorm => GLPixelFormat.Red,
+                PixelFormat.R8SNorm or PixelFormat.R8UInt or PixelFormat.R8SInt or PixelFormat.R16SNorm or PixelFormat.R16UInt or PixelFormat.R16SInt or PixelFormat.R32UInt or PixelFormat.R32SInt or PixelFormat.Bc4SNorm => GLPixelFormat.RedInteger,
+                PixelFormat.R8G8UNorm or PixelFormat.R16G16UNorm or PixelFormat.R16G16Float or PixelFormat.R32G32Float or PixelFormat.Bc5UNorm => GLPixelFormat.Rg,
+                PixelFormat.R8G8SNorm or PixelFormat.R8G8UInt or PixelFormat.R8G8SInt or PixelFormat.R16G16SNorm or PixelFormat.R16G16UInt or PixelFormat.R16G16SInt or PixelFormat.R32G32UInt or PixelFormat.R32G32SInt or PixelFormat.Bc5SNorm => GLPixelFormat.RgInteger,
+                PixelFormat.R8G8B8A8UNorm or PixelFormat.R8G8B8A8UNormSRgb or PixelFormat.R16G16B16A16UNorm or PixelFormat.R16G16B16A16Float or PixelFormat.R32G32B32A32Float => GLPixelFormat.Rgba,
+                PixelFormat.B8G8R8A8UNorm or PixelFormat.B8G8R8A8UNormSRgb => GLPixelFormat.Bgra,
+                PixelFormat.R8G8B8A8SNorm or PixelFormat.R8G8B8A8UInt or PixelFormat.R8G8B8A8SInt or PixelFormat.R16G16B16A16SNorm or PixelFormat.R16G16B16A16UInt or PixelFormat.R16G16B16A16SInt or PixelFormat.R32G32B32A32UInt or PixelFormat.R32G32B32A32SInt => GLPixelFormat.RgbaInteger,
+                PixelFormat.Bc1RgbUNorm or PixelFormat.Bc1RgbUNormSRgb or PixelFormat.Etc2R8G8B8UNorm => GLPixelFormat.Rgb,
+                PixelFormat.Bc1RgbaUNorm or PixelFormat.Bc1RgbaUNormSRgb or PixelFormat.Bc2UNorm or PixelFormat.Bc2UNormSRgb or PixelFormat.Bc3UNorm or PixelFormat.Bc3UNormSRgb or PixelFormat.Bc7UNorm or PixelFormat.Bc7UNormSRgb or PixelFormat.Etc2R8G8B8A1UNorm or PixelFormat.Etc2R8G8B8A8UNorm => GLPixelFormat.Rgba,
+                PixelFormat.D24UNormS8UInt => GLPixelFormat.DepthStencil,
+                PixelFormat.D32FloatS8UInt => GLPixelFormat.DepthStencil,
+                PixelFormat.R10G10B10A2UNorm => GLPixelFormat.Rgba,
+                PixelFormat.R10G10B10A2UInt => GLPixelFormat.RgbaInteger,
+                PixelFormat.R11G11B10Float => GLPixelFormat.Rgb,
+                _ => throw Illegal.Value<PixelFormat>(),
+            };
         }
 
         internal static GLPixelType VdToGLPixelType(PixelFormat format)
         {
-            switch (format)
+            return format switch
             {
-                case PixelFormat.R8UNorm:
-                case PixelFormat.R8UInt:
-                case PixelFormat.R8G8UNorm:
-                case PixelFormat.R8G8UInt:
-                case PixelFormat.R8G8B8A8UNorm:
-                case PixelFormat.R8G8B8A8UNormSRgb:
-                case PixelFormat.R8G8B8A8UInt:
-                case PixelFormat.B8G8R8A8UNorm:
-                case PixelFormat.B8G8R8A8UNormSRgb:
-                    return GLPixelType.UnsignedByte;
-
-                case PixelFormat.R8SNorm:
-                case PixelFormat.R8SInt:
-                case PixelFormat.R8G8SNorm:
-                case PixelFormat.R8G8SInt:
-                case PixelFormat.R8G8B8A8SNorm:
-                case PixelFormat.R8G8B8A8SInt:
-                case PixelFormat.Bc4SNorm:
-                case PixelFormat.Bc5SNorm:
-                    return GLPixelType.Byte;
-
-                case PixelFormat.R16UNorm:
-                case PixelFormat.R16UInt:
-                case PixelFormat.R16G16UNorm:
-                case PixelFormat.R16G16UInt:
-                case PixelFormat.R16G16B16A16UNorm:
-                case PixelFormat.R16G16B16A16UInt:
-                    return GLPixelType.UnsignedShort;
-
-                case PixelFormat.R16SNorm:
-                case PixelFormat.R16SInt:
-                case PixelFormat.R16G16SNorm:
-                case PixelFormat.R16G16SInt:
-                case PixelFormat.R16G16B16A16SNorm:
-                case PixelFormat.R16G16B16A16SInt:
-                    return GLPixelType.Short;
-
-                case PixelFormat.R32UInt:
-                case PixelFormat.R32G32UInt:
-                case PixelFormat.R32G32B32A32UInt:
-                    return GLPixelType.UnsignedInt;
-
-                case PixelFormat.R32SInt:
-                case PixelFormat.R32G32SInt:
-                case PixelFormat.R32G32B32A32SInt:
-                    return GLPixelType.Int;
-
-                case PixelFormat.R16Float:
-                case PixelFormat.R16G16Float:
-                case PixelFormat.R16G16B16A16Float:
-                    return GLPixelType.HalfFloat;
-
-                case PixelFormat.R32Float:
-                case PixelFormat.R32G32Float:
-                case PixelFormat.R32G32B32A32Float:
-                    return GLPixelType.Float;
-
-                case PixelFormat.Bc1RgbUNorm:
-                case PixelFormat.Bc1RgbUNormSRgb:
-                case PixelFormat.Bc1RgbaUNorm:
-                case PixelFormat.Bc1RgbaUNormSRgb:
-                case PixelFormat.Bc2UNorm:
-                case PixelFormat.Bc2UNormSRgb:
-                case PixelFormat.Bc3UNorm:
-                case PixelFormat.Bc3UNormSRgb:
-                case PixelFormat.Bc4UNorm:
-                case PixelFormat.Bc5UNorm:
-                case PixelFormat.Bc7UNorm:
-                case PixelFormat.Bc7UNormSRgb:
-                case PixelFormat.Etc2R8G8B8UNorm:
-                case PixelFormat.Etc2R8G8B8A1UNorm:
-                case PixelFormat.Etc2R8G8B8A8UNorm:
-                    return GLPixelType.UnsignedByte; // ?
-
-                case PixelFormat.D32FloatS8UInt:
-                    return GLPixelType.Float32UnsignedInt248Rev;
-
-                case PixelFormat.D24UNormS8UInt:
-                    return GLPixelType.UnsignedInt248;
-
-                case PixelFormat.R10G10B10A2UNorm:
-                case PixelFormat.R10G10B10A2UInt:
-                    return GLPixelType.UnsignedInt1010102;
-
-                case PixelFormat.R11G11B10Float:
-                    return GLPixelType.UnsignedInt10F11F11FRev;
-
-                default:
-                    throw Illegal.Value<PixelFormat>();
-            }
+                PixelFormat.R8UNorm or PixelFormat.R8UInt or PixelFormat.R8G8UNorm or PixelFormat.R8G8UInt or PixelFormat.R8G8B8A8UNorm or PixelFormat.R8G8B8A8UNormSRgb or PixelFormat.R8G8B8A8UInt or PixelFormat.B8G8R8A8UNorm or PixelFormat.B8G8R8A8UNormSRgb => GLPixelType.UnsignedByte,
+                PixelFormat.R8SNorm or PixelFormat.R8SInt or PixelFormat.R8G8SNorm or PixelFormat.R8G8SInt or PixelFormat.R8G8B8A8SNorm or PixelFormat.R8G8B8A8SInt or PixelFormat.Bc4SNorm or PixelFormat.Bc5SNorm => GLPixelType.Byte,
+                PixelFormat.R16UNorm or PixelFormat.R16UInt or PixelFormat.R16G16UNorm or PixelFormat.R16G16UInt or PixelFormat.R16G16B16A16UNorm or PixelFormat.R16G16B16A16UInt => GLPixelType.UnsignedShort,
+                PixelFormat.R16SNorm or PixelFormat.R16SInt or PixelFormat.R16G16SNorm or PixelFormat.R16G16SInt or PixelFormat.R16G16B16A16SNorm or PixelFormat.R16G16B16A16SInt => GLPixelType.Short,
+                PixelFormat.R32UInt or PixelFormat.R32G32UInt or PixelFormat.R32G32B32A32UInt => GLPixelType.UnsignedInt,
+                PixelFormat.R32SInt or PixelFormat.R32G32SInt or PixelFormat.R32G32B32A32SInt => GLPixelType.Int,
+                PixelFormat.R16Float or PixelFormat.R16G16Float or PixelFormat.R16G16B16A16Float => GLPixelType.HalfFloat,
+                PixelFormat.R32Float or PixelFormat.R32G32Float or PixelFormat.R32G32B32A32Float => GLPixelType.Float,
+                PixelFormat.Bc1RgbUNorm or PixelFormat.Bc1RgbUNormSRgb or PixelFormat.Bc1RgbaUNorm or PixelFormat.Bc1RgbaUNormSRgb or PixelFormat.Bc2UNorm or PixelFormat.Bc2UNormSRgb or PixelFormat.Bc3UNorm or PixelFormat.Bc3UNormSRgb or PixelFormat.Bc4UNorm or PixelFormat.Bc5UNorm or PixelFormat.Bc7UNorm or PixelFormat.Bc7UNormSRgb or PixelFormat.Etc2R8G8B8UNorm or PixelFormat.Etc2R8G8B8A1UNorm or PixelFormat.Etc2R8G8B8A8UNorm => GLPixelType.UnsignedByte, // ?
+                PixelFormat.D32FloatS8UInt => GLPixelType.Float32UnsignedInt248Rev,
+                PixelFormat.D24UNormS8UInt => GLPixelType.UnsignedInt248,
+                PixelFormat.R10G10B10A2UNorm or PixelFormat.R10G10B10A2UInt => GLPixelType.UnsignedInt1010102,
+                PixelFormat.R11G11B10Float => GLPixelType.UnsignedInt10F11F11FRev,
+                _ => throw Illegal.Value<PixelFormat>(),
+            };
         }
 
         internal static SizedInternalFormat VdToGLSizedInternalFormat(PixelFormat format, bool depthFormat)
@@ -700,20 +399,13 @@ namespace Veldrid.OpenGL
 
         internal static BufferAccessMask VdToGLMapMode(MapMode mode)
         {
-            switch (mode)
+            return mode switch
             {
-                case MapMode.Read:
-                    return BufferAccessMask.Read;
-
-                case MapMode.Write:
-                    return BufferAccessMask.Write | BufferAccessMask.InvalidateBuffer;
-
-                case MapMode.ReadWrite:
-                    return BufferAccessMask.Read | BufferAccessMask.Write;
-
-                default:
-                    throw Illegal.Value<MapMode>();
-            }
+                MapMode.Read => BufferAccessMask.Read,
+                MapMode.Write => BufferAccessMask.Write | BufferAccessMask.InvalidateBuffer,
+                MapMode.ReadWrite => BufferAccessMask.Read | BufferAccessMask.Write,
+                _ => throw Illegal.Value<MapMode>(),
+            };
         }
 
         internal static VertexAttribPointerType VdToGLVertexAttribPointerType(
@@ -809,330 +501,163 @@ namespace Veldrid.OpenGL
 
         internal static bool IsFormatSupported(OpenGLExtensions extensions, PixelFormat format, GraphicsBackend backend)
         {
-            switch (format)
+            return format switch
             {
-                case PixelFormat.Etc2R8G8B8UNorm:
-                case PixelFormat.Etc2R8G8B8A1UNorm:
-                case PixelFormat.Etc2R8G8B8A8UNorm:
-                    return extensions.GLESVersion(3, 0) || extensions.GLVersion(4, 3);
-
-                case PixelFormat.Bc1RgbUNorm:
-                case PixelFormat.Bc1RgbUNormSRgb:
-                case PixelFormat.Bc1RgbaUNorm:
-                case PixelFormat.Bc1RgbaUNormSRgb:
-                case PixelFormat.Bc2UNorm:
-                case PixelFormat.Bc2UNormSRgb:
-                case PixelFormat.Bc3UNorm:
-                case PixelFormat.Bc3UNormSRgb:
-                    return extensions.IsExtensionSupported("GL_EXT_texture_compression_s3tc");
-
-                case PixelFormat.Bc4UNorm:
-                case PixelFormat.Bc4SNorm:
-                case PixelFormat.Bc5UNorm:
-                case PixelFormat.Bc5SNorm:
-                    return extensions.GLVersion(3, 0) || extensions.IsExtensionSupported("GL_ARB_texture_compression_rgtc");
-
-                case PixelFormat.Bc7UNorm:
-                case PixelFormat.Bc7UNormSRgb:
-                    return extensions.GLVersion(4, 2) || extensions.IsExtensionSupported("GL_ARB_texture_compression_bptc")
-                                                      || extensions.IsExtensionSupported("GL_EXT_texture_compression_bptc");
-
-                case PixelFormat.B8G8R8A8UNorm:
-                case PixelFormat.B8G8R8A8UNormSRgb:
-                case PixelFormat.R10G10B10A2UInt:
-                case PixelFormat.R10G10B10A2UNorm:
-                    return backend == GraphicsBackend.OpenGL;
-
-                case PixelFormat.D24UNormS8UInt:
-                    return extensions.GLVersion(3, 0) || extensions.GLESVersion(3, 0)
-                           || extensions.IsExtensionSupported("GL_OES_packed_depth_stencil")
-                           || extensions.IsExtensionSupported("GL_ARB_framebuffer_object");
-
-                default:
-                    return true;
-            }
+                PixelFormat.Etc2R8G8B8UNorm or PixelFormat.Etc2R8G8B8A1UNorm or PixelFormat.Etc2R8G8B8A8UNorm => extensions.GLESVersion(3, 0) || extensions.GLVersion(4, 3),
+                PixelFormat.Bc1RgbUNorm or PixelFormat.Bc1RgbUNormSRgb or PixelFormat.Bc1RgbaUNorm or PixelFormat.Bc1RgbaUNormSRgb or PixelFormat.Bc2UNorm or PixelFormat.Bc2UNormSRgb or PixelFormat.Bc3UNorm or PixelFormat.Bc3UNormSRgb => extensions.IsExtensionSupported("GL_EXT_texture_compression_s3tc"),
+                PixelFormat.Bc4UNorm or PixelFormat.Bc4SNorm or PixelFormat.Bc5UNorm or PixelFormat.Bc5SNorm => extensions.GLVersion(3, 0) || extensions.IsExtensionSupported("GL_ARB_texture_compression_rgtc"),
+                PixelFormat.Bc7UNorm or PixelFormat.Bc7UNormSRgb => extensions.GLVersion(4, 2) || extensions.IsExtensionSupported("GL_ARB_texture_compression_bptc")
+                                                                                                 || extensions.IsExtensionSupported("GL_EXT_texture_compression_bptc"),
+                PixelFormat.B8G8R8A8UNorm or PixelFormat.B8G8R8A8UNormSRgb or PixelFormat.R10G10B10A2UInt or PixelFormat.R10G10B10A2UNorm => backend == GraphicsBackend.OpenGL,
+                PixelFormat.D24UNormS8UInt => extensions.GLVersion(3, 0) || extensions.GLESVersion(3, 0)
+                                                                          || extensions.IsExtensionSupported("GL_OES_packed_depth_stencil")
+                                                                          || extensions.IsExtensionSupported("GL_ARB_framebuffer_object"),
+                _ => true,
+            };
         }
 
         internal static DepthFunction VdToGLDepthFunction(ComparisonKind value)
         {
-            switch (value)
+            return value switch
             {
-                case ComparisonKind.Never:
-                    return DepthFunction.Never;
-
-                case ComparisonKind.Less:
-                    return DepthFunction.Less;
-
-                case ComparisonKind.Equal:
-                    return DepthFunction.Equal;
-
-                case ComparisonKind.LessEqual:
-                    return DepthFunction.Lequal;
-
-                case ComparisonKind.Greater:
-                    return DepthFunction.Greater;
-
-                case ComparisonKind.NotEqual:
-                    return DepthFunction.Notequal;
-
-                case ComparisonKind.GreaterEqual:
-                    return DepthFunction.Gequal;
-
-                case ComparisonKind.Always:
-                    return DepthFunction.Always;
-
-                default:
-                    throw Illegal.Value<ComparisonKind>();
-            }
+                ComparisonKind.Never => DepthFunction.Never,
+                ComparisonKind.Less => DepthFunction.Less,
+                ComparisonKind.Equal => DepthFunction.Equal,
+                ComparisonKind.LessEqual => DepthFunction.Lequal,
+                ComparisonKind.Greater => DepthFunction.Greater,
+                ComparisonKind.NotEqual => DepthFunction.Notequal,
+                ComparisonKind.GreaterEqual => DepthFunction.Gequal,
+                ComparisonKind.Always => DepthFunction.Always,
+                _ => throw Illegal.Value<ComparisonKind>(),
+            };
         }
 
         internal static BlendingFactorSrc VdToGLBlendFactorSrc(BlendFactor factor)
         {
-            switch (factor)
+            return factor switch
             {
-                case BlendFactor.Zero:
-                    return BlendingFactorSrc.Zero;
-
-                case BlendFactor.One:
-                    return BlendingFactorSrc.One;
-
-                case BlendFactor.SourceAlpha:
-                    return BlendingFactorSrc.SrcAlpha;
-
-                case BlendFactor.InverseSourceAlpha:
-                    return BlendingFactorSrc.OneMinusSrcAlpha;
-
-                case BlendFactor.DestinationAlpha:
-                    return BlendingFactorSrc.DstAlpha;
-
-                case BlendFactor.InverseDestinationAlpha:
-                    return BlendingFactorSrc.OneMinusDstAlpha;
-
-                case BlendFactor.SourceColor:
-                    return BlendingFactorSrc.SrcColor;
-
-                case BlendFactor.InverseSourceColor:
-                    return BlendingFactorSrc.OneMinusSrcColor;
-
-                case BlendFactor.DestinationColor:
-                    return BlendingFactorSrc.DstColor;
-
-                case BlendFactor.InverseDestinationColor:
-                    return BlendingFactorSrc.OneMinusDstColor;
-
-                case BlendFactor.BlendFactor:
-                    return BlendingFactorSrc.ConstantColor;
-
-                case BlendFactor.InverseBlendFactor:
-                    return BlendingFactorSrc.OneMinusConstantColor;
-
-                default:
-                    throw Illegal.Value<BlendFactor>();
-            }
+                BlendFactor.Zero => BlendingFactorSrc.Zero,
+                BlendFactor.One => BlendingFactorSrc.One,
+                BlendFactor.SourceAlpha => BlendingFactorSrc.SrcAlpha,
+                BlendFactor.InverseSourceAlpha => BlendingFactorSrc.OneMinusSrcAlpha,
+                BlendFactor.DestinationAlpha => BlendingFactorSrc.DstAlpha,
+                BlendFactor.InverseDestinationAlpha => BlendingFactorSrc.OneMinusDstAlpha,
+                BlendFactor.SourceColor => BlendingFactorSrc.SrcColor,
+                BlendFactor.InverseSourceColor => BlendingFactorSrc.OneMinusSrcColor,
+                BlendFactor.DestinationColor => BlendingFactorSrc.DstColor,
+                BlendFactor.InverseDestinationColor => BlendingFactorSrc.OneMinusDstColor,
+                BlendFactor.BlendFactor => BlendingFactorSrc.ConstantColor,
+                BlendFactor.InverseBlendFactor => BlendingFactorSrc.OneMinusConstantColor,
+                _ => throw Illegal.Value<BlendFactor>(),
+            };
         }
 
         internal static BlendEquationMode VdToGLBlendEquationMode(BlendFunction function)
         {
-            switch (function)
+            return function switch
             {
-                case BlendFunction.Add:
-                    return BlendEquationMode.FuncAdd;
-
-                case BlendFunction.Subtract:
-                    return BlendEquationMode.FuncSubtract;
-
-                case BlendFunction.ReverseSubtract:
-                    return BlendEquationMode.FuncReverseSubtract;
-
-                case BlendFunction.Minimum:
-                    return BlendEquationMode.Min;
-
-                case BlendFunction.Maximum:
-                    return BlendEquationMode.Max;
-
-                default:
-                    throw Illegal.Value<BlendFunction>();
-            }
+                BlendFunction.Add => BlendEquationMode.FuncAdd,
+                BlendFunction.Subtract => BlendEquationMode.FuncSubtract,
+                BlendFunction.ReverseSubtract => BlendEquationMode.FuncReverseSubtract,
+                BlendFunction.Minimum => BlendEquationMode.Min,
+                BlendFunction.Maximum => BlendEquationMode.Max,
+                _ => throw Illegal.Value<BlendFunction>(),
+            };
         }
 
         internal static PolygonMode VdToGLPolygonMode(PolygonFillMode fillMode)
         {
-            switch (fillMode)
+            return fillMode switch
             {
-                case PolygonFillMode.Solid:
-                    return PolygonMode.Fill;
-
-                case PolygonFillMode.Wireframe:
-                    return PolygonMode.Line;
-
-                default:
-                    throw Illegal.Value<PolygonFillMode>();
-            }
+                PolygonFillMode.Solid => PolygonMode.Fill,
+                PolygonFillMode.Wireframe => PolygonMode.Line,
+                _ => throw Illegal.Value<PolygonFillMode>(),
+            };
         }
 
         internal static StencilFunction VdToGLStencilFunction(ComparisonKind comparison)
         {
-            switch (comparison)
+            return comparison switch
             {
-                case ComparisonKind.Never:
-                    return StencilFunction.Never;
-
-                case ComparisonKind.Less:
-                    return StencilFunction.Less;
-
-                case ComparisonKind.Equal:
-                    return StencilFunction.Equal;
-
-                case ComparisonKind.LessEqual:
-                    return StencilFunction.Lequal;
-
-                case ComparisonKind.Greater:
-                    return StencilFunction.Greater;
-
-                case ComparisonKind.NotEqual:
-                    return StencilFunction.Notequal;
-
-                case ComparisonKind.GreaterEqual:
-                    return StencilFunction.Gequal;
-
-                case ComparisonKind.Always:
-                    return StencilFunction.Always;
-
-                default:
-                    throw Illegal.Value<ComparisonKind>();
-            }
+                ComparisonKind.Never => StencilFunction.Never,
+                ComparisonKind.Less => StencilFunction.Less,
+                ComparisonKind.Equal => StencilFunction.Equal,
+                ComparisonKind.LessEqual => StencilFunction.Lequal,
+                ComparisonKind.Greater => StencilFunction.Greater,
+                ComparisonKind.NotEqual => StencilFunction.Notequal,
+                ComparisonKind.GreaterEqual => StencilFunction.Gequal,
+                ComparisonKind.Always => StencilFunction.Always,
+                _ => throw Illegal.Value<ComparisonKind>(),
+            };
         }
 
         internal static StencilOp VdToGLStencilOp(StencilOperation op)
         {
-            switch (op)
+            return op switch
             {
-                case StencilOperation.Keep:
-                    return StencilOp.Keep;
-
-                case StencilOperation.Zero:
-                    return StencilOp.Zero;
-
-                case StencilOperation.Replace:
-                    return StencilOp.Replace;
-
-                case StencilOperation.IncrementAndClamp:
-                    return StencilOp.Incr;
-
-                case StencilOperation.DecrementAndClamp:
-                    return StencilOp.Decr;
-
-                case StencilOperation.Invert:
-                    return StencilOp.Invert;
-
-                case StencilOperation.IncrementAndWrap:
-                    return StencilOp.IncrWrap;
-
-                case StencilOperation.DecrementAndWrap:
-                    return StencilOp.DecrWrap;
-
-                default:
-                    throw Illegal.Value<StencilOperation>();
-            }
+                StencilOperation.Keep => StencilOp.Keep,
+                StencilOperation.Zero => StencilOp.Zero,
+                StencilOperation.Replace => StencilOp.Replace,
+                StencilOperation.IncrementAndClamp => StencilOp.Incr,
+                StencilOperation.DecrementAndClamp => StencilOp.Decr,
+                StencilOperation.Invert => StencilOp.Invert,
+                StencilOperation.IncrementAndWrap => StencilOp.IncrWrap,
+                StencilOperation.DecrementAndWrap => StencilOp.DecrWrap,
+                _ => throw Illegal.Value<StencilOperation>(),
+            };
         }
 
         internal static CullFaceMode VdToGLCullFaceMode(FaceCullMode cullMode)
         {
-            switch (cullMode)
+            return cullMode switch
             {
-                case FaceCullMode.Back:
-                    return CullFaceMode.Back;
-
-                case FaceCullMode.Front:
-                    return CullFaceMode.Front;
-
-                default:
-                    throw Illegal.Value<FaceCullMode>();
-            }
+                FaceCullMode.Back => CullFaceMode.Back,
+                FaceCullMode.Front => CullFaceMode.Front,
+                _ => throw Illegal.Value<FaceCullMode>(),
+            };
         }
 
         internal static PrimitiveType VdToGLPrimitiveType(PrimitiveTopology primitiveTopology)
         {
-            switch (primitiveTopology)
+            return primitiveTopology switch
             {
-                case PrimitiveTopology.TriangleList:
-                    return PrimitiveType.Triangles;
-
-                case PrimitiveTopology.TriangleStrip:
-                    return PrimitiveType.TriangleStrip;
-
-                case PrimitiveTopology.LineList:
-                    return PrimitiveType.Lines;
-
-                case PrimitiveTopology.LineStrip:
-                    return PrimitiveType.LineStrip;
-
-                case PrimitiveTopology.PointList:
-                    return PrimitiveType.Points;
-
-                default:
-                    throw Illegal.Value<PrimitiveTopology>();
-            }
+                PrimitiveTopology.TriangleList => PrimitiveType.Triangles,
+                PrimitiveTopology.TriangleStrip => PrimitiveType.TriangleStrip,
+                PrimitiveTopology.LineList => PrimitiveType.Lines,
+                PrimitiveTopology.LineStrip => PrimitiveType.LineStrip,
+                PrimitiveTopology.PointList => PrimitiveType.Points,
+                _ => throw Illegal.Value<PrimitiveTopology>(),
+            };
         }
 
         internal static FrontFaceDirection VdToGLFrontFaceDirection(FrontFace frontFace)
         {
-            switch (frontFace)
+            return frontFace switch
             {
-                case FrontFace.Clockwise:
-                    return FrontFaceDirection.Cw;
-
-                case FrontFace.CounterClockwise:
-                    return FrontFaceDirection.Ccw;
-
-                default:
-                    throw Illegal.Value<FrontFace>();
-            }
+                FrontFace.Clockwise => FrontFaceDirection.Cw,
+                FrontFace.CounterClockwise => FrontFaceDirection.Ccw,
+                _ => throw Illegal.Value<FrontFace>(),
+            };
         }
 
         internal static BlendingFactorDest VdToGLBlendFactorDest(BlendFactor factor)
         {
-            switch (factor)
+            return factor switch
             {
-                case BlendFactor.Zero:
-                    return BlendingFactorDest.Zero;
-
-                case BlendFactor.One:
-                    return BlendingFactorDest.One;
-
-                case BlendFactor.SourceAlpha:
-                    return BlendingFactorDest.SrcAlpha;
-
-                case BlendFactor.InverseSourceAlpha:
-                    return BlendingFactorDest.OneMinusSrcAlpha;
-
-                case BlendFactor.DestinationAlpha:
-                    return BlendingFactorDest.DstAlpha;
-
-                case BlendFactor.InverseDestinationAlpha:
-                    return BlendingFactorDest.OneMinusDstAlpha;
-
-                case BlendFactor.SourceColor:
-                    return BlendingFactorDest.SrcColor;
-
-                case BlendFactor.InverseSourceColor:
-                    return BlendingFactorDest.OneMinusSrcColor;
-
-                case BlendFactor.DestinationColor:
-                    return BlendingFactorDest.DstColor;
-
-                case BlendFactor.InverseDestinationColor:
-                    return BlendingFactorDest.OneMinusDstColor;
-
-                case BlendFactor.BlendFactor:
-                    return BlendingFactorDest.ConstantColor;
-
-                case BlendFactor.InverseBlendFactor:
-                    return BlendingFactorDest.OneMinusConstantColor;
-
-                default:
-                    throw Illegal.Value<BlendFactor>();
-            }
+                BlendFactor.Zero => BlendingFactorDest.Zero,
+                BlendFactor.One => BlendingFactorDest.One,
+                BlendFactor.SourceAlpha => BlendingFactorDest.SrcAlpha,
+                BlendFactor.InverseSourceAlpha => BlendingFactorDest.OneMinusSrcAlpha,
+                BlendFactor.DestinationAlpha => BlendingFactorDest.DstAlpha,
+                BlendFactor.InverseDestinationAlpha => BlendingFactorDest.OneMinusDstAlpha,
+                BlendFactor.SourceColor => BlendingFactorDest.SrcColor,
+                BlendFactor.InverseSourceColor => BlendingFactorDest.OneMinusSrcColor,
+                BlendFactor.DestinationColor => BlendingFactorDest.DstColor,
+                BlendFactor.InverseDestinationColor => BlendingFactorDest.OneMinusDstColor,
+                BlendFactor.BlendFactor => BlendingFactorDest.ConstantColor,
+                BlendFactor.InverseBlendFactor => BlendingFactorDest.OneMinusConstantColor,
+                _ => throw Illegal.Value<BlendFactor>(),
+            };
         }
     }
 }

@@ -232,7 +232,7 @@ namespace Veldrid.OpenGL
                 }
 
                 var errorCode = glCheckFramebufferStatus(framebufferTarget);
-                if (errorCode != FramebufferErrorCode.FramebufferComplete) throw new VeldridException("Failed to create texture copy FBO: " + errorCode);
+                if (errorCode != FramebufferErrorCode.FramebufferComplete) throw new VeldridException($"Failed to create texture copy FBO: {errorCode}");
             }
 
             return framebuffers[subresource];
@@ -693,7 +693,7 @@ namespace Veldrid.OpenGL
                 }
             }
             else
-                throw new VeldridException("Invalid texture target: " + TextureTarget);
+                throw new VeldridException($"Invalid texture target: {TextureTarget}");
 
             Created = true;
         }

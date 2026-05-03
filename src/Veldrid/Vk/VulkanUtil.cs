@@ -12,7 +12,7 @@ namespace Veldrid.Vk
 
         public static void CheckResult(VkResult result)
         {
-            if (result != VkResult.Success) throw new VeldridException("Unsuccessful VkResult: " + result);
+            if (result != VkResult.Success) throw new VeldridException($"Unsuccessful VkResult: {result}");
         }
 
         public static bool TryFindMemoryType(VkPhysicalDeviceMemoryProperties memProperties, uint typeFilter, VkMemoryPropertyFlags properties, out uint typeIndex)

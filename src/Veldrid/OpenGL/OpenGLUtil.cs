@@ -20,7 +20,7 @@ namespace Veldrid.OpenGL
             {
                 if (Debugger.IsAttached) Debugger.Break();
 
-                throw new VeldridException("glGetError indicated an error: " + (ErrorCode)error);
+                throw new VeldridException($"glGetError indicated an error: {(ErrorCode)error}");
             }
         }
 

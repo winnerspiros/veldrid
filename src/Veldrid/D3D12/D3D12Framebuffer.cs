@@ -170,7 +170,7 @@ namespace Veldrid.D3D12
                     return Vortice.DXGI.Format.D32_Float_S8X24_UInt;
 
                 default:
-                    throw new VeldridException("Invalid depth texture format: " + format);
+                    throw new VeldridException($"Invalid depth texture format: {format}");
             }
         }
     }

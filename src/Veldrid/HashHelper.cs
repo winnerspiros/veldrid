@@ -1,61 +1,40 @@
-﻿namespace Veldrid
+﻿using System;
+
+namespace Veldrid
 {
     internal static class HashHelper
     {
-        public static int Combine(int value1, int value2)
+        public static int Combine(int h1, int h2) => HashCode.Combine(h1, h2);
+        public static int Combine(int h1, int h2, int h3) => HashCode.Combine(h1, h2, h3);
+        public static int Combine(int h1, int h2, int h3, int h4) => HashCode.Combine(h1, h2, h3, h4);
+        public static int Combine(int h1, int h2, int h3, int h4, int h5) => HashCode.Combine(h1, h2, h3, h4, h5);
+        public static int Combine(int h1, int h2, int h3, int h4, int h5, int h6) => HashCode.Combine(h1, h2, h3, h4, h5, h6);
+        public static int Combine(int h1, int h2, int h3, int h4, int h5, int h6, int h7) => HashCode.Combine(h1, h2, h3, h4, h5, h6, h7);
+        public static int Combine(int h1, int h2, int h3, int h4, int h5, int h6, int h7, int h8) => HashCode.Combine(h1, h2, h3, h4, h5, h6, h7, h8);
+
+        public static int Combine(int h1, int h2, int h3, int h4, int h5, int h6, int h7, int h8, int h9)
         {
-            uint rol5 = ((uint)value1 << 5) | ((uint)value1 >> 27);
-            return ((int)rol5 + value1) ^ value2;
+            var hc = new HashCode();
+            hc.Add(h1); hc.Add(h2); hc.Add(h3); hc.Add(h4); hc.Add(h5);
+            hc.Add(h6); hc.Add(h7); hc.Add(h8); hc.Add(h9);
+            return hc.ToHashCode();
         }
 
-        public static int Combine(int value1, int value2, int value3)
+        public static int Combine(int h1, int h2, int h3, int h4, int h5, int h6, int h7, int h8, int h9, int h10)
         {
-            return Combine(value1, Combine(value2, value3));
-        }
-
-        public static int Combine(int value1, int value2, int value3, int value4)
-        {
-            return Combine(value1, Combine(value2, Combine(value3, value4)));
-        }
-
-        public static int Combine(int value1, int value2, int value3, int value4, int value5)
-        {
-            return Combine(value1, Combine(value2, Combine(value3, Combine(value4, value5))));
-        }
-
-        public static int Combine(int value1, int value2, int value3, int value4, int value5, int value6)
-        {
-            return Combine(value1, Combine(value2, Combine(value3, Combine(value4, Combine(value5, value6)))));
-        }
-
-        public static int Combine(int value1, int value2, int value3, int value4, int value5, int value6, int value7)
-        {
-            return Combine(value1, Combine(value2, Combine(value3, Combine(value4, Combine(value5, Combine(value6, value7))))));
-        }
-
-        public static int Combine(int value1, int value2, int value3, int value4, int value5, int value6, int value7, int value8)
-        {
-            return Combine(value1, Combine(value2, Combine(value3, Combine(value4, Combine(value5, Combine(value6, Combine(value7, value8)))))));
-        }
-
-        public static int Combine(int value1, int value2, int value3, int value4, int value5, int value6, int value7, int value8, int value9)
-        {
-            return Combine(value1, Combine(value2, Combine(value3, Combine(value4, Combine(value5, Combine(value6, Combine(value7, Combine(value8, value9))))))));
-        }
-
-        public static int Combine(int value1, int value2, int value3, int value4, int value5, int value6, int value7, int value8, int value9, int value10)
-        {
-            return Combine(value1, Combine(value2, Combine(value3, Combine(value4, Combine(value5, Combine(value6, Combine(value7, Combine(value8, Combine(value9, value10)))))))));
+            var hc = new HashCode();
+            hc.Add(h1); hc.Add(h2); hc.Add(h3); hc.Add(h4); hc.Add(h5);
+            hc.Add(h6); hc.Add(h7); hc.Add(h8); hc.Add(h9); hc.Add(h10);
+            return hc.ToHashCode();
         }
 
         public static int Array<T>(T[] items)
         {
-            if (items == null || items.Length == 0) return 0;
+            if (items is null || items.Length == 0) return 0;
 
-            int hash = items[0].GetHashCode();
-            for (int i = 1; i < items.Length; i++) hash = Combine(hash, items[i]?.GetHashCode() ?? i);
-
-            return hash;
+            var hc = new HashCode();
+            foreach (var item in items) hc.Add(item);
+            return hc.ToHashCode();
         }
     }
 }

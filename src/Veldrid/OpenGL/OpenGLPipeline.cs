@@ -137,7 +137,7 @@ namespace Veldrid.OpenGL
                     int location = GetAttribLocation(layoutDesc.Elements[i].Name);
                     if (location == -1)
                     {
-                        throw new VeldridException("There was no attribute variable with the name " + layoutDesc.Elements[i].Name);
+                        throw new VeldridException($"There was no attribute variable with the name {layoutDesc.Elements[i].Name}");
                     }
 
                     slot += 1;
