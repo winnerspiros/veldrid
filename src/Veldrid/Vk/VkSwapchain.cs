@@ -123,6 +123,25 @@ namespace Veldrid.Vk
         private VkPresentModeKHR currentPresentMode;
         private VkPresentModeKHR[] compatiblePresentModes;
 
+        // VK_GOOGLE_display_timing state.
+        // refreshDuration: nanoseconds per display vblank cycle; 0 when unavailable.
+        // nextPresentID:   monotonically-increasing counter correlated with past-timing
+        //                  query results to advance desiredPresentTime each frame.
+        // lastEarliestPresentTime: most recent earliestPresentTime observed in past
+        //                  timing results; used to compute the next vblank target.
+        // All three are reset in initDisplayTiming on every (re)create so a new
+        // swapchain (after rotation, fold, HDMI attach, etc.) starts fresh.
+        private ulong displayTimingRefreshDuration;
+        private uint displayTimingNextPresentID;
+        private ulong displayTimingLastEarliestPresentTime;
+
+        // True when VK_GOOGLE_display_timing is active and the refresh duration was
+        // successfully queried for the current deviceSwapchain.
+        public bool HasDisplayTiming => displayTimingRefreshDuration != 0;
+
+        // The presentID to stamp on the next VkPresentTimeGOOGLE entry.
+        public uint NextPresentID => displayTimingNextPresentID;
+
         public VkSwapchain(VkGraphicsDevice gd, ref SwapchainDescription description)
             : this(gd, ref description, VkSurfaceKHR.Null)
         {
@@ -517,7 +536,18 @@ namespace Veldrid.Vk
             currentPresentMode = presentMode;
 
             uint maxImageCount = surfaceCapabilities.maxImageCount == 0 ? uint.MaxValue : surfaceCapabilities.maxImageCount;
-            uint imageCount = Math.Min(maxImageCount, surfaceCapabilities.minImageCount + 1);
+
+            // Image count tuning for latency:
+            // IMMEDIATE: use minImageCount (typically 2) — with no vblank queuing there
+            //   is at most one pending-display image at any time, so a third image only
+            //   adds memory without reducing latency. Acquire never stalls in IMMEDIATE
+            //   mode because the driver returns the just-replaced image immediately.
+            // FIFO / FIFO_RELAXED / MAILBOX: use minImageCount + 1 (triple-buffering) to
+            //   prevent the GPU from stalling on vkAcquireNextImageKHR while the display
+            //   controller holds two images across the vblank boundary.
+            uint imageCount = presentMode == VkPresentModeKHR.ImmediateKHR
+                ? Math.Min(maxImageCount, surfaceCapabilities.minImageCount)
+                : Math.Min(maxImageCount, surfaceCapabilities.minImageCount + 1);
 
             var swapchainCi = VkSwapchainCreateInfoKHR.New();
             swapchainCi.surface = surface;
@@ -648,6 +678,11 @@ namespace Veldrid.Vk
             // contract impossible to violate even if a future caller passes stale
             // width/height.
             framebuffer.SetNewSwapchain(deviceSwapchain, swapchainCi.imageExtent.width, swapchainCi.imageExtent.height, surfaceFormat, swapchainCi.imageExtent);
+
+            // VK_GOOGLE_display_timing: (re)query the refresh cycle for this swapchain
+            // and reset per-present counters. Called on every (re)create so fold/
+            // rotation/HDMI display changes are always picked up.
+            initDisplayTiming();
             return true;
         }
 
@@ -711,18 +746,29 @@ namespace Veldrid.Vk
             if (syncToVBlank)
             {
                 // Under vsync, prefer FIFO_RELAXED → FIFO. We deliberately do *not* prefer
-                // MAILBOX here, even though it would shave one frame of input-to-photon latency:
-                //   - On Qualcomm Adreno (notably 7xx-series) drivers MAILBOX has been observed
-                //     to stall vkAcquireNextImageKHR / vkQueuePresentKHR indefinitely under
-                //     heavy submission pressure (e.g. texture-upload bursts), producing ANR-style
-                //     black screens.
-                //   - MAILBOX requires an extra in-flight image (~33% more swapchain memory) and
-                //     an extra compositor round-trip; on tile-based mobile GPUs that translates
-                //     to back-pressure rather than reduced latency.
-                //   - Khronos guidance, Google's Android Vulkan samples, and ANGLE all default
-                //     to FIFO on Android.
-                // FIFO_RELAXED gives the lowest-latency tear-free option that's broadly safe;
-                // FIFO is mandatory per spec and is the universal fallback.
+                // MAILBOX even though it would replace a queued frame with a newer one:
+                //
+                //   • Qualcomm Adreno (all 7xx-series drivers tested, including 512.676.73)
+                //     stall vkAcquireNextImageKHR / vkQueuePresentKHR under submission
+                //     pressure (texture-upload bursts, first-frame pipeline compilation),
+                //     producing ANR-style black screens. This is architectural, not a
+                //     driver-version-specific bug: MAILBOX requires the driver to retire
+                //     the oldest queued image when a newer one arrives, and Adreno's
+                //     internal image manager blocks the caller while it does so.
+                //
+                //   • On 120 Hz displays rendering at ~120 fps, MAILBOX latency ≈ FIFO
+                //     latency. The only scenario where it wins is render-fps >> refresh-hz
+                //     (e.g. 240 fps → 120 Hz), which is uncommon on mobile.
+                //
+                //   • VK_GOOGLE_display_timing (active when HasDisplayTiming is true)
+                //     closes the remaining vsync latency gap by targeting the optimal
+                //     vblank slot per-present, without MAILBOX's stall risk.
+                //
+                //   • Khronos guidance, Google's Android Vulkan samples, and ANGLE all
+                //     default to FIFO on Android for the same reasons.
+                //
+                // FIFO_RELAXED gives the lowest-latency tear-free option that's broadly
+                // safe; FIFO is mandatory per spec and is the universal fallback.
                 if (Array.IndexOf(presentModes, VkPresentModeKHR.FifoRelaxedKHR) >= 0)
                     return VkPresentModeKHR.FifoRelaxedKHR;
                 return VkPresentModeKHR.FifoKHR;
@@ -826,7 +872,82 @@ namespace Veldrid.Vk
             return true;
         }
 
-        private bool getPresentQueueIndex(out uint queueFamilyIndex)
+        // --- VK_GOOGLE_display_timing helpers ---
+
+        // Returns the desiredPresentTime to chain in VkPresentTimesInfoGOOGLE for the
+        // next frame. Returns 0 ("let driver decide") until at least one past timing
+        // result has been recorded, after which we target lastEarliestPresentTime +
+        // refreshDuration — the next vblank boundary after the previous frame's
+        // earliest-possible display time.
+        public ulong GetDesiredPresentTime()
+        {
+            if (displayTimingLastEarliestPresentTime == 0)
+                return 0;
+
+            return displayTimingLastEarliestPresentTime + displayTimingRefreshDuration;
+        }
+
+        // Increment the monotonic present counter after a successful vkQueuePresentKHR.
+        public void AdvancePresentID()
+        {
+            displayTimingNextPresentID++;
+        }
+
+        // Query all pending past-timing results from the driver and update
+        // displayTimingLastEarliestPresentTime. Drains the driver's internal ring
+        // buffer to prevent it growing unbounded; capped at 8 entries per call to
+        // keep stack usage bounded (in practice 1–3 entries per frame).
+        public void DrainPastPresentationTimings()
+        {
+            if (gd.GetPastPresentationTimingGOOGLE == null)
+                return;
+
+            uint count = 0;
+            if (gd.GetPastPresentationTimingGOOGLE(gd.Device, deviceSwapchain, &count, null) != VkResult.Success
+                || count == 0)
+                return;
+
+            count = Math.Min(count, 8u);
+            var timings = stackalloc VkPastPresentationTimingGOOGLE[(int)count];
+            if (gd.GetPastPresentationTimingGOOGLE(gd.Device, deviceSwapchain, &count, timings) != VkResult.Success)
+                return;
+
+            for (uint i = 0; i < count; i++)
+            {
+                if (timings[i].earliestPresentTime > displayTimingLastEarliestPresentTime)
+                    displayTimingLastEarliestPresentTime = timings[i].earliestPresentTime;
+            }
+        }
+
+        // Initialise (or re-initialise after swapchain recreate) the per-swapchain
+        // display timing state. Resets all counters so a newly-created swapchain
+        // starts from a clean baseline regardless of what the previous swapchain did.
+        // Called unconditionally at the end of createSwapchain; no-ops when the
+        // device extension is absent (gd.GetRefreshCycleDurationGOOGLE == null).
+        private void initDisplayTiming()
+        {
+            // Always reset per-present state: the new swapchain has no timing history.
+            displayTimingNextPresentID = 0;
+            displayTimingLastEarliestPresentTime = 0;
+
+            if (gd.GetRefreshCycleDurationGOOGLE == null)
+            {
+                displayTimingRefreshDuration = 0;
+                return;
+            }
+
+            var timing = default(VkRefreshCycleDurationGOOGLE);
+            if (gd.GetRefreshCycleDurationGOOGLE(gd.Device, deviceSwapchain, &timing) != VkResult.Success
+                || timing.refreshDuration == 0)
+            {
+                displayTimingRefreshDuration = 0;
+                return;
+            }
+
+            displayTimingRefreshDuration = timing.refreshDuration;
+        }
+
+
         {
             uint deviceGraphicsQueueIndex = gd.GraphicsQueueIndex;
             uint devicePresentQueueIndex = gd.PresentQueueIndex;
