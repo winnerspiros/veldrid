@@ -400,6 +400,18 @@ namespace Veldrid.OpenGL
                 return;
             }
 
+            // Tile-store skip for offscreen FBOs: when switching away from a named FBO, invalidate
+            // any attachment whose texture has no Sampled or Storage usage — those contents will
+            // never be read by a shader, so the tiler can skip the tile→DRAM writeback entirely.
+            // Attachments with Sampled (shadow maps, ping-pong render targets) or Storage are left
+            // intact so their contents are never silently discarded.
+            if (hasCachedFramebuffer
+                && cachedFramebuffer is OpenGLFramebuffer prevGlFb
+                && extensions.InvalidateFramebuffer)
+            {
+                invalidateOffscreenFboAttachments(prevGlFb);
+            }
+
             if (fb is OpenGLFramebuffer glFb)
             {
                 if (backend == GraphicsBackend.OpenGL || extensions.ExtSRGBWriteControl)
@@ -445,6 +457,37 @@ namespace Veldrid.OpenGL
             this.fb = fb;
             cachedFramebuffer = fb;
             hasCachedFramebuffer = true;
+        }
+
+        private void invalidateOffscreenFboAttachments(OpenGLFramebuffer prevFb)
+        {
+            int colorCount = prevFb.ColorTargets.Count;
+            GLFramebufferAttachment* attachments = stackalloc GLFramebufferAttachment[1 + colorCount];
+            int count = 0;
+
+            if (prevFb.DepthTarget.HasValue)
+            {
+                var tex = prevFb.DepthTarget.Value.Target;
+                if ((tex.Usage & (TextureUsage.Sampled | TextureUsage.Storage)) == 0)
+                {
+                    attachments[count++] = FormatHelpers.IsStencilFormat(tex.Format)
+                        ? GLFramebufferAttachment.DepthStencilAttachment
+                        : GLFramebufferAttachment.DepthAttachment;
+                }
+            }
+
+            for (int i = 0; i < colorCount; i++)
+            {
+                var tex = prevFb.ColorTargets[i].Target;
+                if ((tex.Usage & (TextureUsage.Sampled | TextureUsage.Storage)) == 0)
+                    attachments[count++] = GLFramebufferAttachment.ColorAttachment0 + i;
+            }
+
+            if (count > 0)
+            {
+                glInvalidateFramebuffer(FramebufferTarget.Framebuffer, (uint)count, attachments);
+                CheckLastError();
+            }
         }
 
         public void SetIndexBuffer(DeviceBuffer ib, IndexFormat format, uint offset)
