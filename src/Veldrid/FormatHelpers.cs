@@ -248,7 +248,7 @@ namespace Veldrid
 
                 case 32: return TextureSampleCount.Count32;
 
-                default: throw new VeldridException("Unsupported multisample count: " + samples);
+                default: throw new VeldridException($"Unsupported multisample count: {samples}");
             }
         }
 

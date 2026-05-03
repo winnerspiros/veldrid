@@ -42,6 +42,10 @@ As of April 2024, this repository no longer tracks and is incompatible with the 
 - Vulkan backend: pre-sized sampled image list (capacity 32) to avoid hot-path reallocations during draw/dispatch
 - D3D11 backend: pre-allocated arrays for vertex strides/offsets in draw calls, deferred context command recording
 - Target framework upgraded to `net10.0` with `LangVersion 14.0`
+- **`HashHelper` upgraded to `System.HashCode`** — all `GetHashCode` implementations across every description/key struct now delegate to `System.HashCode.Combine` (uses xxHash3/Marvin32 under the hood), replacing a hand-rolled 5-bit rotation XOR that produced poor distribution for small integer sequences. `HashHelper.Array<T>` now uses `HashCode.Add` in a loop instead of the old recursive `Combine` chain, which both improves distribution and eliminates the cascaded virtual dispatch. All call-sites unchanged.
+- **Switch expressions throughout format tables** — all simple `switch`/`return` conversion tables in `VkFormats`, `D3D11Formats`, `D3D12Formats`, `OpenGLFormats`, and `MTLFormats` (≈50 functions) converted to C# switch expressions, giving the JIT clearer value-propagation opportunities and reducing branch-prediction pressure.
+- **`Array.Empty<T>()` for zero-length viewport/scissor arrays** — `D3D11CommandList` now initialises `viewports` and `scissors` fields with `Array.Empty<T>()` instead of `new T[0]`, eliminating two small heap allocations per command list.
+- **String interpolation for all error/debug messages** — all remaining `"..." + x` string concatenation in exception/debug strings replaced with `$"..."` interpolation across every backend, eliminating intermediate `string.Concat` allocations on the (rare) error path.
 
 ### Mobile / Android Optimizations (Adreno / Mali / PowerVR tilers)
 The following changes target tile-based mobile GPUs. They are also harmless (or beneficial) on desktop GPUs, so they're enabled unconditionally where the relevant API/extension is present.
@@ -97,6 +101,7 @@ The following changes target tile-based mobile GPUs. They are also harmless (or 
 - **Vulkan: Fix `CommandBufferCompleted` race condition** — `submittedCommandBuffers.Add` in `End()` now protected by the same lock as `CommandBufferCompleted` ([veldrid#495](https://github.com/veldrid/veldrid/pull/495))
 - **D3D11: FlipDiscard swapchain** — uses modern flip model on DXGI 1.4+, reducing frame latency ([veldrid#484](https://github.com/veldrid/veldrid/pull/484), [veldrid#515](https://github.com/veldrid/veldrid/issues/515))
 - **GLES: Stencil buffer init + 64-bit eglGetDisplay** — GLES now properly initializes stencil buffers and uses `IntPtr` for `eglGetDisplay` on 64-bit targets ([ppy#71](https://github.com/ppy/veldrid/pull/71))
+- **Vulkan: Fix `VkTexture.clearIfRenderTarget` spec violation for transient textures** — transient images are created with only `VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT` (no `TRANSFER_DST_BIT`), yet `clearIfRenderTarget` was calling `vkCmdClearDepthStencilImage`/`vkCmdClearColorImage` which require `TRANSFER_DST_BIT` (spec §19.1). The initialisation clear is now skipped for transient images; the first render pass with `loadOp=Clear` + `initialLayout=Undefined` handles it correctly on tile-based GPUs.
 
 ### CI / Build
 - CI workflow updated to .NET 10 SDK

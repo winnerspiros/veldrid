@@ -440,7 +440,7 @@ namespace Veldrid.OpenGL
                 isSwapchainFb = true;
             }
             else
-                throw new VeldridException("Invalid Framebuffer type: " + fb.GetType().Name);
+                throw new VeldridException($"Invalid Framebuffer type: {fb.GetType().Name}");
 
             this.fb = fb;
             cachedFramebuffer = fb;

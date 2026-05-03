@@ -1183,7 +1183,7 @@ namespace Veldrid.Vk
 
             string fullMessage = $"[{debugReportFlags}] ({objectType}) {message}";
 
-            if (debugReportFlags == VkDebugReportFlagsEXT.ErrorEXT) throw new VeldridException("A Vulkan validation error was encountered: " + fullMessage);
+            if (debugReportFlags == VkDebugReportFlagsEXT.ErrorEXT) throw new VeldridException($"A Vulkan validation error was encountered: {fullMessage}");
 
             Console.WriteLine(fullMessage);
             return 0;
@@ -1222,9 +1222,9 @@ namespace Veldrid.Vk
             fixed (byte* utf8NamePtr = physicalDeviceProperties.deviceName) deviceName = Encoding.UTF8.GetString(utf8NamePtr, (int)MaxPhysicalDeviceNameSize).TrimEnd('\0');
 
             DeviceApiVersion = VkVersion.FromPacked(physicalDeviceProperties.apiVersion);
-            vendorName = "id:" + physicalDeviceProperties.vendorID.ToString("x8");
+            vendorName = $"id:{physicalDeviceProperties.vendorID:x8}";
             apiVersion = new GraphicsApiVersion((int)DeviceApiVersion.Major, (int)DeviceApiVersion.Minor, 0, (int)DeviceApiVersion.Patch);
-            DriverInfo = "version:" + physicalDeviceProperties.driverVersion.ToString("x8");
+            DriverInfo = $"version:{physicalDeviceProperties.driverVersion:x8}";
 
             vkGetPhysicalDeviceFeatures(PhysicalDevice, out physicalDeviceFeatures);
 

@@ -138,7 +138,7 @@ namespace Veldrid.D3D12
             // Read adapter description.
             var adapterDesc = dxgiAdapter.Description;
             DeviceName = adapterDesc.Description;
-            VendorName = "id:" + ((uint)adapterDesc.VendorId).ToString("x8");
+            VendorName = $"id:{(uint)adapterDesc.VendorId:x8}";
             ApiVersion = new GraphicsApiVersion(12, 0, 0, 0);
 
             // 5. Create command queue.

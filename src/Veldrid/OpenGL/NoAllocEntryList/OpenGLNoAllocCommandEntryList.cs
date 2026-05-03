@@ -402,7 +402,7 @@ namespace Veldrid.OpenGL.NoAllocEntryList
                         break;
 
                     default:
-                        throw new InvalidOperationException("Invalid entry ID: " + id);
+                        throw new InvalidOperationException($"Invalid entry ID: {id}");
                 }
             }
         }
