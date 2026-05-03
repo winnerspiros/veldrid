@@ -251,6 +251,41 @@ namespace Veldrid.Vk
                 srcStageFlags = VkPipelineStageFlags.BottomOfPipe;
                 dstStageFlags = VkPipelineStageFlags.Transfer;
             }
+            else if (oldLayout == VkImageLayout.PresentSrcKHR && newLayout == VkImageLayout.ColorAttachmentOptimal)
+            {
+                // Swapchain image released by the presentation engine, transitioning to a render target.
+                // Required by the dynamic rendering path: vkCmdBeginRendering does not perform implicit
+                // layout transitions the way VkRenderPass does via initialLayout/finalLayout.
+                barrier.srcAccessMask = VkAccessFlags.MemoryRead;
+                barrier.dstAccessMask = VkAccessFlags.ColorAttachmentWrite;
+                srcStageFlags = VkPipelineStageFlags.BottomOfPipe;
+                dstStageFlags = VkPipelineStageFlags.ColorAttachmentOutput;
+            }
+            else if (oldLayout == VkImageLayout.ShaderReadOnlyOptimal && newLayout == VkImageLayout.ColorAttachmentOptimal)
+            {
+                // Ping-pong / post-process buffer that was sampled in the previous pass and is now
+                // used as a render target in this pass.
+                barrier.srcAccessMask = VkAccessFlags.ShaderRead;
+                barrier.dstAccessMask = VkAccessFlags.ColorAttachmentWrite;
+                srcStageFlags = VkPipelineStageFlags.FragmentShader;
+                dstStageFlags = VkPipelineStageFlags.ColorAttachmentOutput;
+            }
+            else if (oldLayout == VkImageLayout.Undefined && newLayout == VkImageLayout.ColorAttachmentOptimal)
+            {
+                // First use of a freshly allocated or newly-acquired image as a render target.
+                barrier.srcAccessMask = VkAccessFlags.None;
+                barrier.dstAccessMask = VkAccessFlags.ColorAttachmentWrite;
+                srcStageFlags = VkPipelineStageFlags.TopOfPipe;
+                dstStageFlags = VkPipelineStageFlags.ColorAttachmentOutput;
+            }
+            else if (oldLayout == VkImageLayout.Undefined && newLayout == VkImageLayout.DepthStencilAttachmentOptimal)
+            {
+                // First use of a freshly allocated depth/stencil attachment (e.g. transient swapchain depth).
+                barrier.srcAccessMask = VkAccessFlags.None;
+                barrier.dstAccessMask = VkAccessFlags.DepthStencilAttachmentWrite;
+                srcStageFlags = VkPipelineStageFlags.TopOfPipe;
+                dstStageFlags = VkPipelineStageFlags.EarlyFragmentTests;
+            }
             else
                 Debug.Fail("Invalid image layout transition.");
 

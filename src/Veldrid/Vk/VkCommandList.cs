@@ -1085,6 +1085,28 @@ namespace Veldrid.Vk
             var colorViews = currentFramebuffer.ColorAttachmentViews;
             var colorAttachments = stackalloc VkRenderingAttachmentInfo[colorCount > 0 ? colorCount : 1];
 
+            // Dynamic rendering has no implicit layout transitions (unlike VkRenderPass, which
+            // handles them via VkAttachmentDescription.initialLayout/finalLayout). Emit explicit
+            // barriers here so every attachment is in the correct layout when vkCmdBeginRendering
+            // is called — as required by the Vulkan spec.
+            //
+            // VkTexture.TransitionImageLayout is a no-op when old == new, so attachments that are
+            // already in the target layout (e.g. regular framebuffers reused within the same frame)
+            // pay no barrier cost.
+            for (int i = 0; i < colorCount; i++)
+            {
+                var ca = currentFramebuffer.ColorTargets[i];
+                var vkTex = Util.AssertSubtype<Texture, VkTexture>(ca.Target);
+                vkTex.TransitionImageLayout(CommandBuffer, ca.MipLevel, 1, ca.ArrayLayer, 1, VkImageLayout.ColorAttachmentOptimal);
+            }
+
+            if (currentFramebuffer.DepthTarget.HasValue)
+            {
+                var ca = currentFramebuffer.DepthTarget.Value;
+                var vkTex = Util.AssertSubtype<Texture, VkTexture>(ca.Target);
+                vkTex.TransitionImageLayout(CommandBuffer, ca.MipLevel, 1, ca.ArrayLayer, 1, VkImageLayout.DepthStencilAttachmentOptimal);
+            }
+
             bool haveAllClearValues = depthClearValue.HasValue || currentFramebuffer.DepthTarget == null;
 
             for (int i = 0; i < colorCount; i++)
@@ -1120,11 +1142,18 @@ namespace Veldrid.Vk
 
             if (currentFramebuffer.DepthTarget != null)
             {
+                var vkDepthTex = Util.AssertSubtype<Texture, VkTexture>(currentFramebuffer.DepthTarget.Value.Target);
+                // Transient depth (LAZILY_ALLOCATED) must use DontCare storeOp so the driver knows
+                // it does not need to flush tile-RAM depth/stencil contents to main memory.
+                // Using Store would defeat the purpose of lazy allocation and cost ~35 MB/frame of
+                // unnecessary DRAM writeback on tiler GPUs (Adreno / Mali).
+                bool isTransientDepth = (vkDepthTex.Usage & TextureUsage.Transient) != 0;
+
                 depthAttachment = VkRenderingAttachmentInfo.New();
                 depthAttachment.imageView = currentFramebuffer.DepthAttachmentView;
                 depthAttachment.imageLayout = VkImageLayout.DepthStencilAttachmentOptimal;
                 depthAttachment.resolveMode = VkResolveModeFlagBits.None;
-                depthAttachment.storeOp = VkAttachmentStoreOp.Store;
+                depthAttachment.storeOp = isTransientDepth ? VkAttachmentStoreOp.DontCare : VkAttachmentStoreOp.Store;
 
                 if (depthClearValue.HasValue)
                 {

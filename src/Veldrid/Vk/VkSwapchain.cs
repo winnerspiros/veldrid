@@ -471,7 +471,7 @@ namespace Veldrid.Vk
                 ulong extArea = (ulong)surfaceCapabilities.currentExtent.width * (ulong)surfaceCapabilities.currentExtent.height;
                 if (extArea > 0 && extArea <= reqArea / 4)
                 {
-                    Debug.WriteLine($"[Veldrid/VkSwapchain] dp-scale early-out: extent {surfaceCapabilities.currentExtent.width}×{surfaceCapabilities.currentExtent.height} ≤ ¼ of requested {width}×{height}; skipping WaitForIdle.");
+                    Debug.WriteLine($"[Veldrid/VkSwapchain] dp-scale early-out: extent {surfaceCapabilities.currentExtent.width}x{surfaceCapabilities.currentExtent.height} <= 1/4 of requested {width}x{height}; skipping WaitForIdle.");
                     return false;
                 }
             }
@@ -606,7 +606,7 @@ namespace Veldrid.Vk
                 ulong extArea = (ulong)chosenExtent.width * (ulong)chosenExtent.height;
                 if (extArea > 0 && extArea <= reqArea / 4)
                 {
-                    Debug.WriteLine($"[Veldrid/VkSwapchain] dp-scale guard: extent {chosenExtent.width}×{chosenExtent.height} ≤ ¼ of requested {width}×{height}; retrying.");
+                    Debug.WriteLine($"[Veldrid/VkSwapchain] dp-scale guard: extent {chosenExtent.width}x{chosenExtent.height} <= 1/4 of requested {width}x{height}; retrying.");
                     return false;
                 }
             }
