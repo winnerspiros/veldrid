@@ -59,6 +59,14 @@ namespace Veldrid.Vk
         private BoundResourceSetInfo[] currentGraphicsResourceSets = Array.Empty<BoundResourceSetInfo>();
         private bool[] graphicsResourceSetsChanged;
 
+        // Cached vertex / index buffer state — skip redundant vkCmdBind* calls when the same
+        // buffer+offset is re-submitted on consecutive draw calls or across resource-set changes.
+        private VkBuffer[] cachedVertexBuffers = Array.Empty<VkBuffer>();
+        private ulong[] cachedVertexOffsets = Array.Empty<ulong>();
+        private VkBuffer cachedIndexBuffer;
+        private ulong cachedIndexBufferOffset;
+        private VkIndexType cachedIndexType;
+
         private bool newFramebuffer; // Render pass cycle state
 
         // Sentinel value used in activeRenderPass to indicate that dynamic rendering
@@ -162,6 +170,11 @@ namespace Veldrid.Vk
             clearSets(currentGraphicsResourceSets);
             Util.ClearArray(scissorRects);
             Util.ClearArray(cachedViewports);
+            Util.ClearArray(cachedVertexBuffers);
+            Util.ClearArray(cachedVertexOffsets);
+            cachedIndexBuffer = null;
+            cachedIndexBufferOffset = 0;
+            cachedIndexType = default;
 
             currentComputePipeline = null;
             clearSets(currentComputeResourceSets);
@@ -1293,12 +1306,18 @@ namespace Veldrid.Vk
             {
                 VkBuffer ret = null;
 
-                foreach (var buffer in availableStagingBuffers)
+                for (int i = 0; i < availableStagingBuffers.Count; i++)
                 {
+                    var buffer = availableStagingBuffers[i];
+
                     if (buffer.SizeInBytes >= size)
                     {
                         ret = buffer;
-                        availableStagingBuffers.Remove(buffer);
+                        // Swap-remove: move the last element into this slot and shrink the list in
+                        // O(1) rather than paying the O(n) element shift that List.Remove causes.
+                        int last = availableStagingBuffers.Count - 1;
+                        availableStagingBuffers[i] = availableStagingBuffers[last];
+                        availableStagingBuffers.RemoveAt(last);
                         break;
                     }
                 }
@@ -1449,6 +1468,17 @@ namespace Veldrid.Vk
             var vkBuffer = Util.AssertSubtype<DeviceBuffer, VkBuffer>(buffer);
             var deviceBuffer = vkBuffer.DeviceBuffer;
             ulong offset64 = offset;
+
+            Util.EnsureArrayMinimumSize(ref cachedVertexBuffers, index + 1);
+            Util.EnsureArrayMinimumSize(ref cachedVertexOffsets, index + 1);
+
+            // Skip the GPU call when the same buffer+offset is already bound in this slot.
+            if (cachedVertexBuffers[index] == vkBuffer && cachedVertexOffsets[index] == offset64)
+                return;
+
+            cachedVertexBuffers[index] = vkBuffer;
+            cachedVertexOffsets[index] = offset64;
+
             vkCmdBindVertexBuffers(CommandBuffer, index, 1, ref deviceBuffer, ref offset64);
             currentStagingInfo.Resources.Add(vkBuffer.RefCount);
         }
@@ -1456,7 +1486,18 @@ namespace Veldrid.Vk
         private protected override void SetIndexBufferCore(DeviceBuffer buffer, IndexFormat format, uint offset)
         {
             var vkBuffer = Util.AssertSubtype<DeviceBuffer, VkBuffer>(buffer);
-            vkCmdBindIndexBuffer(CommandBuffer, vkBuffer.DeviceBuffer, offset, VkFormats.VdToVkIndexFormat(format));
+            var vkIndexType = VkFormats.VdToVkIndexFormat(format);
+            ulong offset64 = offset;
+
+            // Skip the GPU call when the same buffer+offset+type is already bound.
+            if (cachedIndexBuffer == vkBuffer && cachedIndexBufferOffset == offset64 && cachedIndexType == vkIndexType)
+                return;
+
+            cachedIndexBuffer = vkBuffer;
+            cachedIndexBufferOffset = offset64;
+            cachedIndexType = vkIndexType;
+
+            vkCmdBindIndexBuffer(CommandBuffer, vkBuffer.DeviceBuffer, offset64, vkIndexType);
             currentStagingInfo.Resources.Add(vkBuffer.RefCount);
         }
 

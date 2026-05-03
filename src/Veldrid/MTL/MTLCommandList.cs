@@ -721,11 +721,16 @@ namespace Veldrid.MTL
 
             lock (submittedCommandsLock)
             {
-                foreach (var buffer in availableStagingBuffers)
+                for (int i = 0; i < availableStagingBuffers.Count; i++)
                 {
+                    var buffer = availableStagingBuffers[i];
+
                     if (buffer.SizeInBytes >= sizeInBytes)
                     {
-                        availableStagingBuffers.Remove(buffer);
+                        // Swap-remove: O(1) instead of O(n) List.Remove.
+                        int last = availableStagingBuffers.Count - 1;
+                        availableStagingBuffers[i] = availableStagingBuffers[last];
+                        availableStagingBuffers.RemoveAt(last);
                         return buffer;
                     }
                 }
