@@ -36,6 +36,13 @@ namespace Veldrid.OpenGL
         public readonly bool OesPackedDepthStencil;
         public readonly bool InvalidateFramebuffer;
         public readonly bool ClearBufferIndividual;
+
+        /// <summary>
+        ///     <c>glBufferStorageEXT</c> (GLES) or <c>glBufferStorage</c> (GL 4.4+ / ARB).
+        ///     When true, dynamic buffers can be created with <c>GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT</c>
+        ///     and mapped once for their entire lifetime, eliminating per-frame Map/Unmap overhead.
+        /// </summary>
+        public readonly bool BufferStorage;
         private readonly HashSet<string> extensions;
         private readonly GraphicsBackend backend;
         private readonly int major;
@@ -112,6 +119,14 @@ namespace Veldrid.OpenGL
             // exactly one attachment without touching draw-buffer state. Mobile drivers (Mali/Adreno)
             // re-do tile setup on every glDrawBuffers change, so this is a meaningful per-pass win.
             ClearBufferIndividual = GLVersion(3, 0) || GLESVersion(3, 0);
+
+            // GL_EXT_buffer_storage / GL_ARB_buffer_storage (core GL 4.4): creates immutable buffer
+            // storage that can be permanently mapped with GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT.
+            // Eliminates the per-frame glMapBufferRange / glUnmapBuffer round-trip for dynamic
+            // uniform and vertex buffers — a significant CPU overhead reduction on Adreno/Mali.
+            BufferStorage = GLVersion(4, 4)
+                            || IsExtensionSupported("GL_ARB_buffer_storage")
+                            || IsExtensionSupported("GL_EXT_buffer_storage");
         }
 
         /// <summary>

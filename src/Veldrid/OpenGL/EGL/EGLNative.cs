@@ -75,6 +75,17 @@ namespace Veldrid.OpenGL.EGL
 
         [DllImport(lib_name)]
         public static extern int eglGetConfigAttrib(IntPtr display, IntPtr config, int attribute, int* value);
+
+        /// <summary>Returns a space-separated string of supported EGL extensions for the given display.</summary>
+        [DllImport(lib_name)]
+        public static extern IntPtr eglQueryString(IntPtr display, int name);
+
+        /// <summary>Sets an attribute on an EGL surface (e.g. EGL_TIMESTAMPS_ANDROID to enable frame timing).</summary>
+        [DllImport(lib_name)]
+        public static extern int eglSurfaceAttrib(IntPtr display, IntPtr surface, int attribute, int value);
+
+        // eglQueryString token: returns the space-separated extension string for the display.
+        public const int EGL_EXTENSIONS = 0x3055;
     }
 
     internal enum EglError

@@ -541,6 +541,27 @@ namespace Veldrid.Vk
         }
     }
 
+    // VK_EXT_pipeline_creation_cache_control (core in Vulkan 1.3).
+    // Enables VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT: callers can
+    // request a pipeline without blocking if it is not already in the cache, receiving
+    // VK_PIPELINE_COMPILE_REQUIRED instead of stalling the render thread for shader
+    // compilation. Essential for hitching-free real-time use on mobile.
+    internal unsafe struct VkPhysicalDevicePipelineCreationCacheControlFeatures
+    {
+        public const VkStructureType TYPE = (VkStructureType)1000297001;
+
+        public VkStructureType sType;
+        public void* pNext;
+        public VkBool32 pipelineCreationCacheControl;
+
+        public static VkPhysicalDevicePipelineCreationCacheControlFeatures New()
+        {
+            var ret = default(VkPhysicalDevicePipelineCreationCacheControlFeatures);
+            ret.sType = TYPE;
+            return ret;
+        }
+    }
+
     // --- VK_GOOGLE_display_timing ---
     // Allows scheduling presents at exact vblank offsets for minimum
     // input-to-photon latency. Android / Qualcomm-supported since Android 7.

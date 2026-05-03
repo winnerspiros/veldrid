@@ -130,6 +130,14 @@ namespace Veldrid.Vk
         public VkGetRefreshCycleDurationGOOGLET GetRefreshCycleDurationGOOGLE { get; private set; }
         public VkGetPastPresentationTimingGOOGLET GetPastPresentationTimingGOOGLE { get; private set; }
 
+        // VK_EXT_pipeline_creation_cache_control (core in Vulkan 1.3).
+        // When true, pipeline creation calls may pass
+        // VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT to avoid blocking
+        // the render thread when the pipeline is not already in the cache, receiving
+        // VK_PIPELINE_COMPILE_REQUIRED and falling back to a simpler pipeline until
+        // the real one is ready. Eliminates shader-compilation hitches in real-time use.
+        public bool HasPipelineCreationCacheControl { get; private set; }
+
         /// <summary>
         ///     The Vulkan API version supported by the selected physical device.
         /// </summary>
@@ -1264,6 +1272,7 @@ namespace Veldrid.Vk
             bool hasSynchronization2 = DeviceApiVersion.IsAtLeast(1, 3); // Core in Vulkan 1.3
             bool hasTimelineSemaphore = DeviceApiVersion.IsAtLeast(1, 2); // Core in Vulkan 1.2
             bool hasDisplayTiming = false; // VK_GOOGLE_display_timing (Android/Qualcomm)
+            bool hasPipelineCreationCacheControl = DeviceApiVersion.IsAtLeast(1, 3); // Core in Vulkan 1.3
             IntPtr[] activeExtensions = new IntPtr[props.Length];
             uint activeExtensionCount = 0;
 
@@ -1428,6 +1437,7 @@ namespace Veldrid.Vk
             VkPhysicalDeviceSynchronization2Features synchronization2Features;
             VkPhysicalDeviceTimelineSemaphoreFeatures timelineSemaphoreFeatures;
             VkPhysicalDeviceFragmentShadingRateFeaturesKHR fragmentShadingRateFeatures;
+            VkPhysicalDevicePipelineCreationCacheControlFeatures pipelineCreationCacheControlFeatures;
 
             if (hasDynamicRendering)
             {
@@ -1467,6 +1477,14 @@ namespace Veldrid.Vk
                 timelineSemaphoreFeatures.timelineSemaphore = true;
                 timelineSemaphoreFeatures.pNext = deviceCreateInfo.pNext;
                 deviceCreateInfo.pNext = &timelineSemaphoreFeatures;
+            }
+
+            if (hasPipelineCreationCacheControl)
+            {
+                pipelineCreationCacheControlFeatures = VkPhysicalDevicePipelineCreationCacheControlFeatures.New();
+                pipelineCreationCacheControlFeatures.pipelineCreationCacheControl = true;
+                pipelineCreationCacheControlFeatures.pNext = deviceCreateInfo.pNext;
+                deviceCreateInfo.pNext = &pipelineCreationCacheControlFeatures;
             }
 
             // VK_KHR_fragment_shading_rate: explicitly request pipelineFragmentShadingRate.
@@ -1626,6 +1644,8 @@ namespace Veldrid.Vk
             }
 
             HasTimelineSemaphore = hasTimelineSemaphore;
+
+            HasPipelineCreationCacheControl = hasPipelineCreationCacheControl;
 
             // VK_GOOGLE_display_timing: load function pointers used by VkSwapchain to
             // query the display refresh cadence and schedule per-present vblank targets.

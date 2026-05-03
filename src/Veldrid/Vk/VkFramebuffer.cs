@@ -91,14 +91,22 @@ namespace Veldrid.Vk
             {
                 var vkDepthTex = Util.AssertSubtype<Texture, VkTexture>(DepthTarget.Value.Target);
                 bool hasStencil = FormatHelpers.IsStencilFormat(vkDepthTex.Format);
+                // Transient depth textures are backed by LAZILY_ALLOCATED (tile-only) memory
+                // and are never sampled or read after the render pass. Using DONT_CARE for both
+                // depth and stencil store ops tells the driver it does not need to flush tile
+                // contents to main memory — the full TBDR win. With STORE the driver would still
+                // perform a tile→DRAM writeback even though the data is never consumed.
+                bool isTransient = (vkDepthTex.Usage & TextureUsage.Transient) != 0;
                 depthAttachmentDesc.format = vkDepthTex.VkFormat;
                 depthAttachmentDesc.samples = vkDepthTex.VkSampleCount;
                 depthAttachmentDesc.loadOp = VkAttachmentLoadOp.Load;
-                depthAttachmentDesc.storeOp = VkAttachmentStoreOp.Store;
+                depthAttachmentDesc.storeOp = isTransient
+                    ? VkAttachmentStoreOp.DontCare
+                    : VkAttachmentStoreOp.Store;
                 depthAttachmentDesc.stencilLoadOp = VkAttachmentLoadOp.DontCare;
-                depthAttachmentDesc.stencilStoreOp = hasStencil
-                    ? VkAttachmentStoreOp.Store
-                    : VkAttachmentStoreOp.DontCare;
+                depthAttachmentDesc.stencilStoreOp = isTransient || !hasStencil
+                    ? VkAttachmentStoreOp.DontCare
+                    : VkAttachmentStoreOp.Store;
                 depthAttachmentDesc.initialLayout = (vkDepthTex.Usage & TextureUsage.Sampled) != 0
                     ? VkImageLayout.ShaderReadOnlyOptimal
                     : VkImageLayout.DepthStencilAttachmentOptimal;

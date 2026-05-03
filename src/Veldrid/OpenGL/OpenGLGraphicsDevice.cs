@@ -839,9 +839,13 @@ namespace Veldrid.OpenGL
                     $"Failed to create an EGL surface from the Android native window: {eglGetError()}");
             }
 
+            // Request an ES 3 context. The config was already filtered to EGL_OPENGL_ES3_BIT, so
+            // ES 3-incapable drivers will have failed eglChooseConfig above. ES 3 is backwards
+            // compatible with ES 2; this change ensures we get a proper 3.x context rather than
+            // relying on the driver to promote a version-2 request (implementation-specific behaviour).
             int* contextAttribs = stackalloc int[3];
             contextAttribs[0] = EGL_CONTEXT_CLIENT_VERSION;
-            contextAttribs[1] = 2;
+            contextAttribs[1] = 3;
             contextAttribs[2] = EGL_NONE;
             IntPtr context = eglCreateContext(display, bestConfig, IntPtr.Zero, contextAttribs);
             if (context == IntPtr.Zero) throw new VeldridException("Failed to create an EGLContext: " + eglGetError());
@@ -858,9 +862,19 @@ namespace Veldrid.OpenGL
                 if (eglMakeCurrent(display, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero) == 0) throw new VeldridException("Failed to clear the current EGLContext: " + eglGetError());
             };
 
+            // EGL_ANDROID_presentation_time + EGL_ANDROID_get_frame_timestamps:
+            // the GLES equivalent of VK_GOOGLE_display_timing. Schedules each eglSwapBuffers
+            // at the next optimal vblank slot based on compositor feedback, minimising the time
+            // a rendered frame sits in the scanout buffer before the display shows it.
+            // TryCreate returns null when the extension is not available; BeforeSwap / AfterSwap
+            // are then never called and there is no overhead.
+            var eglTiming = Veldrid.OpenGL.EGL.EglPresentationTimingHelper.TryCreate(display, eglWindowSurface);
+
             Action swapBuffersFunc = () =>
             {
+                eglTiming?.BeforeSwap();
                 if (eglSwapBuffers(display, eglWindowSurface) == 0) throw new VeldridException("Failed to swap buffers: " + eglGetError());
+                eglTiming?.AfterSwap();
             };
 
             Action<bool> setSync = vsync =>

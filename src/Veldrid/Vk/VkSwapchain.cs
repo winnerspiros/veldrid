@@ -947,7 +947,7 @@ namespace Veldrid.Vk
             displayTimingRefreshDuration = timing.refreshDuration;
         }
 
-
+        private bool getPresentQueueIndex(out uint queueFamilyIndex)
         {
             uint deviceGraphicsQueueIndex = gd.GraphicsQueueIndex;
             uint devicePresentQueueIndex = gd.PresentQueueIndex;
