@@ -459,6 +459,23 @@ namespace Veldrid.Vk
                                                               && surfaceCapabilities.maxImageExtent.width == 0 && surfaceCapabilities.maxImageExtent.height == 0)
                 return false;
 
+            // Android dp-scale early-out: during SurfaceHolder.SetFormat transitions the
+            // ANativeWindow briefly reports dp-scaled dimensions. Bail out here — BEFORE
+            // vkDeviceWaitIdle — so the ~50ms GPU drain isn't paid on every retry cycle.
+            // (The late guard right before swapchainCi.imageExtent is belt-and-braces.)
+            if (OperatingSystem.IsAndroid()
+                && surfaceCapabilities.currentExtent.width != uint.MaxValue // fixed-extent surface
+                && width > 0 && height > 0)
+            {
+                ulong reqArea = (ulong)width * (ulong)height;
+                ulong extArea = (ulong)surfaceCapabilities.currentExtent.width * (ulong)surfaceCapabilities.currentExtent.height;
+                if (extArea > 0 && extArea <= reqArea / 4)
+                {
+                    Debug.WriteLine($"[Veldrid/VkSwapchain] dp-scale early-out: extent {surfaceCapabilities.currentExtent.width}×{surfaceCapabilities.currentExtent.height} ≤ ¼ of requested {width}×{height}; skipping WaitForIdle.");
+                    return false;
+                }
+            }
+
             if (deviceSwapchain != VkSwapchainKHR.Null) gd.WaitForIdle();
 
             currentImageIndex = 0;
