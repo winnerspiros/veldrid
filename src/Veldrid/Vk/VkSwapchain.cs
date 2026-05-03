@@ -915,6 +915,12 @@ namespace Veldrid.Vk
         // earliest-possible display time.
         public ulong GetDesiredPresentTime()
         {
+            // IMMEDIATE / uncapped: return 0 (present ASAP).
+            // A future desiredPresentTime causes SurfaceFlinger to hold the frame until
+            // the next vblank even in IMMEDIATE mode, capping FPS to the refresh rate.
+            if (!syncToVBlank)
+                return 0;
+
             if (displayTimingLastEarliestPresentTime == 0)
                 return 0;
 
