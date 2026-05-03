@@ -1153,11 +1153,35 @@ namespace Veldrid.Vk
                     // If the image was already in ColorAttachmentOptimal before our transition loop,
                     // it was rendered to earlier this frame (swapchain returned from a mid-frame FBO
                     // switch). Use Load to preserve that content. Otherwise fall back to the normal
-                    // newFramebuffer heuristic (DontCare for fresh acquisitions, Load for reuse).
+                    // newFramebuffer heuristic.
                     bool wasAlreadyColorAttachment = priorColorLayouts[i] == VkImageLayout.ColorAttachmentOptimal;
-                    colorAttachments[i].loadOp = wasAlreadyColorAttachment
-                        ? VkAttachmentLoadOp.Load
-                        : newFramebuffer ? VkAttachmentLoadOp.DontCare : VkAttachmentLoadOp.Load;
+                    if (wasAlreadyColorAttachment)
+                    {
+                        colorAttachments[i].loadOp = VkAttachmentLoadOp.Load;
+                    }
+                    else if (newFramebuffer)
+                    {
+                        // On TBR GPUs (Adreno/Mali), DontCare exposes stale tile-RAM content from a previous
+                        // render pass sharing the same tile region → flickering black boxes / gray rectangles.
+                        // For sampled (offscreen) FBOs, use Clear(0,0,0,0) as a safe fallback when the app
+                        // hasn't queued an explicit clear. The swapchain surface (not sampled) keeps DontCare
+                        // as the expected usage pattern is for apps to clear it explicitly each frame.
+                        var vkColorTex = Util.AssertSubtype<Texture, VkTexture>(currentFramebuffer.ColorTargets[i].Target);
+                        bool isSampledOffscreen = (vkColorTex.Usage & TextureUsage.Sampled) != 0;
+                        if (isSampledOffscreen)
+                        {
+                            colorAttachments[i].loadOp = VkAttachmentLoadOp.Clear;
+                            colorAttachments[i].clearValue = new VkClearValue { color = new VkClearColorValue(0f, 0f, 0f, 0f) };
+                        }
+                        else
+                        {
+                            colorAttachments[i].loadOp = VkAttachmentLoadOp.DontCare;
+                        }
+                    }
+                    else
+                    {
+                        colorAttachments[i].loadOp = VkAttachmentLoadOp.Load;
+                    }
                 }
 
                 if (!validColorClearValues[i] && !newFramebuffer)
