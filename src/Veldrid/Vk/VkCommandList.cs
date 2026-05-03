@@ -708,7 +708,7 @@ namespace Veldrid.Vk
                 endCurrentRenderPass();
             }
 
-            currentFramebuffer?.TransitionToFinalLayout(CommandBuffer);
+            currentFramebuffer?.TransitionToFBOSwitchLayout(CommandBuffer);
 
             var vkFb = Util.AssertSubtype<Framebuffer, VkFramebufferBase>(fb);
             currentFramebuffer = vkFb;
@@ -1098,6 +1098,18 @@ namespace Veldrid.Vk
             var colorViews = currentFramebuffer.ColorAttachmentViews;
             var colorAttachments = stackalloc VkRenderingAttachmentInfo[colorCount > 0 ? colorCount : 1];
 
+            // Capture layout BEFORE transitions. If an image is already in ColorAttachmentOptimal,
+            // it was rendered to earlier in this frame (before a mid-frame FBO switch). We must use
+            // loadOp=Load on return to preserve that content. PresentSrcKHR = fresh acquisition;
+            // DontCare is safe there (game always calls Clear on first use via validColorClearValues).
+            var priorColorLayouts = stackalloc VkImageLayout[colorCount > 0 ? colorCount : 1];
+            for (int i = 0; i < colorCount; i++)
+            {
+                var ca = currentFramebuffer.ColorTargets[i];
+                var vkTex = Util.AssertSubtype<Texture, VkTexture>(ca.Target);
+                priorColorLayouts[i] = vkTex.GetImageLayout(ca.MipLevel, ca.ArrayLayer);
+            }
+
             // Dynamic rendering has no implicit layout transitions (unlike VkRenderPass, which
             // handles them via VkAttachmentDescription.initialLayout/finalLayout). Emit explicit
             // barriers here so every attachment is in the correct layout when vkCmdBeginRendering
@@ -1138,7 +1150,14 @@ namespace Veldrid.Vk
                 }
                 else
                 {
-                    colorAttachments[i].loadOp = newFramebuffer ? VkAttachmentLoadOp.DontCare : VkAttachmentLoadOp.Load;
+                    // If the image was already in ColorAttachmentOptimal before our transition loop,
+                    // it was rendered to earlier this frame (swapchain returned from a mid-frame FBO
+                    // switch). Use Load to preserve that content. Otherwise fall back to the normal
+                    // newFramebuffer heuristic (DontCare for fresh acquisitions, Load for reuse).
+                    bool wasAlreadyColorAttachment = priorColorLayouts[i] == VkImageLayout.ColorAttachmentOptimal;
+                    colorAttachments[i].loadOp = wasAlreadyColorAttachment
+                        ? VkAttachmentLoadOp.Load
+                        : newFramebuffer ? VkAttachmentLoadOp.DontCare : VkAttachmentLoadOp.Load;
                 }
 
                 if (!validColorClearValues[i] && !newFramebuffer)

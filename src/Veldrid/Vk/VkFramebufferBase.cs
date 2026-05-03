@@ -53,6 +53,14 @@ namespace Veldrid.Vk
         public abstract void TransitionToIntermediateLayout(VkCommandBuffer cb);
         public abstract void TransitionToFinalLayout(VkCommandBuffer cb);
 
+        /// <summary>
+        ///     Called by <see cref="VkCommandList.SetFramebufferCore"/> when switching away from this
+        ///     framebuffer mid-frame (i.e. not at end-of-frame). The default implementation falls
+        ///     through to <see cref="TransitionToFinalLayout"/> so regular framebuffers (sampled
+        ///     textures → ShaderReadOnly) are unaffected.
+        /// </summary>
+        public virtual void TransitionToFBOSwitchLayout(VkCommandBuffer cb) => TransitionToFinalLayout(cb);
+
         protected abstract void DisposeCore();
     }
 }

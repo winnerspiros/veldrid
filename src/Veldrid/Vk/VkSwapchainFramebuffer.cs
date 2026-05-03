@@ -101,6 +101,13 @@ namespace Veldrid.Vk
             }
         }
 
+        // Override: no-op for swapchain during mid-frame FBO switches.
+        // The swapchain image stays in ColorAttachmentOptimal so that
+        // beginCurrentDynamicRendering() can detect it was used earlier
+        // in this frame and use loadOp=Load to preserve rendered content.
+        // VkCommandList.End() still calls TransitionToFinalLayout → PresentSrcKHR for the actual present.
+        public override void TransitionToFBOSwitchLayout(VkCommandBuffer cb) { }
+
         internal void SetImageIndex(uint index)
         {
             ImageIndex = index;
