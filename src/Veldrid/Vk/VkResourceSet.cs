@@ -1,7 +1,6 @@
 using System.Collections.Generic;
-using Vulkan;
-using static Vulkan.VulkanNative;
-
+using Vortice.Vulkan;
+using static Vortice.Vulkan.Vulkan;
 namespace Veldrid.Vk
 {
     internal unsafe class VkResourceSet : ResourceSet

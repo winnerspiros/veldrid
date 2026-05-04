@@ -1,13 +1,13 @@
-﻿using System.Runtime.CompilerServices;
-using Vulkan;
-using static Vulkan.VulkanNative;
+using System.Runtime.CompilerServices;
+using Vortice.Vulkan;
+using static Vortice.Vulkan.Vulkan;
 using static Veldrid.Vk.VulkanUtil;
 
 namespace Veldrid.Vk
 {
     internal unsafe class VkPipeline : Pipeline
     {
-        public Vulkan.VkPipeline DevicePipeline => devicePipeline;
+        public Vortice.Vulkan.VkPipeline DevicePipeline => devicePipeline;
 
         public VkPipelineLayout PipelineLayout => pipelineLayout;
 
@@ -32,7 +32,7 @@ namespace Veldrid.Vk
         }
 
         private readonly VkGraphicsDevice gd;
-        private readonly Vulkan.VkPipeline devicePipeline;
+        private readonly Vortice.Vulkan.VkPipeline devicePipeline;
         private readonly VkPipelineLayout pipelineLayout;
         private readonly VkRenderPass renderPass;
         private bool destroyed;

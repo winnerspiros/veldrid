@@ -1,12 +1,9 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using Veldrid.Android;
 using Veldrid.MetalBindings;
-using Vulkan;
-using Vulkan.Android;
-using Vulkan.Wayland;
-using Vulkan.Xlib;
-using static Vulkan.VulkanNative;
+using Vortice.Vulkan;
+using static Vortice.Vulkan.Vulkan;
 using static Veldrid.Vk.VulkanUtil;
 
 namespace Veldrid.Vk

@@ -1,9 +1,8 @@
-﻿#if !EXCLUDE_VULKAN_BACKEND
+#if !EXCLUDE_VULKAN_BACKEND
 using System;
 using System.Collections.ObjectModel;
 using Veldrid.Vk;
-using Vulkan;
-
+using Vortice.Vulkan;
 namespace Veldrid
 {
     /// <summary>

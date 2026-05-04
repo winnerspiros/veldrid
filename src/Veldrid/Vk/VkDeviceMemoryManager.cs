@@ -1,9 +1,9 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
-using Vulkan;
-using static Vulkan.VulkanNative;
+using Vortice.Vulkan;
+using static Vortice.Vulkan.Vulkan;
 using static Veldrid.Vk.VulkanUtil;
 
 namespace Veldrid.Vk
@@ -61,7 +61,7 @@ namespace Veldrid.Vk
                 alignment,
                 false,
                 VkImage.Null,
-                Vulkan.VkBuffer.Null);
+                Vortice.Vulkan.VkBuffer.Null);
         }
 
         public VkMemoryBlock Allocate(
@@ -73,23 +73,23 @@ namespace Veldrid.Vk
             ulong alignment,
             bool dedicated,
             VkImage dedicatedImage,
-            Vulkan.VkBuffer dedicatedBuffer)
+            Vortice.Vulkan.VkBuffer dedicatedBuffer)
         {
             if (dedicated)
             {
                 if (dedicatedImage != VkImage.Null && getImageMemoryRequirements2 != null)
                 {
-                    var requirementsInfo = VkImageMemoryRequirementsInfo2KHR.New();
+                    var requirementsInfo = VkImageMemoryRequirementsInfo2.New();
                     requirementsInfo.image = dedicatedImage;
-                    var requirements = VkMemoryRequirements2KHR.New();
+                    var requirements = VkMemoryRequirements2.New();
                     getImageMemoryRequirements2(device, &requirementsInfo, &requirements);
                     size = requirements.memoryRequirements.size;
                 }
-                else if (dedicatedBuffer != Vulkan.VkBuffer.Null && getBufferMemoryRequirements2 != null)
+                else if (dedicatedBuffer != Vortice.Vulkan.VkBuffer.Null && getBufferMemoryRequirements2 != null)
                 {
-                    var requirementsInfo = VkBufferMemoryRequirementsInfo2KHR.New();
+                    var requirementsInfo = VkBufferMemoryRequirementsInfo2.New();
                     requirementsInfo.buffer = dedicatedBuffer;
-                    var requirements = VkMemoryRequirements2KHR.New();
+                    var requirements = VkMemoryRequirements2.New();
                     getBufferMemoryRequirements2(device, &requirementsInfo, &requirements);
                     size = requirements.memoryRequirements.size;
                 }
@@ -115,11 +115,11 @@ namespace Veldrid.Vk
                     allocateInfo.memoryTypeIndex = memoryTypeIndex;
 
                     // ReSharper disable once TooWideLocalVariableScope
-                    VkMemoryDedicatedAllocateInfoKHR dedicatedAi;
+                    VkMemoryDedicatedAllocateInfo dedicatedAi;
 
                     if (dedicated)
                     {
-                        dedicatedAi = VkMemoryDedicatedAllocateInfoKHR.New();
+                        dedicatedAi = VkMemoryDedicatedAllocateInfo.New();
                         dedicatedAi.buffer = dedicatedBuffer;
                         dedicatedAi.image = dedicatedImage;
                         allocateInfo.pNext = &dedicatedAi;

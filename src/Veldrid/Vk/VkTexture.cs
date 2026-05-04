@@ -1,6 +1,6 @@
-﻿using System.Diagnostics;
-using Vulkan;
-using static Vulkan.VulkanNative;
+using System.Diagnostics;
+using Vortice.Vulkan;
+using static Vortice.Vulkan.Vulkan;
 using static Veldrid.Vk.VulkanUtil;
 
 namespace Veldrid.Vk
@@ -29,7 +29,7 @@ namespace Veldrid.Vk
         public override bool IsDisposed => destroyed;
 
         public VkImage OptimalDeviceImage => optimalImage;
-        public Vulkan.VkBuffer StagingBuffer => stagingBuffer;
+        public Vortice.Vulkan.VkBuffer StagingBuffer => stagingBuffer;
         public VkMemoryBlock Memory => memoryBlock;
 
         public VkFormat VkFormat { get; }
@@ -51,7 +51,7 @@ namespace Veldrid.Vk
         private readonly VkGraphicsDevice gd;
         private readonly VkImage optimalImage;
         private readonly VkMemoryBlock memoryBlock;
-        private readonly Vulkan.VkBuffer stagingBuffer;
+        private readonly Vortice.Vulkan.VkBuffer stagingBuffer;
         private PixelFormat format; // Static for regular images -- may change for shared staging images
         private bool destroyed;
 
@@ -114,10 +114,10 @@ namespace Veldrid.Vk
 
                 if (this.gd.GetImageMemoryRequirements2 != null)
                 {
-                    var memReqsInfo2 = VkImageMemoryRequirementsInfo2KHR.New();
+                    var memReqsInfo2 = VkImageMemoryRequirementsInfo2.New();
                     memReqsInfo2.image = optimalImage;
-                    var memReqs2 = VkMemoryRequirements2KHR.New();
-                    var dedicatedReqs = VkMemoryDedicatedRequirementsKHR.New();
+                    var memReqs2 = VkMemoryRequirements2.New();
+                    var dedicatedReqs = VkMemoryDedicatedRequirements.New();
                     memReqs2.pNext = &dedicatedReqs;
                     this.gd.GetImageMemoryRequirements2(this.gd.Device, &memReqsInfo2, &memReqs2);
                     memoryRequirements = memReqs2.memoryRequirements;
@@ -153,7 +153,7 @@ namespace Veldrid.Vk
                     memoryRequirements.alignment,
                     prefersDedicatedAllocation,
                     optimalImage,
-                    Vulkan.VkBuffer.Null);
+                    Vortice.Vulkan.VkBuffer.Null);
                 memoryBlock = memoryToken;
                 result = vkBindImageMemory(gd.Device, optimalImage, memoryBlock.DeviceMemory, memoryBlock.Offset);
                 CheckResult(result);
@@ -195,10 +195,10 @@ namespace Veldrid.Vk
 
                 if (this.gd.GetBufferMemoryRequirements2 != null)
                 {
-                    var memReqInfo2 = VkBufferMemoryRequirementsInfo2KHR.New();
+                    var memReqInfo2 = VkBufferMemoryRequirementsInfo2.New();
                     memReqInfo2.buffer = stagingBuffer;
-                    var memReqs2 = VkMemoryRequirements2KHR.New();
-                    var dedicatedReqs = VkMemoryDedicatedRequirementsKHR.New();
+                    var memReqs2 = VkMemoryRequirements2.New();
+                    var dedicatedReqs = VkMemoryDedicatedRequirements.New();
                     memReqs2.pNext = &dedicatedReqs;
                     this.gd.GetBufferMemoryRequirements2(this.gd.Device, &memReqInfo2, &memReqs2);
                     bufferMemReqs = memReqs2.memoryRequirements;
@@ -313,7 +313,7 @@ namespace Veldrid.Vk
             uint layerCount,
             VkImageLayout newLayout)
         {
-            if (stagingBuffer != Vulkan.VkBuffer.Null) return;
+            if (stagingBuffer != Vortice.Vulkan.VkBuffer.Null) return;
 
             var oldLayout = imageLayouts[CalculateSubresource(baseMipLevel, baseArrayLayer)];
 #if DEBUG
@@ -365,7 +365,7 @@ namespace Veldrid.Vk
             uint layerCount,
             VkImageLayout newLayout)
         {
-            if (stagingBuffer != Vulkan.VkBuffer.Null) return;
+            if (stagingBuffer != Vortice.Vulkan.VkBuffer.Null) return;
 
             for (uint level = baseMipLevel; level < baseMipLevel + levelCount; level++)
             {
@@ -423,7 +423,7 @@ namespace Veldrid.Vk
             srcStage = default;
             dstStage = default;
 
-            if (stagingBuffer != Vulkan.VkBuffer.Null) return false;
+            if (stagingBuffer != Vortice.Vulkan.VkBuffer.Null) return false;
 
             var oldLayout = imageLayouts[CalculateSubresource(baseMipLevel, baseArrayLayer)];
             if (oldLayout == newLayout) return false;
@@ -472,7 +472,7 @@ namespace Veldrid.Vk
 
         internal void SetStagingDimensions(uint width, uint height, uint depth, PixelFormat format)
         {
-            Debug.Assert(stagingBuffer != Vulkan.VkBuffer.Null);
+            Debug.Assert(stagingBuffer != Vortice.Vulkan.VkBuffer.Null);
             Debug.Assert(Usage == TextureUsage.Staging);
             this.width = width;
             this.height = height;

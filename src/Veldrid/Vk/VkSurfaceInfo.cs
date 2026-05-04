@@ -1,7 +1,5 @@
-﻿using System;
-using Vulkan;
-using Vulkan.Xlib;
-
+using System;
+using Vortice.Vulkan;
 namespace Veldrid.Vk
 {
     /// <summary>

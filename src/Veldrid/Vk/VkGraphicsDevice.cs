@@ -6,10 +6,9 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
-using Vulkan;
+using Vortice.Vulkan;
 using static Veldrid.Vk.VulkanUtil;
-using static Vulkan.VulkanNative;
-
+using static Vortice.Vulkan.Vulkan;
 namespace Veldrid.Vk
 {
     internal unsafe class VkGraphicsDevice : GraphicsDevice
@@ -251,7 +250,7 @@ namespace Veldrid.Vk
         }
 
         private readonly Lock submittedFencesLock = new Lock();
-        private readonly ConcurrentQueue<Vulkan.VkFence> availableSubmissionFences = new ConcurrentQueue<Vulkan.VkFence>();
+        private readonly ConcurrentQueue<Vortice.Vulkan.VkFence> availableSubmissionFences = new ConcurrentQueue<Vortice.Vulkan.VkFence>();
         private readonly List<FenceSubmissionInfo> submittedFences = new List<FenceSubmissionInfo>();
         private readonly VkSwapchain mainSwapchain;
 
@@ -384,7 +383,7 @@ namespace Veldrid.Vk
             return surfaceExtensions.Contains(extension);
         }
 
-        public void EnableDebugCallback(VkDebugReportFlagsEXT flags = VkDebugReportFlagsEXT.WarningEXT | VkDebugReportFlagsEXT.ErrorEXT)
+        public void EnableDebugCallback(VkDebugReportFlagsEXT flags = VkDebugReportFlagsEXT.Warning | VkDebugReportFlagsEXT.Error)
         {
             Debug.WriteLine("Enabling Vulkan Debug callbacks.");
             debugCallbackFunc = debugCallback;
@@ -461,7 +460,7 @@ namespace Veldrid.Vk
         public override bool WaitForFences(Fence[] fences, bool waitAll, ulong nanosecondTimeout)
         {
             int fenceCount = fences.Length;
-            var fencesPtr = stackalloc Vulkan.VkFence[fenceCount];
+            var fencesPtr = stackalloc Vortice.Vulkan.VkFence[fenceCount];
             for (int i = 0; i < fenceCount; i++) fencesPtr[i] = Util.AssertSubtype<Fence, VkFence>(fences[i]).DeviceFence;
 
             var result = vkWaitForFences(device, (uint)fenceCount, fencesPtr, waitAll, nanosecondTimeout);
@@ -815,8 +814,8 @@ namespace Veldrid.Vk
 
             bool useExtraFence = fence != null;
 
-            Vulkan.VkFence vkFence;
-            Vulkan.VkFence submissionFence;
+            Vortice.Vulkan.VkFence vkFence;
+            Vortice.Vulkan.VkFence submissionFence;
 
             if (useExtraFence)
             {
@@ -843,7 +842,7 @@ namespace Veldrid.Vk
                     waitInfos[i] = VkSemaphoreSubmitInfo.New();
                     waitInfos[i].semaphore = waitSemaphoresPtr[i];
                     // Mirror the legacy pWaitDstStageMask = ColorAttachmentOutput.
-                    waitInfos[i].stageMask = VkPipelineStageFlags2KHR.ColorAttachmentOutput;
+                    waitInfos[i].stageMask = VkPipelineStageFlags2.ColorAttachmentOutput;
                 }
 
                 var signalInfos = stackalloc VkSemaphoreSubmitInfo[(int)signalSemaphoreCount];
@@ -851,7 +850,7 @@ namespace Veldrid.Vk
                 {
                     signalInfos[i] = VkSemaphoreSubmitInfo.New();
                     signalInfos[i].semaphore = signalSemaphoresPtr[i];
-                    signalInfos[i].stageMask = VkPipelineStageFlags2KHR.AllCommands;
+                    signalInfos[i].stageMask = VkPipelineStageFlags2.AllCommands;
                 }
 
                 var si2 = VkSubmitInfo2.New();
@@ -970,12 +969,12 @@ namespace Veldrid.Vk
             }
         }
 
-        private void returnSubmissionFence(Vulkan.VkFence fence)
+        private void returnSubmissionFence(Vortice.Vulkan.VkFence fence)
         {
             availableSubmissionFences.Enqueue(fence);
         }
 
-        private Vulkan.VkFence getFreeSubmissionFence()
+        private Vortice.Vulkan.VkFence getFreeSubmissionFence()
         {
             if (availableSubmissionFences.TryDequeue(out var availableFence))
                 return availableFence;
@@ -1183,7 +1182,7 @@ namespace Veldrid.Vk
 
             string fullMessage = $"[{debugReportFlags}] ({objectType}) {message}";
 
-            if (debugReportFlags == VkDebugReportFlagsEXT.ErrorEXT) throw new VeldridException($"A Vulkan validation error was encountered: {fullMessage}");
+            if (debugReportFlags == VkDebugReportFlagsEXT.Error) throw new VeldridException($"A Vulkan validation error was encountered: {fullMessage}");
 
             Console.WriteLine(fullMessage);
             return 0;
@@ -1432,8 +1431,8 @@ namespace Veldrid.Vk
 
             // Chain feature structs via pNext for extensions that require opt-in.
             VkPhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeatures;
-            VkPhysicalDeviceHostImageCopyFeaturesEXT hostImageCopyFeatures;
-            VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT swapchainMaintenance1Features;
+            VkPhysicalDeviceHostImageCopyFeatures hostImageCopyFeatures;
+            VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR swapchainMaintenance1Features;
             VkPhysicalDeviceSynchronization2Features synchronization2Features;
             VkPhysicalDeviceTimelineSemaphoreFeatures timelineSemaphoreFeatures;
             VkPhysicalDeviceFragmentShadingRateFeaturesKHR fragmentShadingRateFeatures;
@@ -1449,7 +1448,7 @@ namespace Veldrid.Vk
 
             if (hasHostImageCopy)
             {
-                hostImageCopyFeatures = VkPhysicalDeviceHostImageCopyFeaturesEXT.New();
+                hostImageCopyFeatures = VkPhysicalDeviceHostImageCopyFeatures.New();
                 hostImageCopyFeatures.hostImageCopy = true;
                 hostImageCopyFeatures.pNext = deviceCreateInfo.pNext;
                 deviceCreateInfo.pNext = &hostImageCopyFeatures;
@@ -1457,7 +1456,7 @@ namespace Veldrid.Vk
 
             if (hasSwapchainMaintenance1)
             {
-                swapchainMaintenance1Features = VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT.New();
+                swapchainMaintenance1Features = VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR.New();
                 swapchainMaintenance1Features.swapchainMaintenance1 = true;
                 swapchainMaintenance1Features.pNext = deviceCreateInfo.pNext;
                 deviceCreateInfo.pNext = &swapchainMaintenance1Features;
@@ -1548,7 +1547,7 @@ namespace Veldrid.Vk
 
             if (getPhysicalDeviceProperties2 != null && hasDriverProperties)
             {
-                var deviceProps = VkPhysicalDeviceProperties2KHR.New();
+                var deviceProps = VkPhysicalDeviceProperties2.New();
                 var driverProps = VkPhysicalDeviceDriverProperties.New();
 
                 deviceProps.pNext = &driverProps;
@@ -1569,8 +1568,8 @@ namespace Veldrid.Vk
             // VK_KHR_push_descriptor: query maxPushDescriptors.
             if (hasPushDescriptors && getPhysicalDeviceProperties2 != null)
             {
-                var deviceProps2 = VkPhysicalDeviceProperties2KHR.New();
-                var pushDescProps = VkPhysicalDevicePushDescriptorPropertiesKHR.New();
+                var deviceProps2 = VkPhysicalDeviceProperties2.New();
+                var pushDescProps = VkPhysicalDevicePushDescriptorProperties.New();
                 deviceProps2.pNext = &pushDescProps;
                 getPhysicalDeviceProperties2(PhysicalDevice, &deviceProps2);
                 MaxPushDescriptors = pushDescProps.maxPushDescriptors;
@@ -1885,12 +1884,12 @@ namespace Veldrid.Vk
             // driver applies any pending hot-swap (vsync ↔ low-latency) without a
             // swapchain rebuild. The pointed-to mode must remain valid until vkQueuePresentKHR
             // returns, which is satisfied by the stack-local `currentMode` below.
-            VkSwapchainPresentModeInfoEXT presentModeInfo;
+            VkSwapchainPresentModeInfoKHR presentModeInfo;
             VkPresentModeKHR currentMode;
             if (HasSwapchainMaintenance1 && vkSc.HasPresentModeHotSwap)
             {
                 currentMode = vkSc.CurrentPresentMode;
-                presentModeInfo = VkSwapchainPresentModeInfoEXT.New();
+                presentModeInfo = VkSwapchainPresentModeInfoKHR.New();
                 presentModeInfo.swapchainCount = 1;
                 presentModeInfo.pPresentModes = &currentMode;
                 presentInfo.pNext = &presentModeInfo;
@@ -2158,7 +2157,7 @@ namespace Veldrid.Vk
 
             // Transition to TransferDstOptimal for the host copy.
             var oldLayout = vkTex.GetImageLayout(mipLevel, arrayLayer);
-            var transitionToTransfer = VkHostImageLayoutTransitionInfoEXT.New();
+            var transitionToTransfer = VkHostImageLayoutTransitionInfo.New();
             transitionToTransfer.image = vkTex.OptimalDeviceImage;
             transitionToTransfer.oldLayout = oldLayout;
             transitionToTransfer.newLayout = VkImageLayout.TransferDstOptimal;
@@ -2166,7 +2165,7 @@ namespace Veldrid.Vk
             var tResult = TransitionImageLayoutExt(device, 1, &transitionToTransfer);
             VulkanUtil.CheckResult(tResult);
 
-            var region = VkMemoryToImageCopyEXT.New();
+            var region = VkMemoryToImageCopy.New();
             region.pHostPointer = source.ToPointer();
             region.imageSubresource.aspectMask = aspectMask;
             region.imageSubresource.mipLevel = mipLevel;
@@ -2179,7 +2178,7 @@ namespace Veldrid.Vk
             region.imageExtent.height = height;
             region.imageExtent.depth = depth;
 
-            var copyInfo = VkCopyMemoryToImageInfoEXT.New();
+            var copyInfo = VkCopyMemoryToImageInfo.New();
             copyInfo.dstImage = vkTex.OptimalDeviceImage;
             copyInfo.dstImageLayout = VkImageLayout.TransferDstOptimal;
             copyInfo.regionCount = 1;
@@ -2189,7 +2188,7 @@ namespace Veldrid.Vk
             VulkanUtil.CheckResult(cResult);
 
             // Transition back to the layout the image was in before.
-            var transitionBack = VkHostImageLayoutTransitionInfoEXT.New();
+            var transitionBack = VkHostImageLayoutTransitionInfo.New();
             transitionBack.image = vkTex.OptimalDeviceImage;
             transitionBack.oldLayout = VkImageLayout.TransferDstOptimal;
             transitionBack.newLayout = oldLayout;
@@ -2250,11 +2249,11 @@ namespace Veldrid.Vk
 
         private struct FenceSubmissionInfo
         {
-            public readonly Vulkan.VkFence Fence;
+            public readonly Vortice.Vulkan.VkFence Fence;
             public readonly VkCommandList CommandList;
             public readonly VkCommandBuffer CommandBuffer;
 
-            public FenceSubmissionInfo(Vulkan.VkFence fence, VkCommandList commandList, VkCommandBuffer commandBuffer)
+            public FenceSubmissionInfo(Vortice.Vulkan.VkFence fence, VkCommandList commandList, VkCommandBuffer commandBuffer)
             {
                 Fence = fence;
                 CommandList = commandList;
@@ -2282,9 +2281,9 @@ namespace Veldrid.Vk
 
     internal unsafe delegate void VkCmdDebugMarkerInsertExtT(VkCommandBuffer commandBuffer, VkDebugMarkerMarkerInfoEXT* pMarkerInfo);
 
-    internal unsafe delegate void VkGetBufferMemoryRequirements2T(VkDevice device, VkBufferMemoryRequirementsInfo2KHR* pInfo, VkMemoryRequirements2KHR* pMemoryRequirements);
+    internal unsafe delegate void VkGetBufferMemoryRequirements2T(VkDevice device, VkBufferMemoryRequirementsInfo2* pInfo, VkMemoryRequirements2* pMemoryRequirements);
 
-    internal unsafe delegate void VkGetImageMemoryRequirements2T(VkDevice device, VkImageMemoryRequirementsInfo2KHR* pInfo, VkMemoryRequirements2KHR* pMemoryRequirements);
+    internal unsafe delegate void VkGetImageMemoryRequirements2T(VkDevice device, VkImageMemoryRequirementsInfo2* pInfo, VkMemoryRequirements2* pMemoryRequirements);
 
     internal unsafe delegate void VkGetPhysicalDeviceProperties2T(VkPhysicalDevice physicalDevice, void* properties);
 

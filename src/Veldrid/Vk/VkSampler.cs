@@ -1,11 +1,10 @@
-﻿using Vulkan;
-using static Vulkan.VulkanNative;
-
+using Vortice.Vulkan;
+using static Vortice.Vulkan.Vulkan;
 namespace Veldrid.Vk
 {
     internal unsafe class VkSampler : Sampler
     {
-        public Vulkan.VkSampler DeviceSampler => sampler;
+        public Vortice.Vulkan.VkSampler DeviceSampler => sampler;
 
         public ResourceRefCount RefCount { get; }
 
@@ -22,7 +21,7 @@ namespace Veldrid.Vk
         }
 
         private readonly VkGraphicsDevice gd;
-        private readonly Vulkan.VkSampler sampler;
+        private readonly Vortice.Vulkan.VkSampler sampler;
         private bool disposed;
         private string name;
 

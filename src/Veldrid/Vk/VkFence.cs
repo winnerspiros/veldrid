@@ -1,11 +1,10 @@
-﻿using Vulkan;
-using static Vulkan.VulkanNative;
-
+using Vortice.Vulkan;
+using static Vortice.Vulkan.Vulkan;
 namespace Veldrid.Vk
 {
     internal unsafe class VkFence : Fence
     {
-        public Vulkan.VkFence DeviceFence => fence;
+        public Vortice.Vulkan.VkFence DeviceFence => fence;
 
         public override bool Signaled => vkGetFenceStatus(gd.Device, fence) == VkResult.Success;
         public override bool IsDisposed => destroyed;
@@ -21,7 +20,7 @@ namespace Veldrid.Vk
         }
 
         private readonly VkGraphicsDevice gd;
-        private readonly Vulkan.VkFence fence;
+        private readonly Vortice.Vulkan.VkFence fence;
         private string name;
         private bool destroyed;
 

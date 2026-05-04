@@ -1,6 +1,5 @@
-﻿using System.Collections.Generic;
-using Vulkan;
-
+using System.Collections.Generic;
+using Vortice.Vulkan;
 namespace Veldrid.Vk
 {
     internal abstract class VkFramebufferBase : Framebuffer
@@ -10,7 +9,7 @@ namespace Veldrid.Vk
         public abstract uint RenderableWidth { get; }
         public abstract uint RenderableHeight { get; }
 
-        public abstract Vulkan.VkFramebuffer CurrentFramebuffer { get; }
+        public abstract Vortice.Vulkan.VkFramebuffer CurrentFramebuffer { get; }
         public abstract VkRenderPass RenderPassNoClearInit { get; }
         public abstract VkRenderPass RenderPassNoClearLoad { get; }
         public abstract VkRenderPass RenderPassClear { get; }

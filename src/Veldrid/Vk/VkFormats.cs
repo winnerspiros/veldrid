@@ -1,5 +1,4 @@
-﻿using Vulkan;
-
+using Vortice.Vulkan;
 namespace Veldrid.Vk
 {
     internal static partial class VkFormats

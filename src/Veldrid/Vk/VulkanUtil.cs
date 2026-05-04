@@ -1,8 +1,7 @@
-﻿using System;
+using System;
 using System.Diagnostics;
-using Vulkan;
-using static Vulkan.VulkanNative;
-
+using Vortice.Vulkan;
+using static Vortice.Vulkan.Vulkan;
 namespace Veldrid.Vk
 {
     internal static unsafe class VulkanUtil

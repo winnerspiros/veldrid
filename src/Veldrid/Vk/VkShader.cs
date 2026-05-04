@@ -1,6 +1,6 @@
-﻿using System;
-using Vulkan;
-using static Vulkan.VulkanNative;
+using System;
+using Vortice.Vulkan;
+using static Vortice.Vulkan.Vulkan;
 using static Veldrid.Vk.VulkanUtil;
 
 namespace Veldrid.Vk

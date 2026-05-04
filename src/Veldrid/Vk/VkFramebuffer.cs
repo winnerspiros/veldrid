@@ -1,14 +1,14 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Diagnostics;
-using Vulkan;
-using static Vulkan.VulkanNative;
+using Vortice.Vulkan;
+using static Vortice.Vulkan.Vulkan;
 using static Veldrid.Vk.VulkanUtil;
 
 namespace Veldrid.Vk
 {
     internal unsafe class VkFramebuffer : VkFramebufferBase
     {
-        public override Vulkan.VkFramebuffer CurrentFramebuffer => deviceFramebuffer;
+        public override Vortice.Vulkan.VkFramebuffer CurrentFramebuffer => deviceFramebuffer;
         public override VkRenderPass RenderPassNoClearInit => renderPassNoClear;
         public override VkRenderPass RenderPassNoClearLoad => renderPassNoClearLoad;
         public override VkRenderPass RenderPassClear => renderPassClear;
@@ -32,7 +32,7 @@ namespace Veldrid.Vk
         }
 
         private readonly VkGraphicsDevice gd;
-        private readonly Vulkan.VkFramebuffer deviceFramebuffer;
+        private readonly Vortice.Vulkan.VkFramebuffer deviceFramebuffer;
         private readonly VkRenderPass renderPassNoClearLoad;
         private readonly VkRenderPass renderPassNoClear;
         private readonly VkRenderPass renderPassClear;

@@ -1,8 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using Vulkan;
-using static Vulkan.VulkanNative;
+using Vortice.Vulkan;
+using static Vortice.Vulkan.Vulkan;
 using static Veldrid.Vk.VulkanUtil;
 
 namespace Veldrid.Vk
@@ -15,7 +15,7 @@ namespace Veldrid.Vk
 
         public VkSwapchainKHR DeviceSwapchain => deviceSwapchain;
         public uint ImageIndex => currentImageIndex;
-        public Vulkan.VkFence ImageAvailableFence => imageAvailableFence;
+        public Vortice.Vulkan.VkFence ImageAvailableFence => imageAvailableFence;
         public VkSurfaceKHR Surface => surface;
 
         public VkQueue PresentQueue => presentQueue;
@@ -84,7 +84,7 @@ namespace Veldrid.Vk
         }
 
         // Exposed to VkGraphicsDevice.SwapBuffersCore so the per-present
-        // VkSwapchainPresentModeInfoEXT can carry the active mode.
+        // VkSwapchainPresentModeInfoKHR can carry the active mode.
         public VkPresentModeKHR CurrentPresentMode => currentPresentMode;
 
         // True only when the swapchain was created with a non-trivial compatibility
@@ -105,7 +105,7 @@ namespace Veldrid.Vk
         private VkQueue presentQueue;
         private readonly bool colorSrgb;
         private VkSwapchainKHR deviceSwapchain;
-        private Vulkan.VkFence imageAvailableFence;
+        private Vortice.Vulkan.VkFence imageAvailableFence;
         private bool syncToVBlank;
         private bool? newSyncToVBlank;
         private uint currentImageIndex;
@@ -238,7 +238,7 @@ namespace Veldrid.Vk
             recreateAndReacquire(framebuffer.Width, framebuffer.Height);
         }
 
-        public bool AcquireNextImage(VkDevice device, VkSemaphore semaphore, Vulkan.VkFence fence)
+        public bool AcquireNextImage(VkDevice device, VkSemaphore semaphore, Vortice.Vulkan.VkFence fence)
         {
             if (newSyncToVBlank != null)
             {
@@ -338,7 +338,7 @@ namespace Veldrid.Vk
         // (SUBOPTIMAL_KHR signals; the others don't). Always rebuild it so the next
         // acquire starts from a known-clean state. The `fence` parameter is kept
         // up-to-date for callers who hold the same handle.
-        private void rebuildFenceAfterFailedAcquire(ref Vulkan.VkFence fence)
+        private void rebuildFenceAfterFailedAcquire(ref Vortice.Vulkan.VkFence fence)
         {
             if (fence != imageAvailableFence) return;
             recreateImageAvailableFence();
@@ -683,10 +683,10 @@ namespace Veldrid.Vk
             // spec is explicit: pPresentModes must be valid only during the create call.
             fixed (VkPresentModeKHR* compatibleModesPtr = compatiblePresentModes)
             {
-                var presentModesCi = default(VkSwapchainPresentModesCreateInfoEXT);
+                var presentModesCi = default(VkSwapchainPresentModesCreateInfoKHR);
                 if (compatiblePresentModes != null && compatiblePresentModes.Length > 1)
                 {
-                    presentModesCi = VkSwapchainPresentModesCreateInfoEXT.New();
+                    presentModesCi = VkSwapchainPresentModesCreateInfoKHR.New();
                     presentModesCi.presentModeCount = (uint)compatiblePresentModes.Length;
                     presentModesCi.pPresentModes = compatibleModesPtr;
                     swapchainCi.pNext = &presentModesCi;
@@ -846,7 +846,7 @@ namespace Veldrid.Vk
             if (gd.GetPhysicalDeviceSurfaceCapabilities2 == null)
                 return null;
 
-            var surfaceMode = VkSurfacePresentModeEXT.New();
+            var surfaceMode = VkSurfacePresentModeKHR.New();
             surfaceMode.presentMode = anchor;
 
             var surfaceInfo = VkPhysicalDeviceSurfaceInfo2KHR.New();
@@ -854,7 +854,7 @@ namespace Veldrid.Vk
             surfaceInfo.pNext = &surfaceMode;
 
             // Two-pass query: first call with pPresentModes = null returns the count.
-            var compat = VkSurfacePresentModeCompatibilityEXT.New();
+            var compat = VkSurfacePresentModeCompatibilityKHR.New();
             var caps2 = VkSurfaceCapabilities2KHR.New();
             caps2.pNext = &compat;
 
@@ -874,7 +874,7 @@ namespace Veldrid.Vk
             }
 
             // Defensive intersection with the surface-supported modes; deduplicate while
-            // ensuring `anchor` is the first entry (required by VkSwapchainPresentModesCreateInfoEXT).
+            // ensuring `anchor` is the first entry (required by VkSwapchainPresentModesCreateInfoKHR).
             var result = new List<VkPresentModeKHR>((int)count) { anchor };
             for (int i = 0; i < count; i++)
             {

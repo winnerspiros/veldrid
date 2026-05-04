@@ -1,7 +1,6 @@
-﻿using Vulkan;
+using Vortice.Vulkan;
 using static Veldrid.Vk.VulkanUtil;
-using static Vulkan.VulkanNative;
-
+using static Vortice.Vulkan.Vulkan;
 namespace Veldrid.Vk
 {
     internal unsafe class VkBuffer : DeviceBuffer
@@ -12,7 +11,7 @@ namespace Veldrid.Vk
         public override uint SizeInBytes { get; }
         public override BufferUsage Usage { get; }
 
-        public Vulkan.VkBuffer DeviceBuffer => deviceBuffer;
+        public Vortice.Vulkan.VkBuffer DeviceBuffer => deviceBuffer;
         public VkMemoryBlock Memory => memory;
 
         public VkMemoryRequirements BufferMemoryRequirements => bufferMemoryRequirements;
@@ -28,7 +27,7 @@ namespace Veldrid.Vk
         }
 
         private readonly VkGraphicsDevice gd;
-        private readonly Vulkan.VkBuffer deviceBuffer;
+        private readonly Vortice.Vulkan.VkBuffer deviceBuffer;
         private readonly VkMemoryBlock memory;
         private readonly VkMemoryRequirements bufferMemoryRequirements;
         private bool destroyed;
@@ -63,10 +62,10 @@ namespace Veldrid.Vk
 
             if (this.gd.GetBufferMemoryRequirements2 != null)
             {
-                var memReqInfo2 = VkBufferMemoryRequirementsInfo2KHR.New();
+                var memReqInfo2 = VkBufferMemoryRequirementsInfo2.New();
                 memReqInfo2.buffer = deviceBuffer;
-                var memReqs2 = VkMemoryRequirements2KHR.New();
-                var dedicatedReqs = VkMemoryDedicatedRequirementsKHR.New();
+                var memReqs2 = VkMemoryRequirements2.New();
+                var dedicatedReqs = VkMemoryDedicatedRequirements.New();
                 memReqs2.pNext = &dedicatedReqs;
                 this.gd.GetBufferMemoryRequirements2(this.gd.Device, &memReqInfo2, &memReqs2);
                 bufferMemoryRequirements = memReqs2.memoryRequirements;

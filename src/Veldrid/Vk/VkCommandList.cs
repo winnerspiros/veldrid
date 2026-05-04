@@ -1,13 +1,11 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
 using System.Threading;
-using Vulkan;
-using static Vulkan.VulkanNative;
+using Vortice.Vulkan;
+using static Vortice.Vulkan.Vulkan;
 using static Veldrid.Vk.VulkanUtil;
-using static Vulkan.RawConstants;
-
 namespace Veldrid.Vk
 {
     internal unsafe class VkCommandList : CommandList
@@ -1312,7 +1310,7 @@ namespace Veldrid.Vk
                 colorAttachments[i] = VkRenderingAttachmentInfo.New();
                 colorAttachments[i].imageView = colorViews[i];
                 colorAttachments[i].imageLayout = VkImageLayout.ColorAttachmentOptimal;
-                colorAttachments[i].resolveMode = VkResolveModeFlagBits.None;
+                colorAttachments[i].resolveMode = VkResolveModeFlags.None;
                 colorAttachments[i].storeOp = VkAttachmentStoreOp.Store;
 
                 if (validColorClearValues[i])
@@ -1381,7 +1379,7 @@ namespace Veldrid.Vk
                 depthAttachment = VkRenderingAttachmentInfo.New();
                 depthAttachment.imageView = currentFramebuffer.DepthAttachmentView;
                 depthAttachment.imageLayout = VkImageLayout.DepthStencilAttachmentOptimal;
-                depthAttachment.resolveMode = VkResolveModeFlagBits.None;
+                depthAttachment.resolveMode = VkResolveModeFlags.None;
                 depthAttachment.storeOp = isTransientDepth ? VkAttachmentStoreOp.DontCare : VkAttachmentStoreOp.Store;
 
                 if (depthClearValue.HasValue)

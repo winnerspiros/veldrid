@@ -1,14 +1,14 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using Vulkan;
-using static Vulkan.VulkanNative;
+using Vortice.Vulkan;
+using static Vortice.Vulkan.Vulkan;
 using static Veldrid.Vk.VulkanUtil;
 
 namespace Veldrid.Vk
 {
     internal unsafe class VkSwapchainFramebuffer : VkFramebufferBase
     {
-        public override Vulkan.VkFramebuffer CurrentFramebuffer => scFramebuffers[(int)ImageIndex].CurrentFramebuffer;
+        public override Vortice.Vulkan.VkFramebuffer CurrentFramebuffer => scFramebuffers[(int)ImageIndex].CurrentFramebuffer;
 
         public override VkRenderPass RenderPassNoClearInit => scFramebuffers[0].RenderPassNoClearInit;
         public override VkRenderPass RenderPassNoClearLoad => scFramebuffers[0].RenderPassNoClearLoad;
