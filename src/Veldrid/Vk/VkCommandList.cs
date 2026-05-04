@@ -774,6 +774,30 @@ namespace Veldrid.Vk
             transitionImages(preDrawSampledImages, VkImageLayout.ShaderReadOnlyOptimal);
             preDrawSampledImages.Clear();
 
+            // Transition sampled textures in all currently bound graphics resource sets to
+            // ShaderReadOnlyOptimal before starting the render pass. This mirrors what
+            // preDispatchCommand does for compute dispatches and is necessary because
+            // VkFramebuffer.TransitionToFBOSwitchLayout is a no-op: FBO color attachments
+            // stay in ColorAttachmentOptimal across mid-frame switches and are never
+            // automatically promoted to ShaderReadOnlyOptimal when the FBO is "released"
+            // for use as a sampled texture. Without this, composite/blur passes that sample
+            // a previously rendered FBO read from ColorAttachmentOptimal → undefined behaviour
+            // → garbled / corrupted textures (e.g. garbled font glyphs on Android).
+            // VkTexture.TransitionImageLayout is a no-op when old == new, so textures that
+            // are already in ShaderReadOnlyOptimal (the common case) incur no barrier cost.
+            if (currentGraphicsPipeline != null)
+            {
+                uint setCount = currentGraphicsPipeline.ResourceSetCount;
+                for (int slot = 0; slot < setCount && slot < currentGraphicsResourceSets.Length; slot++)
+                {
+                    if (currentGraphicsResourceSets[slot].Set != null)
+                    {
+                        var vkSet = Util.AssertSubtype<ResourceSet, VkResourceSet>(currentGraphicsResourceSets[slot].Set);
+                        transitionImages(vkSet.SampledTextures, VkImageLayout.ShaderReadOnlyOptimal);
+                    }
+                }
+            }
+
             ensureRenderPassActive();
 
             flushNewResourceSets(
