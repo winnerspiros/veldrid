@@ -14,6 +14,15 @@ namespace Veldrid.Vk
         public abstract VkRenderPass RenderPassNoClearInit { get; }
         public abstract VkRenderPass RenderPassNoClearLoad { get; }
         public abstract VkRenderPass RenderPassClear { get; }
+
+        /// <summary>
+        ///     A render pass variant for the legacy path that uses <c>loadOp=Clear / initialLayout=Undefined</c>
+        ///     for <em>sampled</em> color attachments and <c>loadOp=Load / initialLayout=ColorAttachmentOptimal</c>
+        ///     for non-sampled ones. Used on the first bind of a sampled offscreen FBO per frame to avoid
+        ///     loading stale TBR tile data on TBDR GPUs (equivalent to the dynamic-rendering path behaviour).
+        ///     Returns <see cref="VkRenderPass.Null"/> when the framebuffer has no sampled color attachments.
+        /// </summary>
+        public virtual VkRenderPass RenderPassClearSampledInit => VkRenderPass.Null;
         public abstract uint AttachmentCount { get; }
 
         /// <summary>

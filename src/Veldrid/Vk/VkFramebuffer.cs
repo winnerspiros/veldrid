@@ -12,6 +12,7 @@ namespace Veldrid.Vk
         public override VkRenderPass RenderPassNoClearInit => renderPassNoClear;
         public override VkRenderPass RenderPassNoClearLoad => renderPassNoClearLoad;
         public override VkRenderPass RenderPassClear => renderPassClear;
+        public override VkRenderPass RenderPassClearSampledInit => renderPassClearSampledInit;
 
         public override uint RenderableWidth => Width;
         public override uint RenderableHeight => Height;
@@ -35,6 +36,8 @@ namespace Veldrid.Vk
         private readonly VkRenderPass renderPassNoClearLoad;
         private readonly VkRenderPass renderPassNoClear;
         private readonly VkRenderPass renderPassClear;
+        // Only non-Null when the framebuffer has at least one sampled color attachment (legacy path).
+        private readonly VkRenderPass renderPassClearSampledInit;
         private readonly List<VkImageView> attachmentViews = new List<VkImageView>();
         private readonly List<VkImageView> colorViews = new List<VkImageView>();
         private VkImageView depthView;
@@ -187,6 +190,44 @@ namespace Veldrid.Vk
             creationResult = vkCreateRenderPass(this.gd.Device, ref renderPassCi, null, out renderPassClear);
             CheckResult(creationResult);
 
+            // Build renderPassClearSampledInit: for sampled color attachments use loadOp=Clear /
+            // initialLayout=Undefined (avoids loading stale TBR tile data on the first bind of a
+            // sampled offscreen FBO per frame); non-sampled color attachments use loadOp=Load /
+            // initialLayout=ColorAttachmentOptimal; depth is load-only.  Only created when at least
+            // one sampled color attachment exists.
+            bool hasSampledColorTarget = false;
+            for (int i = 0; i < colorAttachmentCount; i++)
+            {
+                var vkColorTex = Util.AssertSubtype<Texture, VkTexture>(ColorTargets[i].Target);
+                bool isSampled = (vkColorTex.Usage & TextureUsage.Sampled) != 0;
+                if (isSampled)
+                {
+                    hasSampledColorTarget = true;
+                    attachments[i].loadOp = VkAttachmentLoadOp.Clear;
+                    attachments[i].initialLayout = VkImageLayout.Undefined;
+                }
+                else
+                {
+                    attachments[i].loadOp = VkAttachmentLoadOp.Load;
+                    attachments[i].initialLayout = VkImageLayout.ColorAttachmentOptimal;
+                }
+            }
+
+            if (DepthTarget != null)
+            {
+                int depthIdx = (int)(attachments.Count - 1);
+                attachments[depthIdx].loadOp = VkAttachmentLoadOp.Load;
+                attachments[depthIdx].initialLayout = VkImageLayout.DepthStencilAttachmentOptimal;
+                bool hasStencil = FormatHelpers.IsStencilFormat(DepthTarget.Value.Target.Format);
+                if (hasStencil) attachments[depthIdx].stencilLoadOp = VkAttachmentLoadOp.Load;
+            }
+
+            if (hasSampledColorTarget)
+            {
+                creationResult = vkCreateRenderPass(this.gd.Device, ref renderPassCi, null, out renderPassClearSampledInit);
+                CheckResult(creationResult);
+            }
+
             var fbCi = VkFramebufferCreateInfo.New();
             uint fbAttachmentsCount = (uint)description.ColorTargets.Length;
             if (description.DepthTarget != null) fbAttachmentsCount += 1;
@@ -331,6 +372,8 @@ namespace Veldrid.Vk
                 vkDestroyRenderPass(gd.Device, renderPassNoClear, null);
                 vkDestroyRenderPass(gd.Device, renderPassNoClearLoad, null);
                 vkDestroyRenderPass(gd.Device, renderPassClear, null);
+                if (renderPassClearSampledInit != VkRenderPass.Null)
+                    vkDestroyRenderPass(gd.Device, renderPassClearSampledInit, null);
                 foreach (var view in attachmentViews) vkDestroyImageView(gd.Device, view, null);
 
                 destroyed = true;
