@@ -32,6 +32,12 @@ namespace Veldrid.Vk
         private readonly VkGraphicsDevice gd;
         private readonly List<VkTexture> preDrawSampledImages = new List<VkTexture>(32);
 
+        // Accumulated image-memory barriers for the next batched vkCmdPipelineBarrier flush.
+        // Reused every preDrawCommand / preDispatchCommand call — no per-frame allocation.
+        private readonly List<VkImageMemoryBarrier> imageBarrierBatch = new List<VkImageMemoryBarrier>(32);
+        private VkPipelineStageFlags barrierBatchSrcStage;
+        private VkPipelineStageFlags barrierBatchDstStage;
+
         private readonly Lock commandBufferListLock = new Lock();
         private readonly Queue<VkCommandBuffer> availableCommandBuffers = new Queue<VkCommandBuffer>();
         private readonly List<VkCommandBuffer> submittedCommandBuffers = new List<VkCommandBuffer>();
@@ -771,32 +777,50 @@ namespace Veldrid.Vk
 
         private void preDrawCommand()
         {
-            transitionImages(preDrawSampledImages, VkImageLayout.ShaderReadOnlyOptimal);
+            // Flush any textures promoted from compute-storage back to shader-read.
+            appendTransitions(preDrawSampledImages, VkImageLayout.ShaderReadOnlyOptimal);
             preDrawSampledImages.Clear();
 
-            // Transition sampled textures in all currently bound graphics resource sets to
-            // ShaderReadOnlyOptimal before starting the render pass. This mirrors what
-            // preDispatchCommand does for compute dispatches and is necessary because
-            // VkFramebuffer.TransitionToFBOSwitchLayout is a no-op: FBO color attachments
-            // stay in ColorAttachmentOptimal across mid-frame switches and are never
-            // automatically promoted to ShaderReadOnlyOptimal when the FBO is "released"
-            // for use as a sampled texture. Without this, composite/blur passes that sample
-            // a previously rendered FBO read from ColorAttachmentOptimal → undefined behaviour
-            // → garbled / corrupted textures (e.g. garbled font glyphs on Android).
-            // VkTexture.TransitionImageLayout is a no-op when old == new, so textures that
-            // are already in ShaderReadOnlyOptimal (the common case) incur no barrier cost.
+            // Only re-scan resource sets when something actually changed.
+            // An FBO switch (newFramebuffer=true) can leave attachment textures in
+            // ColorAttachmentOptimal; a newly-bound resource set may contain textures whose
+            // layout we haven't ensured yet. When neither is true every sampled texture is
+            // already in ShaderReadOnlyOptimal from the previous draw, so the scan is free.
             if (currentGraphicsPipeline != null)
             {
-                uint setCount = currentGraphicsPipeline.ResourceSetCount;
-                for (int slot = 0; slot < setCount && slot < currentGraphicsResourceSets.Length; slot++)
+                bool needScan = newFramebuffer;
+
+                if (!needScan)
                 {
-                    if (currentGraphicsResourceSets[slot].Set != null)
+                    uint resourceSetCount = currentGraphicsPipeline.ResourceSetCount;
+
+                    for (int s = 0; s < resourceSetCount && s < graphicsResourceSetsChanged.Length; s++)
                     {
-                        var vkSet = Util.AssertSubtype<ResourceSet, VkResourceSet>(currentGraphicsResourceSets[slot].Set);
-                        transitionImages(vkSet.SampledTextures, VkImageLayout.ShaderReadOnlyOptimal);
+                        if (graphicsResourceSetsChanged[s])
+                        {
+                            needScan = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (needScan)
+                {
+                    uint setCount = currentGraphicsPipeline.ResourceSetCount;
+
+                    for (int slot = 0; slot < setCount && slot < currentGraphicsResourceSets.Length; slot++)
+                    {
+                        if (currentGraphicsResourceSets[slot].Set != null)
+                        {
+                            var vkSet = Util.AssertSubtype<ResourceSet, VkResourceSet>(currentGraphicsResourceSets[slot].Set);
+                            appendTransitions(vkSet.SampledTextures, VkImageLayout.ShaderReadOnlyOptimal);
+                        }
                     }
                 }
             }
+
+            // Emit all accumulated transitions as a single vkCmdPipelineBarrier.
+            flushTransitionBarriers();
 
             ensureRenderPassActive();
 
@@ -806,6 +830,52 @@ namespace Veldrid.Vk
                 currentGraphicsPipeline.ResourceSetCount,
                 VkPipelineBindPoint.Graphics,
                 currentGraphicsPipeline.PipelineLayout);
+        }
+
+        // Appends layout transitions for each texture in the list to imageBarrierBatch without
+        // emitting any Vulkan commands.  VkTexture.TryGetLayoutTransitionBarrier is a no-op when
+        // the texture is already in the requested layout, so clean textures cost only an array read.
+        private void appendTransitions(List<VkTexture> textures, VkImageLayout layout)
+        {
+            for (int i = 0; i < textures.Count; i++)
+            {
+                var tex = textures[i];
+
+                if (tex.TryGetLayoutTransitionBarrier(0, tex.MipLevels, 0, tex.ActualArrayLayers, layout,
+                        out var barrier, out var src, out var dst))
+                {
+                    imageBarrierBatch.Add(barrier);
+                    barrierBatchSrcStage |= src;
+                    barrierBatchDstStage |= dst;
+                }
+            }
+        }
+
+        // Emits all barriers accumulated since the last flush as a single vkCmdPipelineBarrier call.
+        private unsafe void flushTransitionBarriers()
+        {
+            int count = imageBarrierBatch.Count;
+            if (count == 0) return;
+
+            // CollectionsMarshal.AsSpan returns the List's internal backing array as a Span.
+            // The list is not modified while the fixed block is executing, so the GC pin is safe.
+            var span = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(imageBarrierBatch);
+
+            fixed (VkImageMemoryBarrier* barriers = span)
+            {
+                vkCmdPipelineBarrier(
+                    CommandBuffer,
+                    barrierBatchSrcStage,
+                    barrierBatchDstStage,
+                    VkDependencyFlags.None,
+                    0, null,
+                    0, null,
+                    (uint)count, barriers);
+            }
+
+            imageBarrierBatch.Clear();
+            barrierBatchSrcStage = VkPipelineStageFlags.None;
+            barrierBatchDstStage = VkPipelineStageFlags.None;
         }
 
         private void flushNewResourceSets(
@@ -983,15 +1053,6 @@ namespace Veldrid.Vk
             }
         }
 
-        private void transitionImages(List<VkTexture> sampledTextures, VkImageLayout layout)
-        {
-            for (int i = 0; i < sampledTextures.Count; i++)
-            {
-                var tex = sampledTextures[i];
-                tex.TransitionImageLayout(CommandBuffer, 0, tex.MipLevels, 0, tex.ActualArrayLayers, layout);
-            }
-        }
-
         private void preDispatchCommand()
         {
             ensureNoRenderPass();
@@ -1001,8 +1062,8 @@ namespace Veldrid.Vk
                 var vkSet = Util.AssertSubtype<ResourceSet, VkResourceSet>(
                     currentComputeResourceSets[currentSlot].Set);
 
-                transitionImages(vkSet.SampledTextures, VkImageLayout.ShaderReadOnlyOptimal);
-                transitionImages(vkSet.StorageTextures, VkImageLayout.General);
+                appendTransitions(vkSet.SampledTextures, VkImageLayout.ShaderReadOnlyOptimal);
+                appendTransitions(vkSet.StorageTextures, VkImageLayout.General);
 
                 for (int texIdx = 0; texIdx < vkSet.StorageTextures.Count; texIdx++)
                 {
@@ -1010,6 +1071,8 @@ namespace Veldrid.Vk
                     if ((storageTex.Usage & TextureUsage.Sampled) != 0) preDrawSampledImages.Add(storageTex);
                 }
             }
+
+            flushTransitionBarriers();
 
             flushNewResourceSets(
                 currentComputeResourceSets,
@@ -1072,13 +1135,15 @@ namespace Veldrid.Vk
                 // TransitionToFBOSwitchLayout was a no-op). In that case renderPassClearSampledInit
                 // would expect initialLayout=Undefined but the actual layout is ColorAttachmentOptimal,
                 // and its loadOp=Clear would wipe partial content. Use RenderPassNoClearLoad instead.
-                bool midFrameReturn = newFramebuffer
-                    && currentFramebuffer.ColorTargets.Count > 0
-                    && Util.AssertSubtype<Texture, VkTexture>(currentFramebuffer.ColorTargets[0].Target)
-                           .GetImageLayout(
-                               currentFramebuffer.ColorTargets[0].MipLevel,
-                               currentFramebuffer.ColorTargets[0].ArrayLayer)
-                       == VkImageLayout.ColorAttachmentOptimal;
+                bool midFrameReturn = false;
+
+                if (newFramebuffer && currentFramebuffer.ColorTargets.Count > 0)
+                {
+                    var firstTarget = currentFramebuffer.ColorTargets[0];
+                    var firstTargetLayout = Util.AssertSubtype<Texture, VkTexture>(firstTarget.Target)
+                        .GetImageLayout(firstTarget.MipLevel, firstTarget.ArrayLayer);
+                    midFrameReturn = firstTargetLayout == VkImageLayout.ColorAttachmentOptimal;
+                }
                 if (newFramebuffer && !midFrameReturn && currentFramebuffer.RenderPassClearSampledInit != VkRenderPass.Null)
                 {
                     // Inject transparent-black into the clear-value slots for any sampled color

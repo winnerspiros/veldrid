@@ -404,6 +404,67 @@ namespace Veldrid.Vk
             }
         }
 
+        // Fills a VkImageMemoryBarrier for transitioning from the current layout to newLayout and
+        // updates imageLayouts so the texture tracks the new state immediately. Does NOT emit any
+        // vkCmdPipelineBarrier — callers are expected to accumulate several barriers and flush them
+        // in a single batched vkCmdPipelineBarrier call (see VkCommandList.flushTransitionBarriers).
+        // Returns false (no-op) when the image is a staging buffer or is already in newLayout.
+        internal bool TryGetLayoutTransitionBarrier(
+            uint baseMipLevel,
+            uint levelCount,
+            uint baseArrayLayer,
+            uint layerCount,
+            VkImageLayout newLayout,
+            out VkImageMemoryBarrier barrier,
+            out VkPipelineStageFlags srcStage,
+            out VkPipelineStageFlags dstStage)
+        {
+            barrier = default;
+            srcStage = default;
+            dstStage = default;
+
+            if (stagingBuffer != Vulkan.VkBuffer.Null) return false;
+
+            var oldLayout = imageLayouts[CalculateSubresource(baseMipLevel, baseArrayLayer)];
+            if (oldLayout == newLayout) return false;
+
+            VkImageAspectFlags aspectMask;
+
+            if ((Usage & TextureUsage.DepthStencil) != 0)
+            {
+                aspectMask = FormatHelpers.IsStencilFormat(Format)
+                    ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+                    : VkImageAspectFlags.Depth;
+            }
+            else
+                aspectMask = VkImageAspectFlags.Color;
+
+            VulkanUtil.GetTransitionParameters(oldLayout, newLayout,
+                out var srcAccess, out var dstAccess, out srcStage, out dstStage);
+
+            barrier = VkImageMemoryBarrier.New();
+            barrier.oldLayout = oldLayout;
+            barrier.newLayout = newLayout;
+            barrier.srcAccessMask = srcAccess;
+            barrier.dstAccessMask = dstAccess;
+            barrier.srcQueueFamilyIndex = QueueFamilyIgnored;
+            barrier.dstQueueFamilyIndex = QueueFamilyIgnored;
+            barrier.image = OptimalDeviceImage;
+            barrier.subresourceRange.aspectMask = aspectMask;
+            barrier.subresourceRange.baseMipLevel = baseMipLevel;
+            barrier.subresourceRange.levelCount = levelCount;
+            barrier.subresourceRange.baseArrayLayer = baseArrayLayer;
+            barrier.subresourceRange.layerCount = layerCount;
+
+            for (uint level = 0; level < levelCount; level++)
+            {
+                for (uint layer = 0; layer < layerCount; layer++)
+                    imageLayouts[CalculateSubresource(baseMipLevel + level, baseArrayLayer + layer)] = newLayout;
+            }
+
+            return true;
+        }
+
         internal VkImageLayout GetImageLayout(uint mipLevel, uint arrayLayer)
         {
             return imageLayouts[CalculateSubresource(mipLevel, arrayLayer)];

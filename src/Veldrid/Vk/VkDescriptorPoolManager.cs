@@ -73,7 +73,7 @@ namespace Veldrid.Vk
         private unsafe PoolInfo createNewPool()
         {
             const uint total_sets = 1000;
-            const uint descriptor_count = 100;
+            const uint descriptor_count = 512;
             const uint pool_size_count = 7;
             var sizes = stackalloc VkDescriptorPoolSize[(int)pool_size_count];
             sizes[0].type = VkDescriptorType.UniformBuffer;
