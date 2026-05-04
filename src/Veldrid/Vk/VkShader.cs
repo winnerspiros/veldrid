@@ -37,7 +37,7 @@ namespace Veldrid.Vk
             {
                 shaderModuleCi.codeSize = (UIntPtr)description.ShaderBytes.Length;
                 shaderModuleCi.pCode = (uint*)codePtr;
-                var result = gd.DeviceApi.vkCreateShaderModule(ref shaderModuleCi, null, out shaderModule);
+                var result = gd.DeviceApi.vkCreateShaderModule(&shaderModuleCi, null, out shaderModule);
                 CheckResult(result);
             }
         }

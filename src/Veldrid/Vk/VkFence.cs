@@ -29,7 +29,7 @@ namespace Veldrid.Vk
             this.gd = gd;
             var fenceCi = new VkFenceCreateInfo();
             fenceCi.flags = signaled ? VkFenceCreateFlags.Signaled : VkFenceCreateFlags.None;
-            var result = gd.DeviceApi.vkCreateFence(ref fenceCi, null, out fence);
+            var result = gd.DeviceApi.vkCreateFence(&fenceCi, null, out fence);
             VulkanUtil.CheckResult(result);
         }
 

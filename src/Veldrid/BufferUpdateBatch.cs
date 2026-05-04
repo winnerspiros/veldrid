@@ -11,9 +11,9 @@ namespace Veldrid
     ///     <see cref="TextureUpdateBatch" /> for the buffer-upload path.
     ///
     ///     <para>
-    ///         On the Vulkan backend this collapses what would otherwise be one <c>vkQueueSubmit</c> per
+    ///         On the Vulkan backend this collapses what would otherwise be one <c>gd.DeviceApi.vkQueueSubmit</c> per
     ///         <c>UpdateBuffer</c> call into a single submission, which on Android matters because each
-    ///         submit contends with <c>vkQueuePresentKHR</c> on the graphics queue. On other backends the
+    ///         submit contends with <c>gd.DeviceApi.vkQueuePresentKHR</c> on the graphics queue. On other backends the
     ///         default implementation simply forwards each <c>Add</c> to <c>UpdateBuffer</c>, so callers
     ///         can use this API portably without per-backend branching.
     ///     </para>

@@ -73,10 +73,10 @@ namespace Veldrid.Vk
             blendStateCi.attachmentCount = (uint)attachmentsCount;
             blendStateCi.pAttachments = attachmentsPtr;
             var blendFactor = description.BlendState.BlendFactor;
-            blendStateCi.blendConstants_0 = blendFactor.R;
-            blendStateCi.blendConstants_1 = blendFactor.G;
-            blendStateCi.blendConstants_2 = blendFactor.B;
-            blendStateCi.blendConstants_3 = blendFactor.A;
+            blendStateCi.blendConstants[0] = blendFactor.R;
+            blendStateCi.blendConstants[1] = blendFactor.G;
+            blendStateCi.blendConstants[2] = blendFactor.B;
+            blendStateCi.blendConstants[3] = blendFactor.A;
 
             pipelineCi.pColorBlendState = &blendStateCi;
 
@@ -259,7 +259,7 @@ namespace Veldrid.Vk
             for (int i = 0; i < resourceLayouts.Length; i++) dsls[i] = Util.AssertSubtype<ResourceLayout, VkResourceLayout>(resourceLayouts[i]).DescriptorSetLayout;
             pipelineLayoutCi.pSetLayouts = dsls;
 
-            gd.DeviceApi.vkCreatePipelineLayout(ref pipelineLayoutCi, null, out pipelineLayout);
+            gd.DeviceApi.vkCreatePipelineLayout(&pipelineLayoutCi, null, out pipelineLayout);
             pipelineCi.layout = pipelineLayout;
 
             var outputDesc = description.Outputs;
@@ -289,7 +289,7 @@ namespace Veldrid.Vk
                 pipelineCi.pNext = &pipelineRenderingCi;
                 pipelineCi.renderPass = VkRenderPass.Null;
 
-                var result = gd.DeviceApi.vkCreateGraphicsPipelines(this.gd.PipelineCache, 1, ref pipelineCi, null, out devicePipeline);
+                var result = gd.DeviceApi.vkCreateGraphicsPipelines(this.gd.PipelineCache, 1, &pipelineCi, null, out devicePipeline);
                 CheckResult(result);
             }
             else
@@ -355,7 +355,7 @@ namespace Veldrid.Vk
 
                 var subpassDependency = new VkSubpassDependency
                 {
-                    srcSubpass = SubpassExternal,
+                    srcSubpass = VK_SUBPASS_EXTERNAL,
                     srcStageMask = VkPipelineStageFlags.ColorAttachmentOutput,
                     dstStageMask = VkPipelineStageFlags.ColorAttachmentOutput,
                     dstAccessMask = VkAccessFlags.ColorAttachmentRead | VkAccessFlags.ColorAttachmentWrite
@@ -368,12 +368,12 @@ namespace Veldrid.Vk
                 renderPassCi.dependencyCount = 1;
                 renderPassCi.pDependencies = &subpassDependency;
 
-                var creationResult = gd.DeviceApi.vkCreateRenderPass(ref renderPassCi, null, out renderPass);
+                var creationResult = gd.DeviceApi.vkCreateRenderPass(&renderPassCi, null, out renderPass);
                 CheckResult(creationResult);
 
                 pipelineCi.renderPass = renderPass;
 
-                var result = gd.DeviceApi.vkCreateGraphicsPipelines(this.gd.PipelineCache, 1, ref pipelineCi, null, out devicePipeline);
+                var result = gd.DeviceApi.vkCreateGraphicsPipelines(this.gd.PipelineCache, 1, &pipelineCi, null, out devicePipeline);
                 CheckResult(result);
             }
 
@@ -400,7 +400,7 @@ namespace Veldrid.Vk
             for (int i = 0; i < resourceLayouts.Length; i++) dsls[i] = Util.AssertSubtype<ResourceLayout, VkResourceLayout>(resourceLayouts[i]).DescriptorSetLayout;
             pipelineLayoutCi.pSetLayouts = dsls;
 
-            gd.DeviceApi.vkCreatePipelineLayout(ref pipelineLayoutCi, null, out pipelineLayout);
+            gd.DeviceApi.vkCreatePipelineLayout(&pipelineLayoutCi, null, out pipelineLayout);
             pipelineCi.layout = pipelineLayout;
 
             // Shader Stage

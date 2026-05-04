@@ -111,13 +111,13 @@ namespace Veldrid.Vk
                 && elements.Length <= gd.MaxPushDescriptors)
             {
                 IsPushDescriptorLayout = true;
-                dslCi.flags = VkDescriptorSetLayoutCreateFlags.PushDescriptorKHR;
+                dslCi.flags = VkDescriptorSetLayoutCreateFlags.PushDescriptor;
             }
 
             dslCi.bindingCount = (uint)elements.Length;
             dslCi.pBindings = bindings;
 
-            var result = gd.DeviceApi.vkCreateDescriptorSetLayout(ref dslCi, null, out dsl);
+            var result = gd.DeviceApi.vkCreateDescriptorSetLayout(&dslCi, null, out dsl);
             CheckResult(result);
         }
 

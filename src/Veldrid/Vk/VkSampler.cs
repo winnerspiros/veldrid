@@ -51,7 +51,7 @@ namespace Veldrid.Vk
                 borderColor = VkFormats.VdToVkSamplerBorderColor(description.BorderColor)
             };
 
-            gd.DeviceApi.vkCreateSampler(ref samplerCi, null, out sampler);
+            gd.DeviceApi.vkCreateSampler(&samplerCi, null, out sampler);
             RefCount = new ResourceRefCount(disposeCore);
         }
 

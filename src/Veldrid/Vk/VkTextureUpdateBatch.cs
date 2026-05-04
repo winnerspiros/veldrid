@@ -9,9 +9,9 @@ namespace Veldrid.Vk
     /// <summary>
     ///     Vulkan implementation of <see cref="TextureUpdateBatch" />: stages every pending region into a single
     ///     growable host-visible buffer, then on <see cref="Submit" /> issues the buffer→image copies in sequential
-    ///     <c>vkQueueSubmit</c> calls capped at <c>MaxCopiesPerSubmit</c> copies each. Submitting very large batches
+    ///     <c>gd.DeviceApi.vkQueueSubmit</c> calls capped at <c>MaxCopiesPerSubmit</c> copies each. Submitting very large batches
     ///     in one call can stall the calling thread for several seconds on some drivers, so the work is split across
-    ///     multiple submissions while still collapsing the per-call <c>vkQueueSubmit</c> storm in
+    ///     multiple submissions while still collapsing the per-call <c>gd.DeviceApi.vkQueueSubmit</c> storm in
     ///     <see cref="VkGraphicsDevice.UpdateTextureCore" /> for callers that opt in.
     ///
     ///     <para>
@@ -65,7 +65,7 @@ namespace Veldrid.Vk
                 return;
             }
 
-            // Compute alignment requirements. vkCmdCopyBufferToImage requires bufferOffset to be a multiple of
+            // Compute alignment requirements. gd.DeviceApi.vkCmdCopyBufferToImage requires bufferOffset to be a multiple of
             // the texel block size and of optimalBufferCopyOffsetAlignment. For uncompressed formats the texel
             // block size is the pixel size in bytes; for compressed formats it's the block size in bytes.
             uint texelBlockSize = FormatHelpers.IsCompressedFormat(vkTex.Format)
@@ -120,7 +120,7 @@ namespace Veldrid.Vk
                 touchedSubresources.Add(key, vkTex.GetImageLayout(mipLevel, arrayLayer));
         }
 
-        // Maximum number of texture copies to include in a single vkQueueSubmit. Submitting very large batches
+        // Maximum number of texture copies to include in a single gd.DeviceApi.vkQueueSubmit. Submitting very large batches
         // in one call can block the calling thread for several seconds on some drivers (e.g. Adreno 740
         // driver 512.676.73), causing watchdog timeouts. Splitting into smaller submissions keeps the
         // GPU pipeline fed while bounding per-submit latency.
@@ -165,7 +165,7 @@ namespace Veldrid.Vk
                 {
                     var copy = pendingCopies[i];
                     var region = copy.Region;
-                    vkCmdCopyBufferToImage(
+                    gd.DeviceApi.vkCmdCopyBufferToImage(
                         cb,
                         stagingBuffer.DeviceBuffer,
                         copy.Texture.OptimalDeviceImage,

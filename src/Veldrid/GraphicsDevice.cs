@@ -674,7 +674,7 @@ namespace Veldrid
         ///     <para>
         ///         On the Vulkan backend this is a substantial throughput / latency win when many texture regions are
         ///         uploaded per frame (font glyph atlases, sprite-sheet streaming, masking buffers): instead of one
-        ///         <c>vkQueueSubmit</c> per call — each contending with <c>vkQueuePresentKHR</c> on the graphics queue
+        ///         <c>gd.DeviceApi.vkQueueSubmit</c> per call — each contending with <c>gd.DeviceApi.vkQueuePresentKHR</c> on the graphics queue
         ///         — the entire batch becomes a single submission. On other backends the default implementation simply
         ///         forwards each <c>Add</c> straight to the corresponding <c>UpdateTexture</c>, so callers can use this
         ///         API portably without per-backend branching.

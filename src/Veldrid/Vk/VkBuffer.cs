@@ -55,7 +55,7 @@ namespace Veldrid.Vk
             var bufferCi = new VkBufferCreateInfo();
             bufferCi.size = sizeInBytes;
             bufferCi.usage = vkUsage;
-            var result = gd.DeviceApi.vkCreateBuffer(ref bufferCi, null, out deviceBuffer);
+            var result = gd.DeviceApi.vkCreateBuffer(&bufferCi, null, out deviceBuffer);
             CheckResult(result);
 
             bool prefersDedicatedAllocation;

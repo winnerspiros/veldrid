@@ -30,7 +30,7 @@ namespace Veldrid.Vk
         private readonly VkGraphicsDevice gd;
         private readonly List<VkTexture> preDrawSampledImages = new List<VkTexture>(32);
 
-        // Accumulated image-memory barriers for the next batched vkCmdPipelineBarrier flush.
+        // Accumulated image-memory barriers for the next batched gd.DeviceApi.vkCmdPipelineBarrier flush.
         // Reused every preDrawCommand / preDispatchCommand call — no per-frame allocation.
         private readonly List<VkImageMemoryBarrier> imageBarrierBatch = new List<VkImageMemoryBarrier>(32);
         private VkPipelineStageFlags barrierBatchSrcStage;
@@ -92,7 +92,7 @@ namespace Veldrid.Vk
             var poolCi = new VkCommandPoolCreateInfo();
             poolCi.flags = VkCommandPoolCreateFlags.ResetCommandBuffer;
             poolCi.queueFamilyIndex = gd.GraphicsQueueIndex;
-            var result = gd.DeviceApi.vkCreateCommandPool(ref poolCi, null, out pool);
+            var result = gd.DeviceApi.vkCreateCommandPool(&poolCi, null, out pool);
             CheckResult(result);
 
             CommandBuffer = getNextCommandBuffer();
@@ -165,7 +165,7 @@ namespace Veldrid.Vk
 
             var beginInfo = new VkCommandBufferBeginInfo();
             beginInfo.flags = VkCommandBufferUsageFlags.OneTimeSubmit;
-            vkBeginCommandBuffer(CommandBuffer, ref beginInfo);
+            gd.DeviceApi.vkBeginCommandBuffer(CommandBuffer, &beginInfo);
             commandBufferBegun = true;
 
             ClearCachedState();
@@ -188,7 +188,7 @@ namespace Veldrid.Vk
         {
             preDispatchCommand();
 
-            vkCmdDispatch(CommandBuffer, groupCountX, groupCountY, groupCountZ);
+            gd.DeviceApi.vkCmdDispatch(CommandBuffer, groupCountX, groupCountY, groupCountZ);
         }
 
         public override void End()
@@ -207,7 +207,7 @@ namespace Veldrid.Vk
                 currentFramebuffer!.TransitionToFinalLayout(CommandBuffer);
             }
 
-            vkEndCommandBuffer(CommandBuffer);
+            gd.DeviceApi.vkEndCommandBuffer(CommandBuffer);
             submittedCommandBuffers.Add(CommandBuffer);
         }
 
@@ -220,7 +220,7 @@ namespace Veldrid.Vk
                 if (scissorRects[index] != scissor)
                 {
                     scissorRects[index] = scissor;
-                    vkCmdSetScissor(CommandBuffer, index, 1, ref scissor);
+                    gd.DeviceApi.vkCmdSetScissor(CommandBuffer, index, 1, &scissor);
                 }
             }
         }
@@ -255,7 +255,7 @@ namespace Veldrid.Vk
                     || cached.maxDepth != vkViewport.maxDepth)
                 {
                     cached = vkViewport;
-                    vkCmdSetViewport(CommandBuffer, index, 1, ref vkViewport);
+                    gd.DeviceApi.vkCmdSetViewport(CommandBuffer, index, 1, &vkViewport);
                 }
             }
         }
@@ -288,7 +288,7 @@ namespace Veldrid.Vk
                 size = sizeInBytes
             };
 
-            vkCmdCopyBuffer(CommandBuffer, srcVkBuffer.DeviceBuffer, dstVkBuffer.DeviceBuffer, 1, ref region);
+            gd.DeviceApi.vkCmdCopyBuffer(CommandBuffer, srcVkBuffer.DeviceBuffer, dstVkBuffer.DeviceBuffer, 1, &region);
 
             bool needToProtectUniform = destination.Usage.HasFlag(BufferUsage.UniformBuffer);
 
@@ -297,7 +297,7 @@ namespace Veldrid.Vk
             barrier.srcAccessMask = VkAccessFlags.TransferWrite;
             barrier.dstAccessMask = needToProtectUniform ? VkAccessFlags.UniformRead : VkAccessFlags.VertexAttributeRead;
             barrier.pNext = null;
-            vkCmdPipelineBarrier(
+            gd.DeviceApi.vkCmdPipelineBarrier(
                 CommandBuffer,
                 VkPipelineStageFlags.Transfer, needToProtectUniform
                     ? VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.FragmentShader
@@ -403,7 +403,7 @@ namespace Veldrid.Vk
                     layerCount,
                     VkImageLayout.TransferDstOptimal);
 
-                vkCmdCopyImage(
+                gd.DeviceApi.vkCmdCopyImage(
                     cb,
                     srcVkTexture.OptimalDeviceImage,
                     VkImageLayout.TransferSrcOptimal,
@@ -486,7 +486,7 @@ namespace Veldrid.Vk
                     imageSubresource = dstSubresource
                 };
 
-                vkCmdCopyBufferToImage(cb, srcBuffer, dstImage, VkImageLayout.TransferDstOptimal, 1, ref regions);
+                gd.DeviceApi.vkCmdCopyBufferToImage(cb, srcBuffer, dstImage, VkImageLayout.TransferDstOptimal, 1, &regions);
 
                 if ((dstVkTexture.Usage & TextureUsage.Sampled) != 0)
                 {
@@ -559,7 +559,7 @@ namespace Veldrid.Vk
                     layers[layer] = region;
                 }
 
-                vkCmdCopyImageToBuffer(cb, srcImage, VkImageLayout.TransferSrcOptimal, dstBuffer, layerCount, layers);
+                gd.DeviceApi.vkCmdCopyImageToBuffer(cb, srcImage, VkImageLayout.TransferSrcOptimal, dstBuffer, layerCount, layers);
 
                 if ((srcVkTexture.Usage & TextureUsage.Sampled) != 0)
                 {
@@ -605,7 +605,7 @@ namespace Veldrid.Vk
                                 size = width * pixelSize
                             };
 
-                            vkCmdCopyBuffer(cb, srcBuffer, dstBuffer, 1, ref region);
+                            gd.DeviceApi.vkCmdCopyBuffer(cb, srcBuffer, dstBuffer, 1, &region);
                         }
                     }
                 }
@@ -636,7 +636,7 @@ namespace Veldrid.Vk
                                 size = denseRowSize
                             };
 
-                            vkCmdCopyBuffer(cb, srcBuffer, dstBuffer, 1, ref region);
+                            gd.DeviceApi.vkCmdCopyBuffer(cb, srcBuffer, dstBuffer, 1, &region);
                         }
                     }
                 }
@@ -648,7 +648,7 @@ namespace Veldrid.Vk
             preDrawCommand();
             var vkBuffer = Util.AssertSubtype<DeviceBuffer, VkBuffer>(indirectBuffer);
             currentStagingInfo.Resources.Add(vkBuffer.RefCount);
-            vkCmdDrawIndirect(CommandBuffer, vkBuffer.DeviceBuffer, offset, drawCount, stride);
+            gd.DeviceApi.vkCmdDrawIndirect(CommandBuffer, vkBuffer.DeviceBuffer, offset, drawCount, stride);
         }
 
         protected override void DrawIndexedIndirectCore(DeviceBuffer indirectBuffer, uint offset, uint drawCount, uint stride)
@@ -656,7 +656,7 @@ namespace Veldrid.Vk
             preDrawCommand();
             var vkBuffer = Util.AssertSubtype<DeviceBuffer, VkBuffer>(indirectBuffer);
             currentStagingInfo.Resources.Add(vkBuffer.RefCount);
-            vkCmdDrawIndexedIndirect(CommandBuffer, vkBuffer.DeviceBuffer, offset, drawCount, stride);
+            gd.DeviceApi.vkCmdDrawIndexedIndirect(CommandBuffer, vkBuffer.DeviceBuffer, offset, drawCount, stride);
         }
 
         protected override void DispatchIndirectCore(DeviceBuffer indirectBuffer, uint offset)
@@ -665,7 +665,7 @@ namespace Veldrid.Vk
 
             var vkBuffer = Util.AssertSubtype<DeviceBuffer, VkBuffer>(indirectBuffer);
             currentStagingInfo.Resources.Add(vkBuffer.RefCount);
-            vkCmdDispatchIndirect(CommandBuffer, vkBuffer.DeviceBuffer, offset);
+            gd.DeviceApi.vkCmdDispatchIndirect(CommandBuffer, vkBuffer.DeviceBuffer, offset);
         }
 
         protected override void ResolveTextureCore(Texture source, Texture destination)
@@ -689,7 +689,7 @@ namespace Veldrid.Vk
             vkSource.TransitionImageLayout(CommandBuffer, 0, 1, 0, 1, VkImageLayout.TransferSrcOptimal);
             vkDestination.TransitionImageLayout(CommandBuffer, 0, 1, 0, 1, VkImageLayout.TransferDstOptimal);
 
-            vkCmdResolveImage(
+            gd.DeviceApi.vkCmdResolveImage(
                 CommandBuffer,
                 vkSource.OptimalDeviceImage,
                 VkImageLayout.TransferSrcOptimal,
@@ -758,7 +758,7 @@ namespace Veldrid.Vk
                 if (availableCommandBuffers.Count > 0)
                 {
                     var cachedCb = availableCommandBuffers.Dequeue();
-                    var resetResult = vkResetCommandBuffer(cachedCb, VkCommandBufferResetFlags.None);
+                    var resetResult = gd.DeviceApi.vkResetCommandBuffer(cachedCb, VkCommandBufferResetFlags.None);
                     CheckResult(resetResult);
                     return cachedCb;
                 }
@@ -768,7 +768,7 @@ namespace Veldrid.Vk
             cbAi.commandPool = pool;
             cbAi.commandBufferCount = 1;
             cbAi.level = VkCommandBufferLevel.Primary;
-            var result = gd.DeviceApi.vkAllocateCommandBuffers(ref cbAi, out var cb);
+            var result = gd.DeviceApi.vkAllocateCommandBuffers(&cbAi, out var cb);
             CheckResult(result);
             return cb;
         }
@@ -817,7 +817,7 @@ namespace Veldrid.Vk
                 }
             }
 
-            // Emit all accumulated transitions as a single vkCmdPipelineBarrier.
+            // Emit all accumulated transitions as a single gd.DeviceApi.vkCmdPipelineBarrier.
             flushTransitionBarriers();
 
             ensureRenderPassActive();
@@ -849,7 +849,7 @@ namespace Veldrid.Vk
             }
         }
 
-        // Emits all barriers accumulated since the last flush as a single vkCmdPipelineBarrier call.
+        // Emits all barriers accumulated since the last flush as a single gd.DeviceApi.vkCmdPipelineBarrier call.
         private unsafe void flushTransitionBarriers()
         {
             int count = imageBarrierBatch.Count;
@@ -861,7 +861,7 @@ namespace Veldrid.Vk
 
             fixed (VkImageMemoryBarrier* barriers = span)
             {
-                vkCmdPipelineBarrier(
+                gd.DeviceApi.vkCmdPipelineBarrier(
                     CommandBuffer,
                     barrierBatchSrcStage,
                     barrierBatchDstStage,
@@ -907,7 +907,7 @@ namespace Veldrid.Vk
                         // Flush any pending traditional batch before the push.
                         if (currentBatchCount != 0)
                         {
-                            vkCmdBindDescriptorSets(
+                            gd.DeviceApi.vkCmdBindDescriptorSets(
                                 CommandBuffer,
                                 bindPoint,
                                 pipelineLayout,
@@ -955,7 +955,7 @@ namespace Veldrid.Vk
 
                         if (batchEnded && currentBatchCount != 0)
                         {
-                            vkCmdBindDescriptorSets(
+                            gd.DeviceApi.vkCmdBindDescriptorSets(
                                 CommandBuffer,
                                 bindPoint,
                                 pipelineLayout,
@@ -975,7 +975,7 @@ namespace Veldrid.Vk
                     // Unchanged slot breaks the batch.
                     if (currentBatchCount != 0)
                     {
-                        vkCmdBindDescriptorSets(
+                        gd.DeviceApi.vkCmdBindDescriptorSets(
                             CommandBuffer,
                             bindPoint,
                             pipelineLayout,
@@ -995,7 +995,7 @@ namespace Veldrid.Vk
             // Flush any remaining batch.
             if (currentBatchCount != 0)
             {
-                vkCmdBindDescriptorSets(
+                gd.DeviceApi.vkCmdBindDescriptorSets(
                     CommandBuffer,
                     bindPoint,
                     pipelineLayout,
@@ -1161,14 +1161,14 @@ namespace Veldrid.Vk
                     {
                         renderPassBi.clearValueCount = attachmentCount;
                         renderPassBi.pClearValues = clearValuesPtr;
-                        vkCmdBeginRenderPass(CommandBuffer, ref renderPassBi, VkSubpassContents.Inline);
+                        gd.DeviceApi.vkCmdBeginRenderPass(CommandBuffer, &renderPassBi, VkSubpassContents.Inline);
                     }
 
                     activeRenderPass = renderPassBi.renderPass;
 
                     // The render pass cleared all sampled attachments (loadOp=Clear).  Any
                     // non-sampled attachment with a pending explicit clear must be issued as
-                    // vkCmdClearAttachments inside the now-active pass.
+                    // gd.DeviceApi.vkCmdClearAttachments inside the now-active pass.
                     if (haveAnyClearValues)
                     {
                         if (depthClearValue.HasValue)
@@ -1189,10 +1189,10 @@ namespace Veldrid.Vk
                                     // the caller's explicit clear must be emitted manually.
                                     var vkClearValue = clearValues[i];
                                     ClearColorTarget(i, new RgbaFloat(
-                                        vkClearValue.color.float32_0,
-                                        vkClearValue.color.float32_1,
-                                        vkClearValue.color.float32_2,
-                                        vkClearValue.color.float32_3));
+                                        vkClearValue.color.float32[0],
+                                        vkClearValue.color.float32[1],
+                                        vkClearValue.color.float32[2],
+                                        vkClearValue.color.float32[3]));
                                 }
                                 // Sampled attachments: already cleared by renderPassClearSampledInit loadOp.
                             }
@@ -1210,7 +1210,7 @@ namespace Veldrid.Vk
                     renderPassBi.renderPass = (newFramebuffer && !midFrameReturn)
                         ? currentFramebuffer.RenderPassNoClearInit
                         : currentFramebuffer.RenderPassNoClearLoad;
-                    vkCmdBeginRenderPass(CommandBuffer, ref renderPassBi, VkSubpassContents.Inline);
+                    gd.DeviceApi.vkCmdBeginRenderPass(CommandBuffer, &renderPassBi, VkSubpassContents.Inline);
                     activeRenderPass = renderPassBi.renderPass;
 
                     if (haveAnyClearValues)
@@ -1228,10 +1228,10 @@ namespace Veldrid.Vk
                                 validColorClearValues[i] = false;
                                 var vkClearValue = clearValues[i];
                                 var clearColor = new RgbaFloat(
-                                    vkClearValue.color.float32_0,
-                                    vkClearValue.color.float32_1,
-                                    vkClearValue.color.float32_2,
-                                    vkClearValue.color.float32_3);
+                                    vkClearValue.color.float32[0],
+                                    vkClearValue.color.float32[1],
+                                    vkClearValue.color.float32[2],
+                                    vkClearValue.color.float32[3]);
                                 ClearColorTarget(i, clearColor);
                             }
                         }
@@ -1254,7 +1254,7 @@ namespace Veldrid.Vk
                         depthClearValue = null;
                     }
 
-                    vkCmdBeginRenderPass(CommandBuffer, ref renderPassBi, VkSubpassContents.Inline);
+                    gd.DeviceApi.vkCmdBeginRenderPass(CommandBuffer, &renderPassBi, VkSubpassContents.Inline);
                     activeRenderPass = currentFramebuffer.RenderPassClear;
                     Util.ClearArray(validColorClearValues);
                 }
@@ -1423,7 +1423,7 @@ namespace Veldrid.Vk
             else
             {
                 // Traditional render pass path.
-                vkCmdEndRenderPass(CommandBuffer);
+                gd.DeviceApi.vkCmdEndRenderPass(CommandBuffer);
             }
 
             currentFramebuffer.TransitionToIntermediateLayout(CommandBuffer);
@@ -1449,7 +1449,7 @@ namespace Veldrid.Vk
                 dstStage = VkPipelineStageFlags.TopOfPipe;
             }
 
-            vkCmdPipelineBarrier(
+            gd.DeviceApi.vkCmdPipelineBarrier(
                 CommandBuffer,
                 srcStage,
                 dstStage,
@@ -1503,7 +1503,7 @@ namespace Veldrid.Vk
                                           VK_ACCESS_HOST_READ_BIT |
                                           VK_ACCESS_HOST_WRITE_BIT;
 
-            vkCmdPipelineBarrier(
+            gd.DeviceApi.vkCmdPipelineBarrier(
                 CommandBuffer,
                 VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, // srcStageMask
                 VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, // dstStageMask
@@ -1617,7 +1617,7 @@ namespace Veldrid.Vk
                     rect = new VkRect2D(0, 0, colorTex.Width, colorTex.Height)
                 };
 
-                vkCmdClearAttachments(CommandBuffer, 1, ref clearAttachment, 1, ref clearRect);
+                gd.DeviceApi.vkCmdClearAttachments(CommandBuffer, 1, &clearAttachment, 1, &clearRect);
             }
             else
             {
@@ -1655,7 +1655,7 @@ namespace Veldrid.Vk
                         rect = new VkRect2D(0, 0, renderableWidth, renderableHeight)
                     };
 
-                    vkCmdClearAttachments(CommandBuffer, 1, ref clearAttachment, 1, ref clearRect);
+                    gd.DeviceApi.vkCmdClearAttachments(CommandBuffer, 1, &clearAttachment, 1, &clearRect);
                 }
             }
             else
@@ -1668,13 +1668,13 @@ namespace Veldrid.Vk
         private protected override void DrawCore(uint vertexCount, uint instanceCount, uint vertexStart, uint instanceStart)
         {
             preDrawCommand();
-            vkCmdDraw(CommandBuffer, vertexCount, instanceCount, vertexStart, instanceStart);
+            gd.DeviceApi.vkCmdDraw(CommandBuffer, vertexCount, instanceCount, vertexStart, instanceStart);
         }
 
         private protected override void DrawIndexedCore(uint indexCount, uint instanceCount, uint indexStart, int vertexOffset, uint instanceStart)
         {
             preDrawCommand();
-            vkCmdDrawIndexed(CommandBuffer, indexCount, instanceCount, indexStart, vertexOffset, instanceStart);
+            gd.DeviceApi.vkCmdDrawIndexed(CommandBuffer, indexCount, instanceCount, indexStart, vertexOffset, instanceStart);
         }
 
         private protected override void SetVertexBufferCore(uint index, DeviceBuffer buffer, uint offset)
@@ -1693,7 +1693,7 @@ namespace Veldrid.Vk
             cachedVertexBuffers[index] = vkBuffer;
             cachedVertexOffsets[index] = offset64;
 
-            vkCmdBindVertexBuffers(CommandBuffer, index, 1, ref deviceBuffer, ref offset64);
+            gd.DeviceApi.vkCmdBindVertexBuffers(CommandBuffer, index, 1, &deviceBuffer, &offset64);
             currentStagingInfo.Resources.Add(vkBuffer.RefCount);
         }
 
@@ -1711,7 +1711,7 @@ namespace Veldrid.Vk
             cachedIndexBufferOffset = offset64;
             cachedIndexType = vkIndexType;
 
-            vkCmdBindIndexBuffer(CommandBuffer, vkBuffer.DeviceBuffer, offset64, vkIndexType);
+            gd.DeviceApi.vkCmdBindIndexBuffer(CommandBuffer, vkBuffer.DeviceBuffer, offset64, vkIndexType);
             currentStagingInfo.Resources.Add(vkBuffer.RefCount);
         }
 
@@ -1724,7 +1724,7 @@ namespace Veldrid.Vk
                 Util.EnsureArrayMinimumSize(ref currentGraphicsResourceSets, vkPipeline.ResourceSetCount);
                 clearSets(currentGraphicsResourceSets);
                 Util.EnsureArrayMinimumSize(ref graphicsResourceSetsChanged, vkPipeline.ResourceSetCount);
-                vkCmdBindPipeline(CommandBuffer, VkPipelineBindPoint.Graphics, vkPipeline.DevicePipeline);
+                gd.DeviceApi.vkCmdBindPipeline(CommandBuffer, VkPipelineBindPoint.Graphics, vkPipeline.DevicePipeline);
                 currentGraphicsPipeline = vkPipeline;
             }
             else if (pipeline.IsComputePipeline && currentComputePipeline != pipeline)
@@ -1732,7 +1732,7 @@ namespace Veldrid.Vk
                 Util.EnsureArrayMinimumSize(ref currentComputeResourceSets, vkPipeline.ResourceSetCount);
                 clearSets(currentComputeResourceSets);
                 Util.EnsureArrayMinimumSize(ref computeResourceSetsChanged, vkPipeline.ResourceSetCount);
-                vkCmdBindPipeline(CommandBuffer, VkPipelineBindPoint.Compute, vkPipeline.DevicePipeline);
+                gd.DeviceApi.vkCmdBindPipeline(CommandBuffer, VkPipelineBindPoint.Compute, vkPipeline.DevicePipeline);
                 currentComputePipeline = vkPipeline;
             }
 
@@ -1771,9 +1771,9 @@ namespace Veldrid.Vk
                         layerCount = layerCount,
                         mipLevel = level - 1
                     },
-                    srcOffsets_0 = new VkOffset3D(),
-                    srcOffsets_1 = new VkOffset3D { x = (int)width, y = (int)height, z = (int)depth },
-                    dstOffsets_0 = new VkOffset3D(),
+                    srcOffsets[0] = new VkOffset3D(),
+                    srcOffsets[1] = new VkOffset3D { x = (int)width, y = (int)height, z = (int)depth },
+                    dstOffsets[0] = new VkOffset3D(),
                     dstSubresource = new VkImageSubresourceLayers
                     {
                         aspectMask = VkImageAspectFlags.Color,
@@ -1781,10 +1781,10 @@ namespace Veldrid.Vk
                         layerCount = layerCount,
                         mipLevel = level
                     },
-                    dstOffsets_1 = new VkOffset3D { x = (int)mipWidth, y = (int)mipHeight, z = (int)mipDepth }
+                    dstOffsets[1] = new VkOffset3D { x = (int)mipWidth, y = (int)mipHeight, z = (int)mipDepth }
                 };
 
-                vkCmdBlitImage(
+                gd.DeviceApi.vkCmdBlitImage(
                     CommandBuffer,
                     deviceImage, VkImageLayout.TransferSrcOptimal,
                     deviceImage, VkImageLayout.TransferDstOptimal,
@@ -1856,8 +1856,8 @@ namespace Veldrid.Vk
 
             // Use KEEP for both combiners (pipeline + image) — the per-draw rate is authoritative.
             var combiners = stackalloc uint[2];
-            combiners[0] = VkFragmentShadingRateCombinerOpKHR.KEEP;
-            combiners[1] = VkFragmentShadingRateCombinerOpKHR.KEEP;
+            combiners[0] = VkFragmentShadingRateCombinerOpKHR.Keep;
+            combiners[1] = VkFragmentShadingRateCombinerOpKHR.Keep;
 
             gd.DeviceApi.vkCmdSetFragmentShadingRateKHR(CommandBuffer, &fragmentSize, combiners);
         }

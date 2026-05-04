@@ -74,7 +74,7 @@ namespace Veldrid.Vk
                 }
             }
 
-            gd.DeviceApi.vkCreateImageView(ref imageViewCi, null, out imageView);
+            gd.DeviceApi.vkCreateImageView(&imageViewCi, null, out imageView);
             RefCount = new ResourceRefCount(disposeCore);
         }
 

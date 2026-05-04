@@ -106,7 +106,7 @@ namespace Veldrid.Vk
                 if (isCubemap) imageCi.flags |= VkImageCreateFlags.CubeCompatible;
 
                 uint subresourceCount = MipLevels * ActualArrayLayers * Depth;
-                var result = gd.DeviceApi.vkCreateImage(ref imageCi, null, out optimalImage);
+                var result = gd.DeviceApi.vkCreateImage(&imageCi, null, out optimalImage);
                 CheckResult(result);
 
                 VkMemoryRequirements memoryRequirements;
@@ -187,7 +187,7 @@ namespace Veldrid.Vk
                 var bufferCi = new VkBufferCreateInfo();
                 bufferCi.usage = VkBufferUsageFlags.TransferSrc | VkBufferUsageFlags.TransferDst;
                 bufferCi.size = stagingSize;
-                var result = gd.DeviceApi.vkCreateBuffer(ref bufferCi, null, out stagingBuffer);
+                var result = gd.DeviceApi.vkCreateBuffer(&bufferCi, null, out stagingBuffer);
                 CheckResult(result);
 
                 VkMemoryRequirements bufferMemReqs;
@@ -283,7 +283,7 @@ namespace Veldrid.Vk
                     aspectMask = aspect
                 };
 
-                gd.DeviceApi.vkGetImageSubresourceLayout(optimalImage, ref imageSubresource, out var layout);
+                gd.DeviceApi.vkGetImageSubresourceLayout(optimalImage, &imageSubresource, out var layout);
                 return layout;
             }
             else
@@ -406,8 +406,8 @@ namespace Veldrid.Vk
 
         // Fills a VkImageMemoryBarrier for transitioning from the current layout to newLayout and
         // updates imageLayouts so the texture tracks the new state immediately. Does NOT emit any
-        // vkCmdPipelineBarrier — callers are expected to accumulate several barriers and flush them
-        // in a single batched vkCmdPipelineBarrier call (see VkCommandList.flushTransitionBarriers).
+        // gd.DeviceApi.vkCmdPipelineBarrier — callers are expected to accumulate several barriers and flush them
+        // in a single batched gd.DeviceApi.vkCmdPipelineBarrier call (see VkCommandList.flushTransitionBarriers).
         // Returns false (no-op) when the image is a staging buffer or is already in newLayout.
         internal bool TryGetLayoutTransitionBarrier(
             uint baseMipLevel,
@@ -447,8 +447,8 @@ namespace Veldrid.Vk
             barrier.newLayout = newLayout;
             barrier.srcAccessMask = srcAccess;
             barrier.dstAccessMask = dstAccess;
-            barrier.srcQueueFamilyIndex = QueueFamilyIgnored;
-            barrier.dstQueueFamilyIndex = QueueFamilyIgnored;
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             barrier.image = OptimalDeviceImage;
             barrier.subresourceRange.aspectMask = aspectMask;
             barrier.subresourceRange.baseMipLevel = baseMipLevel;
@@ -488,7 +488,7 @@ namespace Veldrid.Vk
         private void clearIfRenderTarget()
         {
             // Transient images carry only VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT — no
-            // TRANSFER_DST_BIT. vkCmdClearDepthStencilImage/vkCmdClearColorImage both
+            // TRANSFER_DST_BIT. gd.DeviceApi.vkCmdClearDepthStencilImage/gd.DeviceApi.vkCmdClearColorImage both
             // require TRANSFER_DST_BIT (Vulkan spec §19.1). Skip the initialisation clear;
             // the first render pass uses loadOp=Clear (initialLayout=Undefined) and handles
             // this correctly on tile-based GPUs.

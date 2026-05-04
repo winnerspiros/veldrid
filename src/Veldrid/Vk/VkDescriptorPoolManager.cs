@@ -26,7 +26,7 @@ namespace Veldrid.Vk
                 dsAi.descriptorSetCount = 1;
                 dsAi.pSetLayouts = &setLayout;
                 dsAi.descriptorPool = pool;
-                var result = gd.DeviceApi.vkAllocateDescriptorSets(ref dsAi, out var set);
+                var result = gd.DeviceApi.vkAllocateDescriptorSets(&dsAi, out var set);
                 VulkanUtil.CheckResult(result);
 
                 return new DescriptorAllocationToken(set, pool);
@@ -96,7 +96,7 @@ namespace Veldrid.Vk
             poolCi.pPoolSizes = sizes;
             poolCi.poolSizeCount = pool_size_count;
 
-            var result = gd.DeviceApi.vkCreateDescriptorPool(ref poolCi, null, out var descriptorPool);
+            var result = gd.DeviceApi.vkCreateDescriptorPool(&poolCi, null, out var descriptorPool);
             VulkanUtil.CheckResult(result);
 
             return new PoolInfo(descriptorPool, total_sets, descriptor_count);
@@ -157,7 +157,7 @@ namespace Veldrid.Vk
             internal void Free(VkDevice device, DescriptorAllocationToken token, DescriptorResourceCounts counts)
             {
                 var set = token.Set;
-                gd.DeviceApi.vkFreeDescriptorSets(Pool, 1, ref set);
+                gd.DeviceApi.vkFreeDescriptorSets(Pool, 1, &set);
 
                 RemainingSets += 1;
 

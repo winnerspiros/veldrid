@@ -126,10 +126,10 @@ namespace Veldrid.Vk
 
             // Get the images
             uint scImageCount = 0;
-            var result = gd.DeviceApi.vkGetSwapchainImagesKHR(deviceSwapchain, ref scImageCount, null);
+            var result = gd.DeviceApi.vkGetSwapchainImagesKHR(deviceSwapchain, &scImageCount, null);
             CheckResult(result);
             if (scImages.Length < scImageCount) scImages = new VkImage[(int)scImageCount];
-            result = gd.DeviceApi.vkGetSwapchainImagesKHR(deviceSwapchain, ref scImageCount, out scImages[0]);
+            result = gd.DeviceApi.vkGetSwapchainImagesKHR(deviceSwapchain, &scImageCount, out scImages[0]);
             CheckResult(result);
 
             scImageFormat = surfaceFormat.format;

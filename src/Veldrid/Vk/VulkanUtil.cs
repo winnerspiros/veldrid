@@ -63,7 +63,7 @@ namespace Veldrid.Vk
 
         // Fills srcAccessMask, dstAccessMask, srcStageFlags, dstStageFlags for a layout transition
         // without emitting any barrier. Callers that need to batch multiple transitions use this
-        // to accumulate barriers and OR stage masks before a single vkCmdPipelineBarrier call.
+        // to accumulate barriers and OR stage masks before a single gd.DeviceApi.vkCmdPipelineBarrier call.
         internal static void GetTransitionParameters(
             VkImageLayout oldLayout,
             VkImageLayout newLayout,
@@ -292,8 +292,8 @@ namespace Veldrid.Vk
             var barrier = new VkImageMemoryBarrier();
             barrier.oldLayout = oldLayout;
             barrier.newLayout = newLayout;
-            barrier.srcQueueFamilyIndex = QueueFamilyIgnored;
-            barrier.dstQueueFamilyIndex = QueueFamilyIgnored;
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             barrier.image = image;
             barrier.subresourceRange.aspectMask = aspectMask;
             barrier.subresourceRange.baseMipLevel = baseMipLevel;
@@ -305,7 +305,7 @@ namespace Veldrid.Vk
                 out barrier.srcAccessMask, out barrier.dstAccessMask,
                 out var srcStageFlags, out var dstStageFlags);
 
-            vkCmdPipelineBarrier(
+            gd.DeviceApi.vkCmdPipelineBarrier(
                 cb,
                 srcStageFlags,
                 dstStageFlags,
@@ -354,7 +354,7 @@ namespace Veldrid.Vk
     {
         public static VkMemoryType GetMemoryType(this VkPhysicalDeviceMemoryProperties memoryProperties, uint index)
         {
-            return (&memoryProperties.memoryTypes_0)[index];
+            return (&memoryProperties.memoryTypes[0])[index];
         }
     }
 }
