@@ -1042,7 +1042,20 @@ namespace Veldrid.Vk
                 // initialLayout=Undefined for sampled color attachments.  This prevents the driver
                 // from loading stale tile-RAM data via loadOp=Load from ShaderReadOnlyOptimal on
                 // TBDR GPUs (same invariant as the dynamic-rendering path).
-                if (newFramebuffer && currentFramebuffer.RenderPassClearSampledInit != VkRenderPass.Null)
+                //
+                // Exception: if the first color target is already in ColorAttachmentOptimal, this is
+                // a mid-frame return to a previously-rendered FBO (inner FBO was bound in between and
+                // TransitionToFBOSwitchLayout was a no-op). In that case renderPassClearSampledInit
+                // would expect initialLayout=Undefined but the actual layout is ColorAttachmentOptimal,
+                // and its loadOp=Clear would wipe partial content. Use RenderPassNoClearLoad instead.
+                bool midFrameReturn = newFramebuffer
+                    && currentFramebuffer.ColorTargets.Count > 0
+                    && Util.AssertSubtype<Texture, VkTexture>(currentFramebuffer.ColorTargets[0].Target)
+                           .GetImageLayout(
+                               currentFramebuffer.ColorTargets[0].MipLevel,
+                               currentFramebuffer.ColorTargets[0].ArrayLayer)
+                       == VkImageLayout.ColorAttachmentOptimal;
+                if (newFramebuffer && !midFrameReturn && currentFramebuffer.RenderPassClearSampledInit != VkRenderPass.Null)
                 {
                     // Inject transparent-black into the clear-value slots for any sampled color
                     // attachment that has no explicit caller-supplied clear value.
@@ -1105,7 +1118,9 @@ namespace Veldrid.Vk
                 }
                 else
                 {
-                    renderPassBi.renderPass = newFramebuffer
+                    // midFrameReturn: newFramebuffer=true but the image is in ColorAttachmentOptimal
+                    // from earlier this frame → use Load to preserve partial content.
+                    renderPassBi.renderPass = (newFramebuffer && !midFrameReturn)
                         ? currentFramebuffer.RenderPassNoClearInit
                         : currentFramebuffer.RenderPassNoClearLoad;
                     vkCmdBeginRenderPass(CommandBuffer, ref renderPassBi, VkSubpassContents.Inline);

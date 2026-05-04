@@ -313,6 +313,13 @@ namespace Veldrid.Vk
             AttachmentCount += (uint)ColorTargets.Count;
         }
 
+        // Keep sampled color attachments in ColorAttachmentOptimal during mid-frame FBO switches,
+        // mirroring VkSwapchainFramebuffer. This lets wasAlreadyColorAttachment=true fire on return
+        // to an outer FBO (loadOp=Load), preserving any partial content accumulated before the inner
+        // FBO was bound. TransitionToFinalLayout is still called from End() for the last active FBO,
+        // and transitionImages() emits the ShaderReadOnlyOptimal barrier when textures are sampled.
+        public override void TransitionToFBOSwitchLayout(VkCommandBuffer cb) { }
+
         public override void TransitionToIntermediateLayout(VkCommandBuffer cb)
         {
             for (int i = 0; i < ColorTargets.Count; i++)
