@@ -194,7 +194,7 @@ namespace Veldrid.Vk
                 if (deviceSwapchain != VkSwapchainKHR.Null)
                     gd.DeviceApi.vkDestroySwapchainKHR(deviceSwapchain, null);
                 if (surface != VkSurfaceKHR.Null)
-                    gd.InstanceApi.vkDestroySurfaceKHR(this.gd.Instance, surface, null);
+                    gd.InstanceApi.vkDestroySurfaceKHR(surface, null);
                 throw new VeldridException("The Vulkan surface was not ready in time; cannot create a swapchain.");
             }
 
@@ -263,7 +263,7 @@ namespace Veldrid.Vk
                 acquire_timeout_ns,
                 semaphore,
                 fence,
-                ref currentImageIndex);
+                out currentImageIndex);
             framebuffer.SetImageIndex(currentImageIndex);
 
             if (result == VkResult.ErrorSurfaceLostKHR)
@@ -304,10 +304,11 @@ namespace Veldrid.Vk
         internal void WaitAndResetImageAvailableFence()
         {
             const ulong fence_wait_timeout_ns = 250_000_000; // 250 ms
-            var result = gd.DeviceApi.vkWaitForFences(1, &imageAvailableFence, true, fence_wait_timeout_ns);
+            var fence = imageAvailableFence;
+            var result = gd.DeviceApi.vkWaitForFences(1, &fence, true, fence_wait_timeout_ns);
             if (result == VkResult.Success)
             {
-                gd.DeviceApi.vkResetFences(1, &imageAvailableFence);
+                gd.DeviceApi.vkResetFences(1, &fence);
                 return;
             }
 
@@ -406,7 +407,7 @@ namespace Veldrid.Vk
                 surface = newSurface;
                 if (!getPresentQueueIndex(out var newPresentQueueIndex))
                 {
-                    gd.InstanceApi.vkDestroySurfaceKHR(gd.Instance, newSurface, null);
+                    gd.InstanceApi.vkDestroySurfaceKHR(newSurface, null);
                     surface = oldSurface;
                     return false;
                 }
@@ -431,7 +432,7 @@ namespace Veldrid.Vk
                 }
 
                 if (oldSurface != VkSurfaceKHR.Null)
-                    gd.InstanceApi.vkDestroySurfaceKHR(gd.Instance, oldSurface, null);
+                    gd.InstanceApi.vkDestroySurfaceKHR(oldSurface, null);
 
                 return true;
             }
@@ -446,7 +447,7 @@ namespace Veldrid.Vk
             lastCreateSurfaceLost = false;
 
             // Obtain the surface capabilities first -- this will indicate whether the surface has been lost.
-            var result = gd.InstanceApi.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(surface, out var surfaceCapabilities);
+            var result = gd.InstanceApi.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(gd.PhysicalDevice, surface, out var surfaceCapabilities);
             if (result == VkResult.ErrorSurfaceLostKHR)
             {
                 lastCreateSurfaceLost = true;
@@ -478,7 +479,7 @@ namespace Veldrid.Vk
 
             currentImageIndex = 0;
             uint surfaceFormatCount = 0;
-            result = gd.InstanceApi.vkGetPhysicalDeviceSurfaceFormatsKHR(surface, &surfaceFormatCount, null);
+            result = gd.InstanceApi.vkGetPhysicalDeviceSurfaceFormatsKHR(gd.PhysicalDevice, surface, &surfaceFormatCount, null);
             if (result == VkResult.ErrorSurfaceLostKHR)
             {
                 lastCreateSurfaceLost = true;
@@ -486,7 +487,7 @@ namespace Veldrid.Vk
             }
             CheckResult(result);
             var formats = new VkSurfaceFormatKHR[surfaceFormatCount];
-            result = gd.InstanceApi.vkGetPhysicalDeviceSurfaceFormatsKHR(surface, &surfaceFormatCount, out formats[0]);
+            result = gd.InstanceApi.vkGetPhysicalDeviceSurfaceFormatsKHR(gd.PhysicalDevice, surface, &surfaceFormatCount, &formats[0]);
             if (result == VkResult.ErrorSurfaceLostKHR)
             {
                 lastCreateSurfaceLost = true;
@@ -522,7 +523,7 @@ namespace Veldrid.Vk
             }
 
             uint presentModeCount = 0;
-            result = gd.InstanceApi.vkGetPhysicalDeviceSurfacePresentModesKHR(surface, &presentModeCount, null);
+            result = gd.InstanceApi.vkGetPhysicalDeviceSurfacePresentModesKHR(gd.PhysicalDevice, surface, &presentModeCount, null);
             if (result == VkResult.ErrorSurfaceLostKHR)
             {
                 lastCreateSurfaceLost = true;
@@ -530,7 +531,7 @@ namespace Veldrid.Vk
             }
             CheckResult(result);
             var presentModes = new VkPresentModeKHR[presentModeCount];
-            result = gd.InstanceApi.vkGetPhysicalDeviceSurfacePresentModesKHR(surface, &presentModeCount, out presentModes[0]);
+            result = gd.InstanceApi.vkGetPhysicalDeviceSurfacePresentModesKHR(gd.PhysicalDevice, surface, &presentModeCount, &presentModes[0]);
             if (result == VkResult.ErrorSurfaceLostKHR)
             {
                 lastCreateSurfaceLost = true;
@@ -841,7 +842,7 @@ namespace Veldrid.Vk
         // or the query failed — caller falls back to recreate-on-toggle.
         private VkPresentModeKHR[] queryCompatiblePresentModes(VkPresentModeKHR anchor, VkPresentModeKHR[] surfaceSupported)
         {
-            if (gd.GetPhysicalDeviceSurfaceCapabilities2 == null)
+            if (false /* GetPhysicalDeviceSurfaceCapabilities2 now via InstanceApi */)
                 return null;
 
             var surfaceMode = new VkSurfacePresentModeKHR();
@@ -856,7 +857,7 @@ namespace Veldrid.Vk
             var caps2 = new VkSurfaceCapabilities2KHR();
             caps2.pNext = &compat;
 
-            if (gd.GetPhysicalDeviceSurfaceCapabilities2(gd.PhysicalDevice, &surfaceInfo, &caps2) != VkResult.Success)
+            if (gd.InstanceApi.vkGetPhysicalDeviceSurfaceCapabilities2KHR(gd.PhysicalDevice, &surfaceInfo, &caps2) != VkResult.Success)
                 return null;
 
             uint count = compat.presentModeCount;
@@ -867,7 +868,7 @@ namespace Veldrid.Vk
             fixed (VkPresentModeKHR* modesPtr = modes)
             {
                 compat.pPresentModes = modesPtr;
-                if (gd.GetPhysicalDeviceSurfaceCapabilities2(gd.PhysicalDevice, &surfaceInfo, &caps2) != VkResult.Success)
+                if (gd.InstanceApi.vkGetPhysicalDeviceSurfaceCapabilities2KHR(gd.PhysicalDevice, &surfaceInfo, &caps2) != VkResult.Success)
                     return null;
             }
 
@@ -1008,9 +1009,7 @@ namespace Veldrid.Vk
 
         private bool queueSupportsPresent(uint queueFamilyIndex, VkSurfaceKHR surface)
         {
-            var result = gd.InstanceApi.vkGetPhysicalDeviceSurfaceSupportKHR(queueFamilyIndex,
-                surface,
-                out var supported);
+            var result = gd.InstanceApi.vkGetPhysicalDeviceSurfaceSupportKHR(gd.PhysicalDevice, queueFamilyIndex, surface, out supported);
             CheckResult(result);
             return supported;
         }
@@ -1020,7 +1019,7 @@ namespace Veldrid.Vk
             gd.DeviceApi.vkDestroyFence(imageAvailableFence, null);
             framebuffer.Dispose();
             gd.DeviceApi.vkDestroySwapchainKHR(deviceSwapchain, null);
-            gd.InstanceApi.vkDestroySurfaceKHR(gd.Instance, Surface, null);
+            gd.InstanceApi.vkDestroySurfaceKHR(Surface, null);
 
             disposed = true;
         }
