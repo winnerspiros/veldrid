@@ -57,77 +57,40 @@ namespace Veldrid.Vk
 
         public VkDescriptorPoolManager DescriptorPoolManager { get; private set; }
 
-        public VkCmdDebugMarkerBeginExtT MarkerBegin { get; private set; }
-
-        public VkCmdDebugMarkerEndExtT MarkerEnd { get; private set; }
-
-        public VkCmdDebugMarkerInsertExtT MarkerInsert { get; private set; }
-
-        public VkGetBufferMemoryRequirements2T GetBufferMemoryRequirements2 { get; private set; }
-
-        public VkGetImageMemoryRequirements2T GetImageMemoryRequirements2 { get; private set; }
-
-        public VkCreateMetalSurfaceExtT CreateMetalSurfaceExt { get; private set; }
-
         // VK_KHR_push_descriptor
         public bool HasPushDescriptors { get; private set; }
         public uint MaxPushDescriptors { get; private set; }
-        public VkCmdPushDescriptorSetKHRT CmdPushDescriptorSet { get; private set; }
 
         // VK_KHR_dynamic_rendering
         public bool HasDynamicRendering { get; private set; }
-        public VkCmdBeginRenderingT CmdBeginRendering { get; private set; }
-        public VkCmdEndRenderingT CmdEndRendering { get; private set; }
 
         // VK_EXT_memory_budget
         public bool HasMemoryBudget { get; private set; }
 
         // VK_EXT_host_image_copy
         public bool HasHostImageCopy { get; private set; }
-        public VkCopyMemoryToImageExtT CopyMemoryToImageExt { get; private set; }
-        public VkTransitionImageLayoutExtT TransitionImageLayoutExt { get; private set; }
 
         // VK_EXT_descriptor_indexing (core in Vulkan 1.2)
         public bool HasDescriptorIndexing { get; private set; }
 
         // VK_KHR_fragment_shading_rate
         public bool HasFragmentShadingRate { get; private set; }
-        public VkCmdSetFragmentShadingRateT CmdSetFragmentShadingRate { get; private set; }
 
         // VK_EXT_mesh_shader
         public bool HasMeshShader { get; private set; }
-        public VkCmdDrawMeshTasksExtT CmdDrawMeshTasksExt { get; private set; }
 
         // VK_KHR_get_surface_capabilities2 + VK_EXT_surface_maintenance1 (instance) +
         // VK_EXT_swapchain_maintenance1 (device).
-        // When true, the swapchain can hot-swap present modes at vkQueuePresentKHR
-        // time without rebuilding — used by VkSwapchain to make SyncToVerticalBlank /
-        // AllowTearing toggles near-free.
         public bool HasSwapchainMaintenance1 { get; private set; }
-        public VkGetPhysicalDeviceSurfaceCapabilities2KhrT GetPhysicalDeviceSurfaceCapabilities2 { get; private set; }
 
-        // VK_KHR_synchronization2 (core in Vulkan 1.3). Enabled at device creation;
-        // submission path uses vkQueueSubmit2 with per-semaphore stage masks when active.
+        // VK_KHR_synchronization2 (core in Vulkan 1.3).
         public bool HasSynchronization2 { get; private set; }
 
-        // vkQueueSubmit2 entry point, loaded when HasSynchronization2 is true.
-        // Null on Vulkan < 1.3 without the KHR extension; submitCommandBuffer falls
-        // back to legacy vkQueueSubmit in that case.
-        public VkQueueSubmit2T QueueSubmit2 { get; private set; }
-
-        // VK_KHR_timeline_semaphore (core in Vulkan 1.2). Feature-detect + opt-in only;
-        // see HasSynchronization2 for context.
+        // VK_KHR_timeline_semaphore (core in Vulkan 1.2).
         public bool HasTimelineSemaphore { get; private set; }
 
-        // VK_GOOGLE_display_timing: true when the extension is active and both
-        // vkGetRefreshCycleDurationGOOGLE and vkGetPastPresentationTimingGOOGLE loaded
-        // successfully. When true, VkSwapchain automatically chains
-        // VkPresentTimesInfoGOOGLE on every vkQueuePresentKHR call to target the next
-        // vblank boundary, minimising the time a rendered frame sits in the scanout
-        // buffer before the display shows it.
+        // VK_GOOGLE_display_timing
         public bool HasDisplayTiming { get; private set; }
-        public VkGetRefreshCycleDurationGOOGLET GetRefreshCycleDurationGOOGLE { get; private set; }
-        public VkGetPastPresentationTimingGOOGLET GetPastPresentationTimingGOOGLE { get; private set; }
 
         // VK_EXT_pipeline_creation_cache_control (core in Vulkan 1.3).
         // When true, pipeline creation calls may pass
@@ -267,14 +230,12 @@ namespace Veldrid.Vk
         private VkCommandPool graphicsCommandPool;
         private VkQueue graphicsQueue;
         private VkDebugReportCallbackEXT debugCallbackHandle;
-        private PFN_vkDebugReportCallbackEXT debugCallbackFunc;
         private bool debugMarkerEnabled;
         private VkDebugMarkerSetObjectNameExtT setObjectNameDelegate;
         private readonly Stack<SharedCommandPool> sharedGraphicsCommandPools = new Stack<SharedCommandPool>();
         private bool standardValidationSupported;
         private bool khronosValidationSupported;
         private bool standardClipYDirection;
-        private VkGetPhysicalDeviceProperties2T getPhysicalDeviceProperties2;
         private VkPipelineCache pipelineCache;
 
         /// <summary>

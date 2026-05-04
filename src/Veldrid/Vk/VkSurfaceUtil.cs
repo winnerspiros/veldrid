@@ -102,8 +102,8 @@ namespace Veldrid.Vk
         private static VkSurfaceKHR createXlib(VkInstance instance, XlibSwapchainSource xlibSource)
         {
             var xsci = VkXlibSurfaceCreateInfoKHR.New();
-            xsci.dpy = (Display*)xlibSource.Display;
-            xsci.window = new Window { Value = xlibSource.Window };
+            xsci.dpy = (IntPtr)xlibSource.Display;
+            xsci.window = (ulong)xlibSource.Window;
             var result = vkCreateXlibSurfaceKHR(instance, ref xsci, null, out var surface);
             CheckResult(result);
             return surface;

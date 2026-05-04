@@ -26,7 +26,7 @@ namespace Veldrid.Vk
         /// <param name="display">A pointer to the Xlib Display.</param>
         /// <param name="window">An Xlib window.</param>
         /// <returns>A new VkSurfaceSource.</returns>
-        public static unsafe VkSurfaceSource CreateXlib(Display* display, Window window)
+        public static unsafe VkSurfaceSource CreateXlib(nint display, ulong window)
         {
             return new XlibVkSurfaceInfo(display, window);
         }
@@ -65,10 +65,10 @@ namespace Veldrid.Vk
 
     internal class XlibVkSurfaceInfo : VkSurfaceSource
     {
-        private readonly unsafe Display* display;
-        private readonly Window window;
+        private readonly nint display;
+        private readonly ulong window;
 
-        public unsafe XlibVkSurfaceInfo(Display* display, Window window)
+        public XlibVkSurfaceInfo(nint display, ulong window)
         {
             this.display = display;
             this.window = window;
@@ -79,9 +79,9 @@ namespace Veldrid.Vk
             return VkSurfaceUtil.CreateSurface(null, instance, GetSurfaceSource());
         }
 
-        internal override unsafe SwapchainSource GetSurfaceSource()
+        internal override SwapchainSource GetSurfaceSource()
         {
-            return new XlibSwapchainSource((IntPtr)display, window.Value);
+            return new XlibSwapchainSource(display, window);
         }
     }
 }
