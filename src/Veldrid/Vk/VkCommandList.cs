@@ -1037,32 +1037,101 @@ namespace Veldrid.Vk
 
             if (!haveAnyAttachments || !haveAllClearValues)
             {
-                renderPassBi.renderPass = newFramebuffer
-                    ? currentFramebuffer.RenderPassNoClearInit
-                    : currentFramebuffer.RenderPassNoClearLoad;
-                vkCmdBeginRenderPass(CommandBuffer, ref renderPassBi, VkSubpassContents.Inline);
-                activeRenderPass = renderPassBi.renderPass;
-
-                if (haveAnyClearValues)
+                // On the first bind of a sampled offscreen FBO (newFramebuffer=true) in the legacy
+                // render-pass path, use renderPassClearSampledInit which has loadOp=Clear /
+                // initialLayout=Undefined for sampled color attachments.  This prevents the driver
+                // from loading stale tile-RAM data via loadOp=Load from ShaderReadOnlyOptimal on
+                // TBDR GPUs (same invariant as the dynamic-rendering path).
+                if (newFramebuffer && currentFramebuffer.RenderPassClearSampledInit != VkRenderPass.Null)
                 {
-                    if (depthClearValue.HasValue)
+                    // Inject transparent-black into the clear-value slots for any sampled color
+                    // attachment that has no explicit caller-supplied clear value.
+                    for (int i = 0; i < currentFramebuffer.ColorTargets.Count; i++)
                     {
-                        ClearDepthStencilCore(depthClearValue.Value.depthStencil.depth, (byte)depthClearValue.Value.depthStencil.stencil);
-                        depthClearValue = null;
+                        if (!validColorClearValues[i])
+                        {
+                            var vkColorTex = Util.AssertSubtype<Texture, VkTexture>(currentFramebuffer.ColorTargets[i].Target);
+                            if ((vkColorTex.Usage & TextureUsage.Sampled) != 0)
+                                clearValues[i] = default; // transparent black (0,0,0,0)
+                        }
                     }
 
-                    for (uint i = 0; i < currentFramebuffer.ColorTargets.Count; i++)
+                    renderPassBi.renderPass = currentFramebuffer.RenderPassClearSampledInit;
+                    fixed (VkClearValue* clearValuesPtr = &clearValues[0])
                     {
-                        if (validColorClearValues[i])
+                        renderPassBi.clearValueCount = attachmentCount;
+                        renderPassBi.pClearValues = clearValuesPtr;
+                        vkCmdBeginRenderPass(CommandBuffer, ref renderPassBi, VkSubpassContents.Inline);
+                    }
+
+                    activeRenderPass = renderPassBi.renderPass;
+
+                    // The render pass cleared all sampled attachments (loadOp=Clear).  Any
+                    // non-sampled attachment with a pending explicit clear must be issued as
+                    // vkCmdClearAttachments inside the now-active pass.
+                    if (haveAnyClearValues)
+                    {
+                        if (depthClearValue.HasValue)
                         {
-                            validColorClearValues[i] = false;
-                            var vkClearValue = clearValues[i];
-                            var clearColor = new RgbaFloat(
-                                vkClearValue.color.float32_0,
-                                vkClearValue.color.float32_1,
-                                vkClearValue.color.float32_2,
-                                vkClearValue.color.float32_3);
-                            ClearColorTarget(i, clearColor);
+                            ClearDepthStencilCore(depthClearValue.Value.depthStencil.depth, (byte)depthClearValue.Value.depthStencil.stencil);
+                            depthClearValue = null;
+                        }
+
+                        for (uint i = 0; i < currentFramebuffer.ColorTargets.Count; i++)
+                        {
+                            if (validColorClearValues[i])
+                            {
+                                validColorClearValues[i] = false;
+                                var vkColorTex = Util.AssertSubtype<Texture, VkTexture>(currentFramebuffer.ColorTargets[(int)i].Target);
+                                if ((vkColorTex.Usage & TextureUsage.Sampled) == 0)
+                                {
+                                    // Non-sampled attachment uses loadOp=Load in this pass, so
+                                    // the caller's explicit clear must be emitted manually.
+                                    var vkClearValue = clearValues[i];
+                                    ClearColorTarget(i, new RgbaFloat(
+                                        vkClearValue.color.float32_0,
+                                        vkClearValue.color.float32_1,
+                                        vkClearValue.color.float32_2,
+                                        vkClearValue.color.float32_3));
+                                }
+                                // Sampled attachments: already cleared by renderPassClearSampledInit loadOp.
+                            }
+                        }
+                    }
+                    else
+                    {
+                        Util.ClearArray(validColorClearValues);
+                    }
+                }
+                else
+                {
+                    renderPassBi.renderPass = newFramebuffer
+                        ? currentFramebuffer.RenderPassNoClearInit
+                        : currentFramebuffer.RenderPassNoClearLoad;
+                    vkCmdBeginRenderPass(CommandBuffer, ref renderPassBi, VkSubpassContents.Inline);
+                    activeRenderPass = renderPassBi.renderPass;
+
+                    if (haveAnyClearValues)
+                    {
+                        if (depthClearValue.HasValue)
+                        {
+                            ClearDepthStencilCore(depthClearValue.Value.depthStencil.depth, (byte)depthClearValue.Value.depthStencil.stencil);
+                            depthClearValue = null;
+                        }
+
+                        for (uint i = 0; i < currentFramebuffer.ColorTargets.Count; i++)
+                        {
+                            if (validColorClearValues[i])
+                            {
+                                validColorClearValues[i] = false;
+                                var vkClearValue = clearValues[i];
+                                var clearColor = new RgbaFloat(
+                                    vkClearValue.color.float32_0,
+                                    vkClearValue.color.float32_1,
+                                    vkClearValue.color.float32_2,
+                                    vkClearValue.color.float32_3);
+                                ClearColorTarget(i, clearColor);
+                            }
                         }
                     }
                 }

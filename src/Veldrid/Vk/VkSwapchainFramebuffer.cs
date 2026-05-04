@@ -13,6 +13,7 @@ namespace Veldrid.Vk
         public override VkRenderPass RenderPassNoClearInit => scFramebuffers[0].RenderPassNoClearInit;
         public override VkRenderPass RenderPassNoClearLoad => scFramebuffers[0].RenderPassNoClearLoad;
         public override VkRenderPass RenderPassClear => scFramebuffers[0].RenderPassClear;
+        public override VkRenderPass RenderPassClearSampledInit => scFramebuffers[0].RenderPassClearSampledInit;
 
         public override IReadOnlyList<VkImageView> ColorAttachmentViews =>
             scFramebuffers != null ? scFramebuffers[(int)ImageIndex].ColorAttachmentViews : Array.Empty<VkImageView>();
