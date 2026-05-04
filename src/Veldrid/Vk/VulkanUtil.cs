@@ -289,7 +289,7 @@ namespace Veldrid.Vk
             VkImageLayout newLayout)
         {
             Debug.Assert(oldLayout != newLayout);
-            var barrier = VkImageMemoryBarrier.New();
+            var barrier = new VkImageMemoryBarrier();
             barrier.oldLayout = oldLayout;
             barrier.newLayout = newLayout;
             barrier.srcQueueFamilyIndex = QueueFamilyIgnored;

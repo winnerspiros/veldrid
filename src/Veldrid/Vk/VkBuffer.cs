@@ -52,20 +52,20 @@ namespace Veldrid.Vk
 
             if ((usage & BufferUsage.IndirectBuffer) == BufferUsage.IndirectBuffer) vkUsage |= VkBufferUsageFlags.IndirectBuffer;
 
-            var bufferCi = VkBufferCreateInfo.New();
+            var bufferCi = new VkBufferCreateInfo();
             bufferCi.size = sizeInBytes;
             bufferCi.usage = vkUsage;
-            var result = vkCreateBuffer(gd.Device, ref bufferCi, null, out deviceBuffer);
+            var result = gd.DeviceApi.vkCreateBuffer(ref bufferCi, null, out deviceBuffer);
             CheckResult(result);
 
             bool prefersDedicatedAllocation;
 
             if (this.gd.GetBufferMemoryRequirements2 != null)
             {
-                var memReqInfo2 = VkBufferMemoryRequirementsInfo2.New();
+                var memReqInfo2 = new VkBufferMemoryRequirementsInfo2();
                 memReqInfo2.buffer = deviceBuffer;
-                var memReqs2 = VkMemoryRequirements2.New();
-                var dedicatedReqs = VkMemoryDedicatedRequirements.New();
+                var memReqs2 = new VkMemoryRequirements2();
+                var dedicatedReqs = new VkMemoryDedicatedRequirements();
                 memReqs2.pNext = &dedicatedReqs;
                 this.gd.GetBufferMemoryRequirements2(this.gd.Device, &memReqInfo2, &memReqs2);
                 bufferMemoryRequirements = memReqs2.memoryRequirements;
@@ -73,7 +73,7 @@ namespace Veldrid.Vk
             }
             else
             {
-                vkGetBufferMemoryRequirements(gd.Device, deviceBuffer, out bufferMemoryRequirements);
+                gd.DeviceApi.vkGetBufferMemoryRequirements(deviceBuffer, out bufferMemoryRequirements);
                 prefersDedicatedAllocation = false;
             }
 
@@ -107,7 +107,7 @@ namespace Veldrid.Vk
                 VkImage.Null,
                 deviceBuffer);
             memory = memoryToken;
-            result = vkBindBufferMemory(gd.Device, deviceBuffer, memory.DeviceMemory, memory.Offset);
+            result = gd.DeviceApi.vkBindBufferMemory(deviceBuffer, memory.DeviceMemory, memory.Offset);
             CheckResult(result);
 
             RefCount = new ResourceRefCount(disposeCore);
@@ -127,7 +127,7 @@ namespace Veldrid.Vk
             if (!destroyed)
             {
                 destroyed = true;
-                vkDestroyBuffer(gd.Device, deviceBuffer, null);
+                gd.DeviceApi.vkDestroyBuffer(deviceBuffer, null);
                 gd.MemoryManager.Free(Memory);
             }
         }

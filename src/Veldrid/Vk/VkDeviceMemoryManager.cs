@@ -79,17 +79,17 @@ namespace Veldrid.Vk
             {
                 if (dedicatedImage != VkImage.Null && getImageMemoryRequirements2 != null)
                 {
-                    var requirementsInfo = VkImageMemoryRequirementsInfo2.New();
+                    var requirementsInfo = new VkImageMemoryRequirementsInfo2();
                     requirementsInfo.image = dedicatedImage;
-                    var requirements = VkMemoryRequirements2.New();
+                    var requirements = new VkMemoryRequirements2();
                     getImageMemoryRequirements2(device, &requirementsInfo, &requirements);
                     size = requirements.memoryRequirements.size;
                 }
                 else if (dedicatedBuffer != Vortice.Vulkan.VkBuffer.Null && getBufferMemoryRequirements2 != null)
                 {
-                    var requirementsInfo = VkBufferMemoryRequirementsInfo2.New();
+                    var requirementsInfo = new VkBufferMemoryRequirementsInfo2();
                     requirementsInfo.buffer = dedicatedBuffer;
-                    var requirements = VkMemoryRequirements2.New();
+                    var requirements = new VkMemoryRequirements2();
                     getBufferMemoryRequirements2(device, &requirementsInfo, &requirements);
                     size = requirements.memoryRequirements.size;
                 }
@@ -110,7 +110,7 @@ namespace Veldrid.Vk
 
                 if (dedicated || size >= minDedicatedAllocationSize)
                 {
-                    var allocateInfo = VkMemoryAllocateInfo.New();
+                    var allocateInfo = new VkMemoryAllocateInfo();
                     allocateInfo.allocationSize = size;
                     allocateInfo.memoryTypeIndex = memoryTypeIndex;
 
@@ -119,20 +119,20 @@ namespace Veldrid.Vk
 
                     if (dedicated)
                     {
-                        dedicatedAi = VkMemoryDedicatedAllocateInfo.New();
+                        dedicatedAi = new VkMemoryDedicatedAllocateInfo();
                         dedicatedAi.buffer = dedicatedBuffer;
                         dedicatedAi.image = dedicatedImage;
                         allocateInfo.pNext = &dedicatedAi;
                     }
 
-                    var allocationResult = vkAllocateMemory(device, ref allocateInfo, null, out var memory);
+                    var allocationResult = gd.DeviceApi.vkAllocateMemory(ref allocateInfo, null, out var memory);
                     if (allocationResult != VkResult.Success) throw new VeldridException("Unable to allocate sufficient Vulkan memory.");
 
                     void* mappedPtr = null;
 
                     if (persistentMapped)
                     {
-                        var mapResult = vkMapMemory(device, memory, 0, size, 0, &mappedPtr);
+                        var mapResult = gd.DeviceApi.vkMapMemory(memory, 0, size, 0, &mappedPtr);
                         if (mapResult != VkResult.Success) throw new VeldridException("Unable to map newly-allocated Vulkan memory.");
                     }
 
@@ -152,7 +152,7 @@ namespace Veldrid.Vk
             lock (@lock)
             {
                 if (block.DedicatedAllocation)
-                    vkFreeMemory(device, block.DeviceMemory, null);
+                    gd.DeviceApi.vkFreeMemory(block.DeviceMemory, null);
                 else
                     getAllocator(block.MemoryTypeIndex, block.IsPersistentMapped).Free(block);
             }
@@ -161,7 +161,7 @@ namespace Veldrid.Vk
         internal IntPtr Map(VkMemoryBlock memoryBlock)
         {
             void* ret;
-            var result = vkMapMemory(device, memoryBlock.DeviceMemory, memoryBlock.Offset, memoryBlock.Size, 0, &ret);
+            var result = gd.DeviceApi.vkMapMemory(memoryBlock.DeviceMemory, memoryBlock.Offset, memoryBlock.Size, 0, &ret);
             CheckResult(result);
             return (IntPtr)ret;
         }
@@ -253,7 +253,7 @@ namespace Veldrid.Vk
                 this.memoryTypeIndex = memoryTypeIndex;
                 ulong totalMemorySize = persistentMapped ? persistent_mapped_chunk_size : unmapped_chunk_size;
 
-                var memoryAi = VkMemoryAllocateInfo.New();
+                var memoryAi = new VkMemoryAllocateInfo();
                 memoryAi.allocationSize = totalMemorySize;
                 memoryAi.memoryTypeIndex = this.memoryTypeIndex;
                 var result = vkAllocateMemory(this.device, ref memoryAi, null, out memory);
@@ -283,7 +283,7 @@ namespace Veldrid.Vk
 
             public void Dispose()
             {
-                vkFreeMemory(device, memory, null);
+                gd.DeviceApi.vkFreeMemory(memory, null);
             }
 
             #endregion

@@ -87,7 +87,7 @@ namespace Veldrid.Vk
 
             if (!isStaging)
             {
-                var imageCi = VkImageCreateInfo.New();
+                var imageCi = new VkImageCreateInfo();
                 imageCi.mipLevels = MipLevels;
                 imageCi.arrayLayers = ActualArrayLayers;
                 imageCi.imageType = VkFormats.VdToVkTextureType(Type);
@@ -106,7 +106,7 @@ namespace Veldrid.Vk
                 if (isCubemap) imageCi.flags |= VkImageCreateFlags.CubeCompatible;
 
                 uint subresourceCount = MipLevels * ActualArrayLayers * Depth;
-                var result = vkCreateImage(gd.Device, ref imageCi, null, out optimalImage);
+                var result = gd.DeviceApi.vkCreateImage(ref imageCi, null, out optimalImage);
                 CheckResult(result);
 
                 VkMemoryRequirements memoryRequirements;
@@ -114,10 +114,10 @@ namespace Veldrid.Vk
 
                 if (this.gd.GetImageMemoryRequirements2 != null)
                 {
-                    var memReqsInfo2 = VkImageMemoryRequirementsInfo2.New();
+                    var memReqsInfo2 = new VkImageMemoryRequirementsInfo2();
                     memReqsInfo2.image = optimalImage;
-                    var memReqs2 = VkMemoryRequirements2.New();
-                    var dedicatedReqs = VkMemoryDedicatedRequirements.New();
+                    var memReqs2 = new VkMemoryRequirements2();
+                    var dedicatedReqs = new VkMemoryDedicatedRequirements();
                     memReqs2.pNext = &dedicatedReqs;
                     this.gd.GetImageMemoryRequirements2(this.gd.Device, &memReqsInfo2, &memReqs2);
                     memoryRequirements = memReqs2.memoryRequirements;
@@ -125,7 +125,7 @@ namespace Veldrid.Vk
                 }
                 else
                 {
-                    vkGetImageMemoryRequirements(gd.Device, optimalImage, out memoryRequirements);
+                    gd.DeviceApi.vkGetImageMemoryRequirements(optimalImage, out memoryRequirements);
                     prefersDedicatedAllocation = false;
                 }
 
@@ -155,7 +155,7 @@ namespace Veldrid.Vk
                     optimalImage,
                     Vortice.Vulkan.VkBuffer.Null);
                 memoryBlock = memoryToken;
-                result = vkBindImageMemory(gd.Device, optimalImage, memoryBlock.DeviceMemory, memoryBlock.Offset);
+                result = gd.DeviceApi.vkBindImageMemory(optimalImage, memoryBlock.DeviceMemory, memoryBlock.Offset);
                 CheckResult(result);
 
                 imageLayouts = new VkImageLayout[subresourceCount];
@@ -184,10 +184,10 @@ namespace Veldrid.Vk
 
                 stagingSize *= ArrayLayers;
 
-                var bufferCi = VkBufferCreateInfo.New();
+                var bufferCi = new VkBufferCreateInfo();
                 bufferCi.usage = VkBufferUsageFlags.TransferSrc | VkBufferUsageFlags.TransferDst;
                 bufferCi.size = stagingSize;
-                var result = vkCreateBuffer(this.gd.Device, ref bufferCi, null, out stagingBuffer);
+                var result = gd.DeviceApi.vkCreateBuffer(ref bufferCi, null, out stagingBuffer);
                 CheckResult(result);
 
                 VkMemoryRequirements bufferMemReqs;
@@ -195,10 +195,10 @@ namespace Veldrid.Vk
 
                 if (this.gd.GetBufferMemoryRequirements2 != null)
                 {
-                    var memReqInfo2 = VkBufferMemoryRequirementsInfo2.New();
+                    var memReqInfo2 = new VkBufferMemoryRequirementsInfo2();
                     memReqInfo2.buffer = stagingBuffer;
-                    var memReqs2 = VkMemoryRequirements2.New();
-                    var dedicatedReqs = VkMemoryDedicatedRequirements.New();
+                    var memReqs2 = new VkMemoryRequirements2();
+                    var dedicatedReqs = new VkMemoryDedicatedRequirements();
                     memReqs2.pNext = &dedicatedReqs;
                     this.gd.GetBufferMemoryRequirements2(this.gd.Device, &memReqInfo2, &memReqs2);
                     bufferMemReqs = memReqs2.memoryRequirements;
@@ -206,7 +206,7 @@ namespace Veldrid.Vk
                 }
                 else
                 {
-                    vkGetBufferMemoryRequirements(gd.Device, stagingBuffer, out bufferMemReqs);
+                    gd.DeviceApi.vkGetBufferMemoryRequirements(stagingBuffer, out bufferMemReqs);
                     prefersDedicatedAllocation = false;
                 }
 
@@ -224,7 +224,7 @@ namespace Veldrid.Vk
                     VkImage.Null,
                     stagingBuffer);
 
-                result = vkBindBufferMemory(this.gd.Device, stagingBuffer, memoryBlock.DeviceMemory, memoryBlock.Offset);
+                result = gd.DeviceApi.vkBindBufferMemory(stagingBuffer, memoryBlock.DeviceMemory, memoryBlock.Offset);
                 CheckResult(result);
             }
 
@@ -283,7 +283,7 @@ namespace Veldrid.Vk
                     aspectMask = aspect
                 };
 
-                vkGetImageSubresourceLayout(gd.Device, optimalImage, ref imageSubresource, out var layout);
+                gd.DeviceApi.vkGetImageSubresourceLayout(optimalImage, ref imageSubresource, out var layout);
                 return layout;
             }
             else
@@ -442,7 +442,7 @@ namespace Veldrid.Vk
             VulkanUtil.GetTransitionParameters(oldLayout, newLayout,
                 out var srcAccess, out var dstAccess, out srcStage, out dstStage);
 
-            barrier = VkImageMemoryBarrier.New();
+            barrier = new VkImageMemoryBarrier();
             barrier.oldLayout = oldLayout;
             barrier.newLayout = newLayout;
             barrier.srcAccessMask = srcAccess;
@@ -517,9 +517,9 @@ namespace Veldrid.Vk
 
                 bool isStaging = (Usage & TextureUsage.Staging) == TextureUsage.Staging;
                 if (isStaging)
-                    vkDestroyBuffer(gd.Device, stagingBuffer, null);
+                    gd.DeviceApi.vkDestroyBuffer(stagingBuffer, null);
                 else
-                    vkDestroyImage(gd.Device, optimalImage, null);
+                    gd.DeviceApi.vkDestroyImage(optimalImage, null);
 
                 if (memoryBlock.DeviceMemory.Handle != 0) gd.MemoryManager.Free(memoryBlock);
             }

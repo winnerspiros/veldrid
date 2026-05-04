@@ -39,7 +39,7 @@ namespace Veldrid.Vk
             : base(ref description)
         {
             this.gd = gd;
-            var dslCi = VkDescriptorSetLayoutCreateInfo.New();
+            var dslCi = new VkDescriptorSetLayoutCreateInfo();
             var elements = description.Elements;
             DescriptorTypes = new VkDescriptorType[elements.Length];
             var bindings = stackalloc VkDescriptorSetLayoutBinding[elements.Length];
@@ -117,7 +117,7 @@ namespace Veldrid.Vk
             dslCi.bindingCount = (uint)elements.Length;
             dslCi.pBindings = bindings;
 
-            var result = vkCreateDescriptorSetLayout(this.gd.Device, ref dslCi, null, out dsl);
+            var result = gd.DeviceApi.vkCreateDescriptorSetLayout(ref dslCi, null, out dsl);
             CheckResult(result);
         }
 
@@ -128,7 +128,7 @@ namespace Veldrid.Vk
             if (!disposed)
             {
                 disposed = true;
-                vkDestroyDescriptorSetLayout(gd.Device, dsl, null);
+                gd.DeviceApi.vkDestroyDescriptorSetLayout(dsl, null);
             }
         }
 

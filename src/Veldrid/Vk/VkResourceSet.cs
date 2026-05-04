@@ -179,7 +179,7 @@ namespace Veldrid.Vk
                     }
                 }
 
-                vkUpdateDescriptorSets(this.gd.Device, descriptorWriteCount, descriptorWrites, 0, null);
+                gd.DeviceApi.vkUpdateDescriptorSets(descriptorWriteCount, descriptorWrites, 0, null);
             }
         }
 

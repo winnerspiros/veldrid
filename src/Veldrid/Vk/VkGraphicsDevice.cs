@@ -105,6 +105,12 @@ namespace Veldrid.Vk
         /// </summary>
         internal VkVersion DeviceApiVersion { get; private set; }
 
+        /// <summary>Per-instance Vulkan function pointers (Vortice.Vulkan 3.x style).</summary>
+        public VkInstanceApi InstanceApi { get; private set; }
+
+        /// <summary>Per-device Vulkan function pointers (Vortice.Vulkan 3.x style).</summary>
+        public VkDeviceApi DeviceApi { get; private set; }
+
         public override ResourceFactory ResourceFactory { get; }
         private static readonly FixedUtf8String s_name = "Veldrid-VkGraphicsDevice";
         private static readonly Lazy<bool> s_is_supported = new Lazy<bool>(checkIsSupported, true);
@@ -230,8 +236,7 @@ namespace Veldrid.Vk
         private VkCommandPool graphicsCommandPool;
         private VkQueue graphicsQueue;
         private VkDebugReportCallbackEXT debugCallbackHandle;
-        private bool debugMarkerEnabled;
-        private VkDebugMarkerSetObjectNameExtT setObjectNameDelegate;
+        internal bool debugMarkerEnabled;
         private readonly Stack<SharedCommandPool> sharedGraphicsCommandPools = new Stack<SharedCommandPool>();
         private bool standardValidationSupported;
         private bool khronosValidationSupported;
@@ -265,9 +270,8 @@ namespace Veldrid.Vk
 
             MemoryManager = new VkDeviceMemoryManager(
                 device,
-                physicalDeviceProperties.limits.bufferImageGranularity,
-                GetBufferMemoryRequirements2,
-                GetImageMemoryRequirements2);
+                DeviceApi,
+                physicalDeviceProperties.limits.bufferImageGranularity);
 
             Features = new GraphicsDeviceFeatures(
                 true,
@@ -300,7 +304,7 @@ namespace Veldrid.Vk
             // skip re-compiling matching pipelines. The driver header-validates the blob
             // (vendorID / deviceID / driver UUID) and silently discards on mismatch, so
             // it's always safe to pass through stale data without manual versioning.
-            var pipelineCacheCi = VkPipelineCacheCreateInfo.New();
+            var pipelineCacheCi = new VkPipelineCacheCreateInfo();
             byte[] initialCacheData = vkOptions.PipelineCacheData;
             if (initialCacheData != null && initialCacheData.Length > 0)
             {
@@ -308,13 +312,13 @@ namespace Veldrid.Vk
                 {
                     pipelineCacheCi.initialDataSize = (UIntPtr)initialCacheData.Length;
                     pipelineCacheCi.pInitialData = initialDataPtr;
-                    var cacheResult = vkCreatePipelineCache(device, ref pipelineCacheCi, null, out pipelineCache);
+                    var cacheResult = DeviceApi.vkCreatePipelineCache(&pipelineCacheCi, null, out pipelineCache);
                     CheckResult(cacheResult);
                 }
             }
             else
             {
-                var cacheResult = vkCreatePipelineCache(device, ref pipelineCacheCi, null, out pipelineCache);
+                var cacheResult = DeviceApi.vkCreatePipelineCache(&pipelineCacheCi, null, out pipelineCache);
                 CheckResult(cacheResult);
             }
 
@@ -349,7 +353,7 @@ namespace Veldrid.Vk
             Debug.WriteLine("Enabling Vulkan Debug callbacks.");
             debugCallbackFunc = debugCallback;
             IntPtr debugFunctionPtr = Marshal.GetFunctionPointerForDelegate(debugCallbackFunc);
-            var debugCallbackCi = VkDebugReportCallbackCreateInfoEXT.New();
+            var debugCallbackCi = new VkDebugReportCallbackCreateInfoEXT();
             debugCallbackCi.flags = flags;
             debugCallbackCi.pfnCallback = debugFunctionPtr;
             IntPtr createFnPtr = getInstanceProcAddr("vkCreateDebugReportCallbackEXT"u8);
@@ -364,13 +368,13 @@ namespace Veldrid.Vk
         public VkExtensionProperties[] GetDeviceExtensionProperties()
         {
             uint propertyCount = 0;
-            var result = vkEnumerateDeviceExtensionProperties(PhysicalDevice, (byte*)null, &propertyCount, null);
+            var result = InstanceApi.vkEnumerateDeviceExtensionProperties(PhysicalDevice, null, &propertyCount, null);
             CheckResult(result);
             var props = new VkExtensionProperties[(int)propertyCount];
 
             fixed (VkExtensionProperties* properties = props)
             {
-                result = vkEnumerateDeviceExtensionProperties(PhysicalDevice, (byte*)null, &propertyCount, properties);
+                result = InstanceApi.vkEnumerateDeviceExtensionProperties(PhysicalDevice, null, &propertyCount, properties);
                 CheckResult(result);
             }
 
@@ -382,14 +386,13 @@ namespace Veldrid.Vk
             var usageFlags = VkImageUsageFlags.Sampled;
             usageFlags |= depthFormat ? VkImageUsageFlags.DepthStencilAttachment : VkImageUsageFlags.ColorAttachment;
 
-            vkGetPhysicalDeviceImageFormatProperties(
-                PhysicalDevice,
-                VkFormats.VdToVkPixelFormat(format),
+            VkImageFormatProperties formatProperties;
+            InstanceApi.InstanceApi.vkGetPhysicalDeviceImageFormatProperties(VkFormats.VdToVkPixelFormat(format),
                 VkImageType.Image2D,
                 VkImageTiling.Optimal,
                 usageFlags,
-                VkImageCreateFlags.None,
-                out var formatProperties);
+                0,
+                &formatProperties);
 
             var vkSampleCounts = formatProperties.sampleCounts;
             if ((vkSampleCounts & VkSampleCountFlags.Count32) == VkSampleCountFlags.Count32)
@@ -408,13 +411,13 @@ namespace Veldrid.Vk
         public override void ResetFence(Fence fence)
         {
             var vkFence = Util.AssertSubtype<Fence, VkFence>(fence).DeviceFence;
-            vkResetFences(device, 1, ref vkFence);
+            DeviceApi.vkResetFences(1, &vkFence);
         }
 
         public override bool WaitForFence(Fence fence, ulong nanosecondTimeout)
         {
             var vkFence = Util.AssertSubtype<Fence, VkFence>(fence).DeviceFence;
-            var result = vkWaitForFences(device, 1, ref vkFence, true, nanosecondTimeout);
+            var result = DeviceApi.vkWaitForFences(1, &vkFence, true, nanosecondTimeout);
             return result == VkResult.Success;
         }
 
@@ -424,7 +427,7 @@ namespace Veldrid.Vk
             var fencesPtr = stackalloc Vortice.Vulkan.VkFence[fenceCount];
             for (int i = 0; i < fenceCount; i++) fencesPtr[i] = Util.AssertSubtype<Fence, VkFence>(fences[i]).DeviceFence;
 
-            var result = vkWaitForFences(device, (uint)fenceCount, fencesPtr, waitAll, nanosecondTimeout);
+            var result = DeviceApi.vkWaitForFences((uint)fenceCount, fencesPtr, waitAll, nanosecondTimeout);
             return result == VkResult.Success;
         }
 
@@ -508,7 +511,7 @@ namespace Veldrid.Vk
         {
             if (!filters.TryGetValue(format, out var filter))
             {
-                vkGetPhysicalDeviceFormatProperties(PhysicalDevice, format, out var vkFormatProps);
+                InstanceApi.vkGetPhysicalDeviceFormatProperties(format, out var vkFormatProps);
                 filter = (vkFormatProps.optimalTilingFeatures & VkFormatFeatureFlags.SampledImageFilterLinear) != 0
                     ? VkFilter.Linear
                     : VkFilter.Nearest;
@@ -639,13 +642,13 @@ namespace Veldrid.Vk
             }
 
             if (memoryBlock.DeviceMemory.Handle != 0 && !memoryBlock.IsPersistentMapped)
-                vkUnmapMemory(device, memoryBlock.DeviceMemory);
+                DeviceApi.vkUnmapMemory(memoryBlock.DeviceMemory);
         }
 
         protected override void PlatformDispose()
         {
             Debug.Assert(submittedFences.Count == 0);
-            foreach (var fence in availableSubmissionFences) vkDestroyFence(device, fence, null);
+            foreach (var fence in availableSubmissionFences) DeviceApi.vkDestroyFence(fence, null);
 
             mainSwapchain?.Dispose();
 
@@ -659,10 +662,10 @@ namespace Veldrid.Vk
             }
 
             DescriptorPoolManager.DestroyAll();
-            vkDestroyCommandPool(device, graphicsCommandPool, null);
+            DeviceApi.vkDestroyCommandPool(graphicsCommandPool, null);
 
             if (pipelineCache != VkPipelineCache.Null)
-                vkDestroyPipelineCache(device, pipelineCache, null);
+                DeviceApi.vkDestroyPipelineCache(pipelineCache, null);
 
             Debug.Assert(submittedStagingTextures.Count == 0);
             foreach (var tex in availableStagingTextures) tex.Dispose();
@@ -681,17 +684,17 @@ namespace Veldrid.Vk
 
             MemoryManager.Dispose();
 
-            var result = vkDeviceWaitIdle(device);
+            var result = DeviceApi.vkDeviceWaitIdle();
             CheckResult(result);
-            vkDestroyDevice(device, null);
-            vkDestroyInstance(instance, null);
+            DeviceApi.vkDestroyDevice(null);
+            InstanceApi.vkDestroyInstance(null);
         }
 
         private static bool checkIsSupported()
         {
             if (!IsVulkanLoaded()) return false;
 
-            var instanceCi = VkInstanceCreateInfo.New();
+            var instanceCi = new VkInstanceCreateInfo();
             var applicationInfo = new VkApplicationInfo
             {
                 apiVersion = new VkVersion(1, 0, 0),
@@ -706,16 +709,17 @@ namespace Veldrid.Vk
             var result = vkCreateInstance(ref instanceCi, null, out var testInstance);
             if (result != VkResult.Success) return false;
 
+            var testInstApi = new VkInstanceApi(testInstance);
             uint physicalDeviceCount = 0;
-            result = vkEnumeratePhysicalDevices(testInstance, ref physicalDeviceCount, null);
+            result = testInstApi.vkEnumeratePhysicalDevices(&physicalDeviceCount, null);
 
             if (result != VkResult.Success || physicalDeviceCount == 0)
             {
-                vkDestroyInstance(testInstance, null);
+                testInstApi.vkDestroyInstance(null);
                 return false;
             }
 
-            vkDestroyInstance(testInstance, null);
+            testInstApi.vkDestroyInstance(null);
 
             var instanceExtensions = new HashSet<string>(GetInstanceExtensions());
             if (!instanceExtensions.Contains(CommonStrings.VkKhrSurfaceExtensionName)) return false;
@@ -789,18 +793,18 @@ namespace Veldrid.Vk
                 submissionFence = vkFence;
             }
 
-            if (QueueSubmit2 != null)
+            if (HasSynchronization2)
             {
                 // vkQueueSubmit2 path: per-semaphore pipeline stage masks, no shared
                 // pWaitDstStageMask array. Requires VK_KHR_synchronization2 / Vulkan 1.3.
-                var cbInfo = VkCommandBufferSubmitInfo.New();
+                var cbInfo = new VkCommandBufferSubmitInfo();
                 cbInfo.commandBuffer = vkCb;
                 cbInfo.deviceMask = 0;
 
                 var waitInfos = stackalloc VkSemaphoreSubmitInfo[(int)waitSemaphoreCount];
                 for (uint i = 0; i < waitSemaphoreCount; i++)
                 {
-                    waitInfos[i] = VkSemaphoreSubmitInfo.New();
+                    waitInfos[i] = new VkSemaphoreSubmitInfo();
                     waitInfos[i].semaphore = waitSemaphoresPtr[i];
                     // Mirror the legacy pWaitDstStageMask = ColorAttachmentOutput.
                     waitInfos[i].stageMask = VkPipelineStageFlags2.ColorAttachmentOutput;
@@ -809,12 +813,12 @@ namespace Veldrid.Vk
                 var signalInfos = stackalloc VkSemaphoreSubmitInfo[(int)signalSemaphoreCount];
                 for (uint i = 0; i < signalSemaphoreCount; i++)
                 {
-                    signalInfos[i] = VkSemaphoreSubmitInfo.New();
+                    signalInfos[i] = new VkSemaphoreSubmitInfo();
                     signalInfos[i].semaphore = signalSemaphoresPtr[i];
                     signalInfos[i].stageMask = VkPipelineStageFlags2.AllCommands;
                 }
 
-                var si2 = VkSubmitInfo2.New();
+                var si2 = new VkSubmitInfo2();
                 si2.waitSemaphoreInfoCount = waitSemaphoreCount;
                 si2.pWaitSemaphoreInfos = waitSemaphoreCount > 0 ? waitInfos : null;
                 si2.commandBufferInfoCount = 1;
@@ -824,12 +828,12 @@ namespace Veldrid.Vk
 
                 lock (graphicsQueueLock)
                 {
-                    var result = QueueSubmit2(graphicsQueue, 1, &si2, vkFence);
+                    var result = DeviceApi.vkQueueSubmit2(graphicsQueue, 1, &si2, vkFence);
                     CheckResult(result);
 
                     if (useExtraFence)
                     {
-                        result = QueueSubmit2(graphicsQueue, 0, null, submissionFence);
+                        result = DeviceApi.vkQueueSubmit2(graphicsQueue, 0, null, submissionFence);
                         CheckResult(result);
                     }
                 }
@@ -838,7 +842,7 @@ namespace Veldrid.Vk
             {
                 // Legacy vkQueueSubmit path: single pWaitDstStageMask shared across all
                 // wait semaphores. Used on Vulkan < 1.3 without VK_KHR_synchronization2.
-                var si = VkSubmitInfo.New();
+                var si = new VkSubmitInfo();
                 si.commandBufferCount = 1;
                 si.pCommandBuffers = &vkCb;
                 var waitDstStageMask = VkPipelineStageFlags.ColorAttachmentOutput;
@@ -876,14 +880,14 @@ namespace Veldrid.Vk
                 // Quick-check the oldest fence first; if it's not ready, none after it will be.
                 // vkGetFenceStatus is a non-blocking status query and is cheaper than vkWaitForFences(timeout=0)
                 // on drivers that treat the wait path differently.
-                if (vkGetFenceStatus(device, submittedFences[0].Fence) != VkResult.Success)
+                if (DeviceApi.vkGetFenceStatus(submittedFences[0].Fence) != VkResult.Success)
                     return;
 
                 for (int i = 0; i < submittedFences.Count; i++)
                 {
                     var fsi = submittedFences[i];
 
-                    if (vkGetFenceStatus(device, fsi.Fence) == VkResult.Success)
+                    if (DeviceApi.vkGetFenceStatus(fsi.Fence) == VkResult.Success)
                     {
                         completeFenceSubmission(fsi);
                         submittedFences.RemoveAt(i);
@@ -900,7 +904,7 @@ namespace Veldrid.Vk
             var fence = fsi.Fence;
             var completedCb = fsi.CommandBuffer;
             fsi.CommandList?.CommandBufferCompleted(completedCb);
-            var resetResult = vkResetFences(device, 1, ref fence);
+            var resetResult = DeviceApi.vkResetFences(1, &fence);
             CheckResult(resetResult);
             returnSubmissionFence(fence);
 
@@ -940,17 +944,17 @@ namespace Veldrid.Vk
             if (availableSubmissionFences.TryDequeue(out var availableFence))
                 return availableFence;
 
-            var fenceCi = VkFenceCreateInfo.New();
-            var result = vkCreateFence(device, ref fenceCi, null, out var newFence);
+            var fenceCi = new VkFenceCreateInfo();
+            var result = DeviceApi.vkCreateFence(ref fenceCi, null, out var newFence);
             CheckResult(result);
             return newFence;
         }
 
         private void setDebugMarkerName(VkDebugReportObjectTypeEXT type, ulong target, string name)
         {
-            Debug.Assert(setObjectNameDelegate != null);
+            Debug.Assert(debugMarkerEnabled);
 
-            var nameInfo = VkDebugMarkerObjectNameInfoEXT.New();
+            var nameInfo = new VkDebugMarkerObjectNameInfoEXT();
             nameInfo.objectType = type;
             nameInfo.@object = target;
 
@@ -960,7 +964,7 @@ namespace Veldrid.Vk
             utf8Ptr[byteCount] = 0;
 
             nameInfo.pObjectName = utf8Ptr;
-            var result = setObjectNameDelegate(device, &nameInfo);
+            var result = DeviceApi.vkDebugMarkerSetObjectNameEXT(&nameInfo);
             CheckResult(result);
         }
 
@@ -969,7 +973,7 @@ namespace Veldrid.Vk
             var availableInstanceLayers = new HashSet<string>(EnumerateInstanceLayers());
             var availableInstanceExtensions = new HashSet<string>(GetInstanceExtensions());
 
-            var instanceCi = VkInstanceCreateInfo.New();
+            var instanceCi = new VkInstanceCreateInfo();
 
             // Query the highest supported Vulkan instance version.
             // vkEnumerateInstanceVersion is a Vulkan 1.1 function; if absent we fall back to 1.0.
@@ -1102,24 +1106,9 @@ namespace Veldrid.Vk
 
             var result = vkCreateInstance(ref instanceCi, null, out instance);
             CheckResult(result);
-
-            if (HasSurfaceExtension(CommonStrings.VkExtMetalSurfaceExtensionName)) CreateMetalSurfaceExt = getInstanceProcAddr<VkCreateMetalSurfaceExtT>("vkCreateMetalSurfaceEXT"u8);
+            InstanceApi = new VkInstanceApi(instance);
 
             if (debug && debugReportExtensionAvailable) EnableDebugCallback();
-
-            if (hasDeviceProperties2)
-            {
-                getPhysicalDeviceProperties2 = getInstanceProcAddr<VkGetPhysicalDeviceProperties2T>("vkGetPhysicalDeviceProperties2"u8)
-                                               ?? getInstanceProcAddr<VkGetPhysicalDeviceProperties2T>("vkGetPhysicalDeviceProperties2KHR"u8);
-            }
-
-            // Load vkGetPhysicalDeviceSurfaceCapabilities2KHR for VK_EXT_surface_maintenance1
-            // queries. Required before we can validate VK_EXT_swapchain_maintenance1 below.
-            if (hasSurfaceMaintenance1)
-            {
-                GetPhysicalDeviceSurfaceCapabilities2 =
-                    getInstanceProcAddr<VkGetPhysicalDeviceSurfaceCapabilities2KhrT>("vkGetPhysicalDeviceSurfaceCapabilities2KHR"u8);
-            }
 
             foreach (var tempStr in tempStrings) tempStr.Dispose();
         }
@@ -1152,18 +1141,20 @@ namespace Veldrid.Vk
         private void createPhysicalDevice()
         {
             uint deviceCount = 0;
-            vkEnumeratePhysicalDevices(instance, ref deviceCount, null);
+            InstanceApi.vkEnumeratePhysicalDevices(&deviceCount, null);
             if (deviceCount == 0) throw new InvalidOperationException("No physical devices exist.");
 
             var physicalDevices = new VkPhysicalDevice[deviceCount];
-            vkEnumeratePhysicalDevices(instance, ref deviceCount, ref physicalDevices[0]);
+            fixed (VkPhysicalDevice* pdPtr = physicalDevices)
+                InstanceApi.vkEnumeratePhysicalDevices(&deviceCount, pdPtr);
 
             // Prefer discrete GPU over integrated/virtual/CPU, falling back to the first device.
             PhysicalDevice = physicalDevices[0];
 
             for (int i = 0; i < physicalDevices.Length; i++)
             {
-                vkGetPhysicalDeviceProperties(physicalDevices[i], out var props);
+                VkPhysicalDeviceProperties props;
+                InstanceApi.vkGetPhysicalDeviceProperties(physicalDevices[i], &props);
 
                 if (props.deviceType == VkPhysicalDeviceType.DiscreteGpu)
                 {
@@ -1178,17 +1169,17 @@ namespace Veldrid.Vk
                 }
             }
 
-            vkGetPhysicalDeviceProperties(PhysicalDevice, out physicalDeviceProperties);
-            fixed (byte* utf8NamePtr = physicalDeviceProperties.deviceName) deviceName = Encoding.UTF8.GetString(utf8NamePtr, (int)MaxPhysicalDeviceNameSize).TrimEnd('\0');
+            InstanceApi.vkGetPhysicalDeviceProperties(PhysicalDevice, &physicalDeviceProperties);
+            fixed (byte* utf8NamePtr = physicalDeviceProperties.deviceName)
+                deviceName = Encoding.UTF8.GetString(utf8NamePtr, physicalDeviceProperties.deviceName.Length).TrimEnd('\0');
 
             DeviceApiVersion = VkVersion.FromPacked(physicalDeviceProperties.apiVersion);
             vendorName = $"id:{physicalDeviceProperties.vendorID:x8}";
             apiVersion = new GraphicsApiVersion((int)DeviceApiVersion.Major, (int)DeviceApiVersion.Minor, 0, (int)DeviceApiVersion.Patch);
             DriverInfo = $"version:{physicalDeviceProperties.driverVersion:x8}";
 
-            vkGetPhysicalDeviceFeatures(PhysicalDevice, out physicalDeviceFeatures);
-
-            vkGetPhysicalDeviceMemoryProperties(PhysicalDevice, out physicalDeviceMemProperties);
+            InstanceApi.vkGetPhysicalDeviceFeatures(PhysicalDevice, &physicalDeviceFeatures);
+            InstanceApi.vkGetPhysicalDeviceMemoryProperties(PhysicalDevice, &physicalDeviceMemProperties);
         }
 
         private void createLogicalDevice(VkSurfaceKHR surface, bool preferStandardClipY, VulkanDeviceOptions options)
@@ -1203,7 +1194,7 @@ namespace Veldrid.Vk
 
             foreach (uint queueFamilyIndex in familyIndices)
             {
-                var queueCreateInfo = VkDeviceQueueCreateInfo.New();
+                var queueCreateInfo = new VkDeviceQueueCreateInfo();
                 queueCreateInfo.queueFamilyIndex = queueFamilyIndex;
                 queueCreateInfo.queueCount = 1;
                 float priority = 1f;
@@ -1338,7 +1329,7 @@ namespace Veldrid.Vk
                     // would have nothing valid to chain.
                     else if ((extensionName == "VK_EXT_swapchain_maintenance1"
                               || extensionName == "VK_KHR_swapchain_maintenance1")
-                             && GetPhysicalDeviceSurfaceCapabilities2 != null)
+                             && HasSurfaceExtension(CommonStrings.VkKhrGetSurfaceCapabilities2))
                     {
                         activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
                         requiredInstanceExtensions.Remove(extensionName);
@@ -1384,7 +1375,7 @@ namespace Veldrid.Vk
                     $"The following Vulkan device extensions were not available: {missingList}");
             }
 
-            var deviceCreateInfo = VkDeviceCreateInfo.New();
+            var deviceCreateInfo = new VkDeviceCreateInfo();
             deviceCreateInfo.queueCreateInfoCount = queueCreateInfosCount;
             deviceCreateInfo.pQueueCreateInfos = queueCreateInfos;
 
@@ -1401,7 +1392,7 @@ namespace Veldrid.Vk
 
             if (hasDynamicRendering)
             {
-                dynamicRenderingFeatures = VkPhysicalDeviceDynamicRenderingFeatures.New();
+                dynamicRenderingFeatures = new VkPhysicalDeviceDynamicRenderingFeatures();
                 dynamicRenderingFeatures.dynamicRendering = true;
                 dynamicRenderingFeatures.pNext = deviceCreateInfo.pNext;
                 deviceCreateInfo.pNext = &dynamicRenderingFeatures;
@@ -1409,7 +1400,7 @@ namespace Veldrid.Vk
 
             if (hasHostImageCopy)
             {
-                hostImageCopyFeatures = VkPhysicalDeviceHostImageCopyFeatures.New();
+                hostImageCopyFeatures = new VkPhysicalDeviceHostImageCopyFeatures();
                 hostImageCopyFeatures.hostImageCopy = true;
                 hostImageCopyFeatures.pNext = deviceCreateInfo.pNext;
                 deviceCreateInfo.pNext = &hostImageCopyFeatures;
@@ -1417,7 +1408,7 @@ namespace Veldrid.Vk
 
             if (hasSwapchainMaintenance1)
             {
-                swapchainMaintenance1Features = VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR.New();
+                swapchainMaintenance1Features = new VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR();
                 swapchainMaintenance1Features.swapchainMaintenance1 = true;
                 swapchainMaintenance1Features.pNext = deviceCreateInfo.pNext;
                 deviceCreateInfo.pNext = &swapchainMaintenance1Features;
@@ -1425,7 +1416,7 @@ namespace Veldrid.Vk
 
             if (hasSynchronization2)
             {
-                synchronization2Features = VkPhysicalDeviceSynchronization2Features.New();
+                synchronization2Features = new VkPhysicalDeviceSynchronization2Features();
                 synchronization2Features.synchronization2 = true;
                 synchronization2Features.pNext = deviceCreateInfo.pNext;
                 deviceCreateInfo.pNext = &synchronization2Features;
@@ -1433,7 +1424,7 @@ namespace Veldrid.Vk
 
             if (hasTimelineSemaphore)
             {
-                timelineSemaphoreFeatures = VkPhysicalDeviceTimelineSemaphoreFeatures.New();
+                timelineSemaphoreFeatures = new VkPhysicalDeviceTimelineSemaphoreFeatures();
                 timelineSemaphoreFeatures.timelineSemaphore = true;
                 timelineSemaphoreFeatures.pNext = deviceCreateInfo.pNext;
                 deviceCreateInfo.pNext = &timelineSemaphoreFeatures;
@@ -1441,7 +1432,7 @@ namespace Veldrid.Vk
 
             if (hasPipelineCreationCacheControl)
             {
-                pipelineCreationCacheControlFeatures = VkPhysicalDevicePipelineCreationCacheControlFeatures.New();
+                pipelineCreationCacheControlFeatures = new VkPhysicalDevicePipelineCreationCacheControlFeatures();
                 pipelineCreationCacheControlFeatures.pipelineCreationCacheControl = true;
                 pipelineCreationCacheControlFeatures.pNext = deviceCreateInfo.pNext;
                 deviceCreateInfo.pNext = &pipelineCreationCacheControlFeatures;
@@ -1453,7 +1444,7 @@ namespace Veldrid.Vk
             // (pc = 0x0, SIGSEGV on the draw thread).
             if (hasFragmentShadingRate)
             {
-                fragmentShadingRateFeatures = VkPhysicalDeviceFragmentShadingRateFeaturesKHR.New();
+                fragmentShadingRateFeatures = new VkPhysicalDeviceFragmentShadingRateFeaturesKHR();
                 fragmentShadingRateFeatures.pipelineFragmentShadingRate = true;
                 fragmentShadingRateFeatures.pNext = deviceCreateInfo.pNext;
                 deviceCreateInfo.pNext = &fragmentShadingRateFeatures;
@@ -1471,48 +1462,28 @@ namespace Veldrid.Vk
                 deviceCreateInfo.enabledExtensionCount = activeExtensionCount;
                 deviceCreateInfo.ppEnabledExtensionNames = (byte**)activeExtensionsPtr;
 
-                var result = vkCreateDevice(PhysicalDevice, ref deviceCreateInfo, null, out device);
+                var result = InstanceApi.vkCreateDevice(PhysicalDevice, &deviceCreateInfo, null, &device);
                 CheckResult(result);
             }
 
-            vkGetDeviceQueue(device, GraphicsQueueIndex, 0, out graphicsQueue);
+            DeviceApi = new VkDeviceApi(InstanceApi, device);
 
-            if (debugMarkerEnabled)
             {
-                setObjectNameDelegate = Marshal.GetDelegateForFunctionPointer<VkDebugMarkerSetObjectNameExtT>(
-                    getInstanceProcAddr("vkDebugMarkerSetObjectNameEXT"u8));
-                MarkerBegin = Marshal.GetDelegateForFunctionPointer<VkCmdDebugMarkerBeginExtT>(
-                    getInstanceProcAddr("vkCmdDebugMarkerBeginEXT"u8));
-                MarkerEnd = Marshal.GetDelegateForFunctionPointer<VkCmdDebugMarkerEndExtT>(
-                    getInstanceProcAddr("vkCmdDebugMarkerEndEXT"u8));
-                MarkerInsert = Marshal.GetDelegateForFunctionPointer<VkCmdDebugMarkerInsertExtT>(
-                    getInstanceProcAddr("vkCmdDebugMarkerInsertEXT"u8));
+                VkQueue q;
+                DeviceApi.vkGetDeviceQueue(GraphicsQueueIndex, 0, &q);
+                graphicsQueue = q;
             }
 
-            if (hasDedicatedAllocation && hasMemReqs2)
-            {
-                // On Vulkan 1.1+ the core entry points are available directly.
-                if (DeviceApiVersion.IsAtLeast(1, 1))
-                {
-                    GetBufferMemoryRequirements2 = getDeviceProcAddr<VkGetBufferMemoryRequirements2T>("vkGetBufferMemoryRequirements2"u8);
-                    GetImageMemoryRequirements2 = getDeviceProcAddr<VkGetImageMemoryRequirements2T>("vkGetImageMemoryRequirements2"u8);
-                }
-                else
-                {
-                    GetBufferMemoryRequirements2 = getDeviceProcAddr<VkGetBufferMemoryRequirements2T>("vkGetBufferMemoryRequirements2"u8)
-                                                   ?? getDeviceProcAddr<VkGetBufferMemoryRequirements2T>("vkGetBufferMemoryRequirements2KHR"u8);
-                    GetImageMemoryRequirements2 = getDeviceProcAddr<VkGetImageMemoryRequirements2T>("vkGetImageMemoryRequirements2"u8)
-                                                  ?? getDeviceProcAddr<VkGetImageMemoryRequirements2T>("vkGetImageMemoryRequirements2KHR"u8);
-                }
-            }
+            // DeviceApi is initialized above; debug-marker functions are accessed via DeviceApi directly.
+            // VkDeviceMemoryRequirements2 functions are accessed via DeviceApi (no delegate loading needed).
 
-            if (getPhysicalDeviceProperties2 != null && hasDriverProperties)
+            if (hasDriverProperties)
             {
-                var deviceProps = VkPhysicalDeviceProperties2.New();
-                var driverProps = VkPhysicalDeviceDriverProperties.New();
+                var deviceProps = new VkPhysicalDeviceProperties2();
+                var driverProps = new VkPhysicalDeviceDriverProperties();
 
                 deviceProps.pNext = &driverProps;
-                getPhysicalDeviceProperties2(PhysicalDevice, &deviceProps);
+                InstanceApi.vkGetPhysicalDeviceProperties2(PhysicalDevice, &deviceProps);
 
                 string driverName = Encoding.UTF8.GetString(
                     driverProps.DriverName, VkPhysicalDeviceDriverProperties.DRIVER_NAME_LENGTH).TrimEnd('\0');
@@ -1527,48 +1498,25 @@ namespace Veldrid.Vk
             }
 
             // VK_KHR_push_descriptor: query maxPushDescriptors.
-            if (hasPushDescriptors && getPhysicalDeviceProperties2 != null)
+            if (hasPushDescriptors)
             {
-                var deviceProps2 = VkPhysicalDeviceProperties2.New();
-                var pushDescProps = VkPhysicalDevicePushDescriptorProperties.New();
+                var deviceProps2 = new VkPhysicalDeviceProperties2();
+                var pushDescProps = new VkPhysicalDevicePushDescriptorProperties();
                 deviceProps2.pNext = &pushDescProps;
-                getPhysicalDeviceProperties2(PhysicalDevice, &deviceProps2);
+                InstanceApi.vkGetPhysicalDeviceProperties2(PhysicalDevice, &deviceProps2);
                 MaxPushDescriptors = pushDescProps.maxPushDescriptors;
-
-                // Load via getDeviceProcAddr so it works on Android — libvulkan.so does NOT
-                // export device extension functions via dlsym; ppy.Vk's VulkanNative.vkCmdPushDescriptorSetKHR
-                // loads via dlsym and returns IntPtr.Zero on Android, causing SIGSEGV PC=0 on the draw thread.
-                CmdPushDescriptorSet = getDeviceProcAddr<VkCmdPushDescriptorSetKHRT>("vkCmdPushDescriptorSetKHR"u8);
-                HasPushDescriptors = CmdPushDescriptorSet != null && MaxPushDescriptors > 0;
+                // CmdPushDescriptorSetKHR is accessed via DeviceApi.vkCmdPushDescriptorSetKHR.
+                HasPushDescriptors = MaxPushDescriptors > 0;
             }
 
-            // VK_KHR_dynamic_rendering: load function pointers.
-            if (hasDynamicRendering)
-            {
-                if (DeviceApiVersion.IsAtLeast(1, 3))
-                {
-                    CmdBeginRendering = getDeviceProcAddr<VkCmdBeginRenderingT>("vkCmdBeginRendering"u8);
-                    CmdEndRendering = getDeviceProcAddr<VkCmdEndRenderingT>("vkCmdEndRendering"u8);
-                }
-                else
-                {
-                    CmdBeginRendering = getDeviceProcAddr<VkCmdBeginRenderingT>("vkCmdBeginRendering"u8)
-                                        ?? getDeviceProcAddr<VkCmdBeginRenderingT>("vkCmdBeginRenderingKHR"u8);
-                    CmdEndRendering = getDeviceProcAddr<VkCmdEndRenderingT>("vkCmdEndRendering"u8)
-                                      ?? getDeviceProcAddr<VkCmdEndRenderingT>("vkCmdEndRenderingKHR"u8);
-                }
-
-                HasDynamicRendering = CmdBeginRendering != null && CmdEndRendering != null;
-            }
+            // VK_KHR_dynamic_rendering: always available via DeviceApi when extension/core feature loaded.
+            HasDynamicRendering = hasDynamicRendering;
 
             HasMemoryBudget = hasMemoryBudget;
 
             // VK_EXT_host_image_copy: load function pointers.
             if (hasHostImageCopy)
-            {
-                CopyMemoryToImageExt = getDeviceProcAddr<VkCopyMemoryToImageExtT>("vkCopyMemoryToImageEXT"u8);
-                TransitionImageLayoutExt = getDeviceProcAddr<VkTransitionImageLayoutExtT>("vkTransitionImageLayoutEXT"u8);
-                HasHostImageCopy = CopyMemoryToImageExt != null && TransitionImageLayoutExt != null;
+            {                HasHostImageCopy = true;
             }
 
             // VK_EXT_descriptor_indexing: detection only (core in Vulkan 1.2).
@@ -1577,16 +1525,12 @@ namespace Veldrid.Vk
 
             // VK_KHR_fragment_shading_rate: load function pointer for per-draw VRS.
             if (hasFragmentShadingRate)
-            {
-                CmdSetFragmentShadingRate = getDeviceProcAddr<VkCmdSetFragmentShadingRateT>("vkCmdSetFragmentShadingRateKHR"u8);
-                HasFragmentShadingRate = CmdSetFragmentShadingRate != null;
+            {                HasFragmentShadingRate = true;
             }
 
             // VK_EXT_mesh_shader: load function pointer for mesh shader dispatch.
             if (hasMeshShader)
-            {
-                CmdDrawMeshTasksExt = getDeviceProcAddr<VkCmdDrawMeshTasksExtT>("vkCmdDrawMeshTasksEXT"u8);
-                HasMeshShader = CmdDrawMeshTasksExt != null;
+            {                HasMeshShader = true;
             }
 
             // VK_EXT_swapchain_maintenance1: no device function pointers required by
@@ -1598,10 +1542,7 @@ namespace Veldrid.Vk
             // the KHR entry point for 1.2 drivers that expose only the extension form.
             HasSynchronization2 = hasSynchronization2;
             if (hasSynchronization2)
-            {
-                QueueSubmit2 = getDeviceProcAddr<VkQueueSubmit2T>("vkQueueSubmit2"u8)
-                               ?? getDeviceProcAddr<VkQueueSubmit2T>("vkQueueSubmit2KHR"u8);
-            }
+            {            }
 
             HasTimelineSemaphore = hasTimelineSemaphore;
 
@@ -1610,13 +1551,7 @@ namespace Veldrid.Vk
             // VK_GOOGLE_display_timing: load function pointers used by VkSwapchain to
             // query the display refresh cadence and schedule per-present vblank targets.
             if (hasDisplayTiming)
-            {
-                GetRefreshCycleDurationGOOGLE =
-                    getDeviceProcAddr<VkGetRefreshCycleDurationGOOGLET>("vkGetRefreshCycleDurationGOOGLE"u8);
-                GetPastPresentationTimingGOOGLE =
-                    getDeviceProcAddr<VkGetPastPresentationTimingGOOGLET>("vkGetPastPresentationTimingGOOGLE"u8);
-                HasDisplayTiming = GetRefreshCycleDurationGOOGLE != null
-                                   && GetPastPresentationTimingGOOGLE != null;
+            {                HasDisplayTiming = true;
             }
         }
 
@@ -1691,9 +1626,9 @@ namespace Veldrid.Vk
         private void getQueueFamilyIndices(VkSurfaceKHR surface)
         {
             uint queueFamilyCount = 0;
-            vkGetPhysicalDeviceQueueFamilyProperties(PhysicalDevice, ref queueFamilyCount, null);
+            InstanceApi.vkGetPhysicalDeviceQueueFamilyProperties(ref queueFamilyCount, null);
             var qfp = new VkQueueFamilyProperties[queueFamilyCount];
-            vkGetPhysicalDeviceQueueFamilyProperties(PhysicalDevice, ref queueFamilyCount, out qfp[0]);
+            InstanceApi.vkGetPhysicalDeviceQueueFamilyProperties(ref queueFamilyCount, out qfp[0]);
 
             bool foundGraphics = false;
             bool foundPresent = surface == VkSurfaceKHR.Null;
@@ -1708,7 +1643,7 @@ namespace Veldrid.Vk
 
                 if (!foundPresent)
                 {
-                    vkGetPhysicalDeviceSurfaceSupportKHR(PhysicalDevice, i, surface, out var presentSupported);
+                    InstanceApi.vkGetPhysicalDeviceSurfaceSupportKHR(i, surface, out var presentSupported);
 
                     if (presentSupported)
                     {
@@ -1728,10 +1663,10 @@ namespace Veldrid.Vk
 
         private void createGraphicsCommandPool()
         {
-            var commandPoolCi = VkCommandPoolCreateInfo.New();
+            var commandPoolCi = new VkCommandPoolCreateInfo();
             commandPoolCi.flags = VkCommandPoolCreateFlags.ResetCommandBuffer;
             commandPoolCi.queueFamilyIndex = GraphicsQueueIndex;
-            var result = vkCreateCommandPool(device, ref commandPoolCi, null, out graphicsCommandPool);
+            var result = DeviceApi.vkCreateCommandPool(ref commandPoolCi, null, out graphicsCommandPool);
             CheckResult(result);
         }
 
@@ -1835,7 +1770,7 @@ namespace Veldrid.Vk
             }
 
             var deviceSwapchain = vkSc.DeviceSwapchain;
-            var presentInfo = VkPresentInfoKHR.New();
+            var presentInfo = new VkPresentInfoKHR();
             presentInfo.swapchainCount = 1;
             presentInfo.pSwapchains = &deviceSwapchain;
             uint imageIndex = vkSc.ImageIndex;
@@ -1850,7 +1785,7 @@ namespace Veldrid.Vk
             if (HasSwapchainMaintenance1 && vkSc.HasPresentModeHotSwap)
             {
                 currentMode = vkSc.CurrentPresentMode;
-                presentModeInfo = VkSwapchainPresentModeInfoKHR.New();
+                presentModeInfo = new VkSwapchainPresentModeInfoKHR();
                 presentModeInfo.swapchainCount = 1;
                 presentModeInfo.pPresentModes = &currentMode;
                 presentInfo.pNext = &presentModeInfo;
@@ -1870,7 +1805,7 @@ namespace Veldrid.Vk
                     presentID = vkSc.NextPresentID,
                     desiredPresentTime = vkSc.GetDesiredPresentTime()
                 };
-                presentTimesInfo = VkPresentTimesInfoGOOGLE.New();
+                presentTimesInfo = new VkPresentTimesInfoGOOGLE();
                 presentTimesInfo.swapchainCount = 1;
                 presentTimesInfo.pTimes = &presentTime;
                 // Append after any existing pNext chain (e.g. maintenance1 mode info).
@@ -1975,9 +1910,7 @@ namespace Veldrid.Vk
             var tiling = usage == TextureUsage.Staging ? VkImageTiling.Linear : VkImageTiling.Optimal;
             var vkUsage = VkFormats.VdToVkTextureUsage(usage);
 
-            var result = vkGetPhysicalDeviceImageFormatProperties(
-                PhysicalDevice,
-                vkFormat,
+            var result = InstanceApi.vkGetPhysicalDeviceImageFormatProperties(vkFormat,
                 vkType,
                 tiling,
                 vkUsage,
@@ -2118,15 +2051,15 @@ namespace Veldrid.Vk
 
             // Transition to TransferDstOptimal for the host copy.
             var oldLayout = vkTex.GetImageLayout(mipLevel, arrayLayer);
-            var transitionToTransfer = VkHostImageLayoutTransitionInfo.New();
+            var transitionToTransfer = new VkHostImageLayoutTransitionInfo();
             transitionToTransfer.image = vkTex.OptimalDeviceImage;
             transitionToTransfer.oldLayout = oldLayout;
             transitionToTransfer.newLayout = VkImageLayout.TransferDstOptimal;
             transitionToTransfer.subresourceRange = new VkImageSubresourceRange(aspectMask, mipLevel, 1, arrayLayer, 1);
-            var tResult = TransitionImageLayoutExt(device, 1, &transitionToTransfer);
+            var tResult = DeviceApi.vkTransitionImageLayoutEXT( 1, &transitionToTransfer);
             VulkanUtil.CheckResult(tResult);
 
-            var region = VkMemoryToImageCopy.New();
+            var region = new VkMemoryToImageCopy();
             region.pHostPointer = source.ToPointer();
             region.imageSubresource.aspectMask = aspectMask;
             region.imageSubresource.mipLevel = mipLevel;
@@ -2139,22 +2072,22 @@ namespace Veldrid.Vk
             region.imageExtent.height = height;
             region.imageExtent.depth = depth;
 
-            var copyInfo = VkCopyMemoryToImageInfo.New();
+            var copyInfo = new VkCopyMemoryToImageInfo();
             copyInfo.dstImage = vkTex.OptimalDeviceImage;
             copyInfo.dstImageLayout = VkImageLayout.TransferDstOptimal;
             copyInfo.regionCount = 1;
             copyInfo.pRegions = &region;
 
-            var cResult = CopyMemoryToImageExt(device, &copyInfo);
+            var cResult = DeviceApi.vkCopyMemoryToImageEXT( &copyInfo);
             VulkanUtil.CheckResult(cResult);
 
             // Transition back to the layout the image was in before.
-            var transitionBack = VkHostImageLayoutTransitionInfo.New();
+            var transitionBack = new VkHostImageLayoutTransitionInfo();
             transitionBack.image = vkTex.OptimalDeviceImage;
             transitionBack.oldLayout = VkImageLayout.TransferDstOptimal;
             transitionBack.newLayout = oldLayout;
             transitionBack.subresourceRange = new VkImageSubresourceRange(aspectMask, mipLevel, 1, arrayLayer, 1);
-            tResult = TransitionImageLayoutExt(device, 1, &transitionBack);
+            tResult = DeviceApi.vkTransitionImageLayoutEXT( 1, &transitionBack);
             VulkanUtil.CheckResult(tResult);
         }
 
@@ -2170,23 +2103,23 @@ namespace Veldrid.Vk
                 this.gd = gd;
                 IsCached = isCached;
 
-                var commandPoolCi = VkCommandPoolCreateInfo.New();
+                var commandPoolCi = new VkCommandPoolCreateInfo();
                 commandPoolCi.flags = VkCommandPoolCreateFlags.Transient | VkCommandPoolCreateFlags.ResetCommandBuffer;
                 commandPoolCi.queueFamilyIndex = this.gd.GraphicsQueueIndex;
-                var result = vkCreateCommandPool(this.gd.Device, ref commandPoolCi, null, out pool);
+                var result = DeviceApi.vkCreateCommandPool(ref commandPoolCi, null, out pool);
                 CheckResult(result);
 
-                var allocateInfo = VkCommandBufferAllocateInfo.New();
+                var allocateInfo = new VkCommandBufferAllocateInfo();
                 allocateInfo.commandBufferCount = 1;
                 allocateInfo.level = VkCommandBufferLevel.Primary;
                 allocateInfo.commandPool = pool;
-                result = vkAllocateCommandBuffers(this.gd.Device, ref allocateInfo, out cb);
+                result = DeviceApi.vkAllocateCommandBuffers(ref allocateInfo, out cb);
                 CheckResult(result);
             }
 
             public VkCommandBuffer BeginNewCommandBuffer()
             {
-                var beginInfo = VkCommandBufferBeginInfo.New();
+                var beginInfo = new VkCommandBufferBeginInfo();
                 beginInfo.flags = VkCommandBufferUsageFlags.OneTimeSubmit;
                 var result = vkBeginCommandBuffer(cb, ref beginInfo);
                 CheckResult(result);
@@ -2204,7 +2137,7 @@ namespace Veldrid.Vk
 
             internal void Destroy()
             {
-                vkDestroyCommandPool(gd.Device, pool, null);
+                DeviceApi.vkDestroyCommandPool(pool, null);
             }
         }
 

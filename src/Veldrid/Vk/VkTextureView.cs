@@ -31,7 +31,7 @@ namespace Veldrid.Vk
             : base(ref description)
         {
             this.gd = gd;
-            var imageViewCi = VkImageViewCreateInfo.New();
+            var imageViewCi = new VkImageViewCreateInfo();
             var tex = Util.AssertSubtype<Texture, VkTexture>(description.Target);
             imageViewCi.image = tex.OptimalDeviceImage;
             imageViewCi.format = VkFormats.VdToVkPixelFormat(Format, (Target.Usage & TextureUsage.DepthStencil) != 0);
@@ -74,7 +74,7 @@ namespace Veldrid.Vk
                 }
             }
 
-            vkCreateImageView(this.gd.Device, ref imageViewCi, null, out imageView);
+            gd.DeviceApi.vkCreateImageView(ref imageViewCi, null, out imageView);
             RefCount = new ResourceRefCount(disposeCore);
         }
 
@@ -92,7 +92,7 @@ namespace Veldrid.Vk
             if (!destroyed)
             {
                 destroyed = true;
-                vkDestroyImageView(gd.Device, ImageView, null);
+                gd.DeviceApi.vkDestroyImageView(ImageView, null);
             }
         }
     }

@@ -51,7 +51,7 @@ namespace Veldrid.Vk
                 borderColor = VkFormats.VdToVkSamplerBorderColor(description.BorderColor)
             };
 
-            vkCreateSampler(this.gd.Device, ref samplerCi, null, out sampler);
+            gd.DeviceApi.vkCreateSampler(ref samplerCi, null, out sampler);
             RefCount = new ResourceRefCount(disposeCore);
         }
 
@@ -68,7 +68,7 @@ namespace Veldrid.Vk
         {
             if (!disposed)
             {
-                vkDestroySampler(gd.Device, sampler, null);
+                gd.DeviceApi.vkDestroySampler(sampler, null);
                 disposed = true;
             }
         }

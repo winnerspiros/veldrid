@@ -89,10 +89,10 @@ namespace Veldrid.Vk
             : base(ref description, gd.Features, gd.UniformBufferMinOffsetAlignment, gd.StructuredBufferMinOffsetAlignment)
         {
             this.gd = gd;
-            var poolCi = VkCommandPoolCreateInfo.New();
+            var poolCi = new VkCommandPoolCreateInfo();
             poolCi.flags = VkCommandPoolCreateFlags.ResetCommandBuffer;
             poolCi.queueFamilyIndex = gd.GraphicsQueueIndex;
-            var result = vkCreateCommandPool(this.gd.Device, ref poolCi, null, out pool);
+            var result = gd.DeviceApi.vkCreateCommandPool(ref poolCi, null, out pool);
             CheckResult(result);
 
             CommandBuffer = getNextCommandBuffer();
@@ -163,7 +163,7 @@ namespace Veldrid.Vk
 
             currentStagingInfo = getStagingResourceInfo();
 
-            var beginInfo = VkCommandBufferBeginInfo.New();
+            var beginInfo = new VkCommandBufferBeginInfo();
             beginInfo.flags = VkCommandBufferUsageFlags.OneTimeSubmit;
             vkBeginCommandBuffer(CommandBuffer, ref beginInfo);
             commandBufferBegun = true;
@@ -764,11 +764,11 @@ namespace Veldrid.Vk
                 }
             }
 
-            var cbAi = VkCommandBufferAllocateInfo.New();
+            var cbAi = new VkCommandBufferAllocateInfo();
             cbAi.commandPool = pool;
             cbAi.commandBufferCount = 1;
             cbAi.level = VkCommandBufferLevel.Primary;
-            var result = vkAllocateCommandBuffers(gd.Device, ref cbAi, out var cb);
+            var result = gd.DeviceApi.vkAllocateCommandBuffers(ref cbAi, out var cb);
             CheckResult(result);
             return cb;
         }
@@ -1041,7 +1041,7 @@ namespace Veldrid.Vk
                     }
                 }
 
-                gd.CmdPushDescriptorSet(
+                gd.DeviceApi.vkCmdPushDescriptorSetKHR(
                     CommandBuffer,
                     bindPoint,
                     pipelineLayout,
@@ -1116,7 +1116,7 @@ namespace Veldrid.Vk
                     haveAnyClearValues = true;
             }
 
-            var renderPassBi = VkRenderPassBeginInfo.New();
+            var renderPassBi = new VkRenderPassBeginInfo();
             renderPassBi.renderArea = new VkRect2D(currentFramebuffer.RenderableWidth, currentFramebuffer.RenderableHeight);
             renderPassBi.framebuffer = currentFramebuffer.CurrentFramebuffer;
 
@@ -1307,7 +1307,7 @@ namespace Veldrid.Vk
 
             for (int i = 0; i < colorCount; i++)
             {
-                colorAttachments[i] = VkRenderingAttachmentInfo.New();
+                colorAttachments[i] = new VkRenderingAttachmentInfo();
                 colorAttachments[i].imageView = colorViews[i];
                 colorAttachments[i].imageLayout = VkImageLayout.ColorAttachmentOptimal;
                 colorAttachments[i].resolveMode = VkResolveModeFlags.None;
@@ -1359,7 +1359,7 @@ namespace Veldrid.Vk
                     haveAllClearValues = false;
             }
 
-            var renderingInfo = VkRenderingInfo.New();
+            var renderingInfo = new VkRenderingInfo();
             renderingInfo.renderArea = new VkRect2D(currentFramebuffer.RenderableWidth, currentFramebuffer.RenderableHeight);
             renderingInfo.layerCount = 1;
             renderingInfo.colorAttachmentCount = (uint)colorCount;
@@ -1376,7 +1376,7 @@ namespace Veldrid.Vk
                 // unnecessary DRAM writeback on tiler GPUs (Adreno / Mali).
                 bool isTransientDepth = (vkDepthTex.Usage & TextureUsage.Transient) != 0;
 
-                depthAttachment = VkRenderingAttachmentInfo.New();
+                depthAttachment = new VkRenderingAttachmentInfo();
                 depthAttachment.imageView = currentFramebuffer.DepthAttachmentView;
                 depthAttachment.imageLayout = VkImageLayout.DepthStencilAttachmentOptimal;
                 depthAttachment.resolveMode = VkResolveModeFlags.None;
@@ -1403,7 +1403,7 @@ namespace Veldrid.Vk
                 }
             }
 
-            gd.CmdBeginRendering(CommandBuffer, &renderingInfo);
+            gd.DeviceApi.vkCmdBeginRendering(CommandBuffer, &renderingInfo);
 
             // Use a sentinel render pass value to indicate dynamic rendering is active.
             // Any non-null value signals "inside a render pass" to ensureRenderPassActive / ensureNoRenderPass.
@@ -1418,7 +1418,7 @@ namespace Veldrid.Vk
             if (activeRenderPass == dynamicRenderingSentinel)
             {
                 // Dynamic rendering path.
-                gd.CmdEndRendering(CommandBuffer);
+                gd.DeviceApi.vkCmdEndRendering(CommandBuffer);
             }
             else
             {
@@ -1471,7 +1471,7 @@ namespace Veldrid.Vk
         [Conditional("DEBUG")]
         private void debugFullPipelineBarrier()
         {
-            var memoryBarrier = VkMemoryBarrier.New();
+            var memoryBarrier = new VkMemoryBarrier();
             memoryBarrier.srcAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT |
                                           VK_ACCESS_INDEX_READ_BIT |
                                           VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT |
@@ -1552,7 +1552,7 @@ namespace Veldrid.Vk
             if (!destroyed)
             {
                 destroyed = true;
-                vkDestroyCommandPool(gd.Device, pool, null);
+                gd.DeviceApi.vkDestroyCommandPool(pool, null);
 
                 Debug.Assert(submittedStagingInfos.Count == 0);
 
@@ -1801,10 +1801,9 @@ namespace Veldrid.Vk
 
         private protected override void PushDebugGroupCore(string name)
         {
-            var func = gd.MarkerBegin;
-            if (func == null) return;
+            if (!gd.debugMarkerEnabled) return;
 
-            var markerInfo = VkDebugMarkerMarkerInfoEXT.New();
+            var markerInfo = new VkDebugMarkerMarkerInfoEXT();
 
             int byteCount = Encoding.UTF8.GetByteCount(name);
             byte* utf8Ptr = stackalloc byte[byteCount + 1];
@@ -1813,22 +1812,20 @@ namespace Veldrid.Vk
 
             markerInfo.pMarkerName = utf8Ptr;
 
-            func(CommandBuffer, &markerInfo);
+            gd.DeviceApi.vkCmdDebugMarkerBeginEXT(CommandBuffer, &markerInfo);
         }
 
         private protected override void PopDebugGroupCore()
         {
-            var func = gd.MarkerEnd;
-
-            func?.Invoke(CommandBuffer);
+            if (!gd.debugMarkerEnabled) return;
+            gd.DeviceApi.vkCmdDebugMarkerEndEXT(CommandBuffer);
         }
 
         private protected override void InsertDebugMarkerCore(string name)
         {
-            var func = gd.MarkerInsert;
-            if (func == null) return;
+            if (!gd.debugMarkerEnabled) return;
 
-            var markerInfo = VkDebugMarkerMarkerInfoEXT.New();
+            var markerInfo = new VkDebugMarkerMarkerInfoEXT();
 
             int byteCount = Encoding.UTF8.GetByteCount(name);
             byte* utf8Ptr = stackalloc byte[byteCount + 1];
@@ -1837,12 +1834,12 @@ namespace Veldrid.Vk
 
             markerInfo.pMarkerName = utf8Ptr;
 
-            func(CommandBuffer, &markerInfo);
+            gd.DeviceApi.vkCmdDebugMarkerInsertEXT(CommandBuffer, &markerInfo);
         }
 
         private protected override void SetShadingRateCore(ShadingRate rate)
         {
-            if (gd.CmdSetFragmentShadingRate == null)
+            if (!gd.HasFragmentShadingRate)
                 return;
 
             // Map Veldrid ShadingRate to VkExtent2D fragment size.
@@ -1862,15 +1859,15 @@ namespace Veldrid.Vk
             combiners[0] = VkFragmentShadingRateCombinerOpKHR.KEEP;
             combiners[1] = VkFragmentShadingRateCombinerOpKHR.KEEP;
 
-            gd.CmdSetFragmentShadingRate(CommandBuffer, &fragmentSize, combiners);
+            gd.DeviceApi.vkCmdSetFragmentShadingRateKHR(CommandBuffer, &fragmentSize, combiners);
         }
 
         private protected override void DispatchMeshCore(uint groupCountX, uint groupCountY, uint groupCountZ)
         {
-            if (gd.CmdDrawMeshTasksExt == null)
+            if (!gd.HasMeshShader)
                 throw new NotSupportedException("Mesh shaders are not supported by this Vulkan device.");
 
-            gd.CmdDrawMeshTasksExt(CommandBuffer, groupCountX, groupCountY, groupCountZ);
+            gd.DeviceApi.vkCmdDrawMeshTasksEXT(CommandBuffer, groupCountX, groupCountY, groupCountZ);
         }
 
         private class StagingResourceInfo
