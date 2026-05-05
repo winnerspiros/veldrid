@@ -1560,11 +1560,18 @@ namespace Veldrid.Vk
             currentFramebuffer.TransitionToIntermediateLayout(CommandBuffer);
             activeRenderPass = VkRenderPass.Null;
 
-            // Place a barrier between RenderPasses, so that color / depth outputs
-            // can be read in subsequent passes.
+            // Place a memory + execution barrier between RenderPasses so that color/depth
+            // outputs written in this pass are AVAILABLE and VISIBLE to subsequent passes.
             //
-            // On Vulkan 1.3+ devices use granular stage masks instead of the catch-all
-            // BottomOfPipe → TopOfPipe, which causes full tile flushes on mobile GPUs.
+            // An execution-only barrier (no access masks) is insufficient: the Vulkan spec
+            // requires explicit srcAccessMask/dstAccessMask to guarantee cache flush and
+            // invalidation.  Without them, vkCmdBeginRendering's loadOp=Load may read stale
+            // data on implementations that don't implicitly flush render-pass tile caches —
+            // notably some mobile GPUs (Adreno / Mali) in dynamic rendering mode, which lacks
+            // the implicit subpass end-dependency that legacy VkRenderPass provides.
+            //
+            // On Vulkan 1.3+ use granular stage masks instead of the catch-all
+            // BottomOfPipe → TopOfPipe, which forces an unnecessary full tile flush on mobile.
             VkPipelineStageFlags srcStage;
             VkPipelineStageFlags dstStage;
 
@@ -1580,17 +1587,27 @@ namespace Veldrid.Vk
                 dstStage = VkPipelineStageFlags.TopOfPipe;
             }
 
+            var memBarrier = new VkMemoryBarrier();
+            memBarrier.sType = VkStructureType.MemoryBarrier;
+            // Make all color and depth/stencil writes from this render pass available.
+            memBarrier.srcAccessMask = VkAccessFlags.ColorAttachmentWrite
+                                       | VkAccessFlags.DepthStencilAttachmentWrite;
+            // Invalidate all destination cache types that the next pass may read through.
+            memBarrier.dstAccessMask = VkAccessFlags.ColorAttachmentRead
+                                       | VkAccessFlags.ColorAttachmentWrite
+                                       | VkAccessFlags.DepthStencilAttachmentRead
+                                       | VkAccessFlags.DepthStencilAttachmentWrite
+                                       | VkAccessFlags.ShaderRead
+                                       | VkAccessFlags.InputAttachmentRead;
+
             gd.DeviceApi.vkCmdPipelineBarrier(
                 CommandBuffer,
                 srcStage,
                 dstStage,
                 VkDependencyFlags.None,
-                0,
-                null,
-                0,
-                null,
-                0,
-                null);
+                1, &memBarrier,
+                0, null,
+                0, null);
         }
 
         private void clearSets(BoundResourceSetInfo[] boundSets)

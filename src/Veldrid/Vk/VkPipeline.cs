@@ -247,7 +247,11 @@ namespace Veldrid.Vk
                 stageCi.module = vkShader.ShaderModule;
                 stageCi.stage = VkFormats.VdToVkShaderStages(shader.Stage);
                 stageCi.pName = nameDst;
-                stageCi.pSpecializationInfo = &specializationInfo;
+                // Pass null when there are no specialization constants — a pointer to a
+                // zero-initialized VkSpecializationInfo is technically valid (mapEntryCount=0)
+                // but null is the correct representation of "no specialization" and avoids
+                // the driver having to dereference an unnecessary struct.
+                stageCi.pSpecializationInfo = specDescs != null ? &specializationInfo : null;
                 stages.Add(stageCi);
             }
 
@@ -373,6 +377,7 @@ namespace Veldrid.Vk
                 {
                     srcSubpass = VK_SUBPASS_EXTERNAL,
                     srcStageMask = VkPipelineStageFlags.ColorAttachmentOutput,
+                    srcAccessMask = VkAccessFlags.ColorAttachmentWrite,
                     dstStageMask = VkPipelineStageFlags.ColorAttachmentOutput,
                     dstAccessMask = VkAccessFlags.ColorAttachmentRead | VkAccessFlags.ColorAttachmentWrite
                 };
@@ -385,6 +390,7 @@ namespace Veldrid.Vk
                 {
                     subpassDependency.srcStageMask |= VkPipelineStageFlags.EarlyFragmentTests
                                                       | VkPipelineStageFlags.LateFragmentTests;
+                    subpassDependency.srcAccessMask |= VkAccessFlags.DepthStencilAttachmentWrite;
                     subpassDependency.dstStageMask |= VkPipelineStageFlags.EarlyFragmentTests
                                                       | VkPipelineStageFlags.LateFragmentTests;
                     subpassDependency.dstAccessMask |= VkAccessFlags.DepthStencilAttachmentRead
@@ -472,8 +478,18 @@ namespace Veldrid.Vk
             var stageCi = new VkPipelineShaderStageCreateInfo();
             stageCi.module = vkShader.ShaderModule;
             stageCi.stage = VkFormats.VdToVkShaderStages(shader.Stage);
-            stageCi.pName = CommonStrings.Main; // Meh
-            stageCi.pSpecializationInfo = &specializationInfo;
+
+            // Encode the entry-point name as a null-terminated UTF-8 string on the stack,
+            // matching the graphics pipeline path. Previously this hardcoded CommonStrings.Main
+            // ("main"), which silently broke any compute shader with a custom entry point name.
+            const int maxComputeEntryPointBytes = 256;
+            byte* computeEntryPointBuf = stackalloc byte[maxComputeEntryPointBytes];
+            int computeNameWritten = Encoding.UTF8.GetBytes(
+                shader.EntryPoint,
+                new Span<byte>(computeEntryPointBuf, maxComputeEntryPointBytes - 1));
+            computeEntryPointBuf[computeNameWritten] = 0;
+            stageCi.pName = computeEntryPointBuf;
+            stageCi.pSpecializationInfo = specDescs != null ? &specializationInfo : null;
             pipelineCi.stage = stageCi;
 
             Vortice.Vulkan.VkPipeline localPipeline;

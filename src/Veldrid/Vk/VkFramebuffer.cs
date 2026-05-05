@@ -142,6 +142,11 @@ namespace Veldrid.Vk
             {
                 srcSubpass = VK_SUBPASS_EXTERNAL,
                 srcStageMask = VkPipelineStageFlags.ColorAttachmentOutput,
+                // Make previous color writes available before this render pass invalidates
+                // and re-reads them (loadOp=Load).  srcAccessMask=0 would silently rely on
+                // the implicit end-dependency of the preceding render pass to flush caches,
+                // which is fragile and insufficient when no prior render pass exists.
+                srcAccessMask = VkAccessFlags.ColorAttachmentWrite,
                 dstStageMask = VkPipelineStageFlags.ColorAttachmentOutput,
                 dstAccessMask = VkAccessFlags.ColorAttachmentRead | VkAccessFlags.ColorAttachmentWrite
             };
@@ -156,6 +161,7 @@ namespace Veldrid.Vk
             {
                 subpassDependency.srcStageMask |= VkPipelineStageFlags.EarlyFragmentTests
                                                   | VkPipelineStageFlags.LateFragmentTests;
+                subpassDependency.srcAccessMask |= VkAccessFlags.DepthStencilAttachmentWrite;
                 subpassDependency.dstStageMask |= VkPipelineStageFlags.EarlyFragmentTests
                                                   | VkPipelineStageFlags.LateFragmentTests;
                 subpassDependency.dstAccessMask |= VkAccessFlags.DepthStencilAttachmentRead
