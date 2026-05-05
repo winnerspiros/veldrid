@@ -357,7 +357,6 @@ namespace Veldrid.Vk
                     colorAttachmentCount = (uint)outputDesc.ColorAttachments.Length,
                     pColorAttachments = (VkAttachmentReference*)colorAttachmentRefs.Data
                 };
-                for (int i = 0; i < colorAttachmentDescs.Count; i++) attachments.Add(colorAttachmentDescs[i]);
 
                 if (outputDesc.DepthAttachment != null)
                 {
