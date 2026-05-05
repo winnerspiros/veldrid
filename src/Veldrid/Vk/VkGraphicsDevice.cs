@@ -1538,12 +1538,14 @@ namespace Veldrid.Vk
 
             HasMemoryBudget = hasMemoryBudget;
 
-            // VK_EXT_host_image_copy: validate function pointer before enabling.
+            // VK_EXT_host_image_copy: validate all required function pointers before enabling.
+            // vkTransitionImageLayoutEXT is also needed by hostCopyToImage.
             if (hasHostImageCopy)
             {
-                HasHostImageCopy = DeviceApi.vkCopyMemoryToImageEXT_ptr.Value != null;
+                HasHostImageCopy = DeviceApi.vkCopyMemoryToImageEXT_ptr.Value != null
+                                && DeviceApi.vkTransitionImageLayoutEXT_ptr.Value != null;
                 if (!HasHostImageCopy)
-                    Debug.WriteLine("[Veldrid] VK_EXT_host_image_copy: extension listed but vkCopyMemoryToImageEXT is null — disabled.");
+                    Debug.WriteLine("[Veldrid] VK_EXT_host_image_copy: extension listed but required function pointers are null — disabled.");
             }
 
             // VK_EXT_descriptor_indexing: detection only (core in Vulkan 1.2).
@@ -1610,6 +1612,16 @@ namespace Veldrid.Vk
                                 && DeviceApi.vkGetPastPresentationTimingGOOGLE_ptr.Value != null;
                 if (!HasDisplayTiming)
                     Debug.WriteLine("[Veldrid] VK_GOOGLE_display_timing: extension listed but function pointers are null — disabled.");
+            }
+
+            // VK_EXT_debug_marker: validate all three function pointers before allowing
+            // marker calls. Some drivers list the extension but fail to load its functions.
+            if (debugMarkerEnabled)
+            {
+                debugMarkerEnabled = DeviceApi.vkDebugMarkerSetObjectNameEXT_ptr.Value != null
+                                  && DeviceApi.vkCmdDebugMarkerBeginEXT_ptr.Value != null;
+                if (!debugMarkerEnabled)
+                    Debug.WriteLine("[Veldrid] VK_EXT_debug_marker: extension listed but function pointers are null — disabled.");
             }
         }
 
