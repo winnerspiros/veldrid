@@ -198,7 +198,7 @@ namespace Veldrid.Vk
 
             // Shader Stage
 
-            VkSpecializationInfo specializationInfo;
+            VkSpecializationInfo specializationInfo = default;
             var specDescs = description.ShaderSet.Specializations;
 
             if (specDescs != null)
@@ -443,7 +443,7 @@ namespace Veldrid.Vk
 
             // Shader Stage
 
-            VkSpecializationInfo specializationInfo;
+            VkSpecializationInfo specializationInfo = default;
             var specDescs = description.Specializations;
 
             if (specDescs != null)

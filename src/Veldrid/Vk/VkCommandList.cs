@@ -1578,8 +1578,16 @@ namespace Veldrid.Vk
             if (gd.DeviceApiVersion.IsAtLeast(1, 3))
             {
                 srcStage = VkPipelineStageFlags.ColorAttachmentOutput | VkPipelineStageFlags.LateFragmentTests;
+                // Cover all pipeline stages that can consume render-pass outputs:
+                //   ColorAttachmentOutput / EarlyFragmentTests  → next render pass reads attachments
+                //   FragmentShader / VertexShader               → sampling the output as a texture
+                //   ComputeShader                               → compute post-process reads the output
+                //   Transfer                                    → CopyTexture / GenerateMipmaps after render pass
+                // NOTE: VertexInput (vertex/index buffer fetch) was here previously but is wrong —
+                //   render-pass outputs are never consumed in the VertexInput stage.
                 dstStage = VkPipelineStageFlags.ColorAttachmentOutput | VkPipelineStageFlags.EarlyFragmentTests
-                           | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexInput;
+                           | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader
+                           | VkPipelineStageFlags.ComputeShader | VkPipelineStageFlags.Transfer;
             }
             else
             {
@@ -1598,7 +1606,8 @@ namespace Veldrid.Vk
                                        | VkAccessFlags.DepthStencilAttachmentRead
                                        | VkAccessFlags.DepthStencilAttachmentWrite
                                        | VkAccessFlags.ShaderRead
-                                       | VkAccessFlags.InputAttachmentRead;
+                                       | VkAccessFlags.InputAttachmentRead
+                                       | VkAccessFlags.TransferRead;
 
             gd.DeviceApi.vkCmdPipelineBarrier(
                 CommandBuffer,
