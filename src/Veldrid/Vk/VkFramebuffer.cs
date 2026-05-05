@@ -263,7 +263,8 @@ namespace Veldrid.Vk
                     VkImageAspectFlags.Color,
                     description.ColorTargets[i].MipLevel,
                     1,
-                    description.ColorTargets[i].ArrayLayer);
+                    description.ColorTargets[i].ArrayLayer,
+                    1);
                 var dest = fbAttachments + i;
                 var result = gd.DeviceApi.vkCreateImageView(&imageViewCi, null, dest);
                 CheckResult(result);
@@ -286,7 +287,8 @@ namespace Veldrid.Vk
                     hasStencil ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil : VkImageAspectFlags.Depth,
                     description.DepthTarget.Value.MipLevel,
                     1,
-                    description.DepthTarget.Value.ArrayLayer);
+                    description.DepthTarget.Value.ArrayLayer,
+                    1);
                 var dest = fbAttachments + (fbAttachmentsCount - 1);
                 var result = gd.DeviceApi.vkCreateImageView(&depthViewCi, null, dest);
                 CheckResult(result);

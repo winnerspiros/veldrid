@@ -396,7 +396,9 @@ namespace Veldrid.Vk
             if (!sourceIsStaging && !destIsStaging)
             {
                 var srcAspect = (srcVkTexture.Usage & TextureUsage.DepthStencil) != 0
-                    ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+                    ? FormatHelpers.IsStencilFormat(srcVkTexture.Format)
+                        ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+                        : VkImageAspectFlags.Depth
                     : VkImageAspectFlags.Color;
 
                 var srcSubresource = new VkImageSubresourceLayers
@@ -408,7 +410,9 @@ namespace Veldrid.Vk
                 };
 
                 var dstAspect = (dstVkTexture.Usage & TextureUsage.DepthStencil) != 0
-                    ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+                    ? FormatHelpers.IsStencilFormat(dstVkTexture.Format)
+                        ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+                        : VkImageAspectFlags.Depth
                     : VkImageAspectFlags.Color;
 
                 var dstSubresource = new VkImageSubresourceLayers
@@ -492,7 +496,9 @@ namespace Veldrid.Vk
                 var dstSubresource = new VkImageSubresourceLayers
                 {
                     aspectMask = (dstVkTexture.Usage & TextureUsage.DepthStencil) != 0
-                        ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+                        ? FormatHelpers.IsStencilFormat(dstVkTexture.Format)
+                            ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+                            : VkImageAspectFlags.Depth
                         : VkImageAspectFlags.Color,
                     layerCount = layerCount,
                     mipLevel = dstMipLevel,

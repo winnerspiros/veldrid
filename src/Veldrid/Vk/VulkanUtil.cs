@@ -224,14 +224,16 @@ namespace Veldrid.Vk
             {
                 srcAccessMask = VkAccessFlags.ShaderWrite;
                 dstAccessMask = VkAccessFlags.TransferRead;
-                srcStageFlags = VkPipelineStageFlags.ComputeShader;
+                // Storage image writes can originate in any shader stage (vertex/fragment/compute).
+                srcStageFlags = VkPipelineStageFlags.ComputeShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader;
                 dstStageFlags = VkPipelineStageFlags.Transfer;
             }
             else if (oldLayout == VkImageLayout.General && newLayout == VkImageLayout.TransferDstOptimal)
             {
                 srcAccessMask = VkAccessFlags.ShaderWrite;
                 dstAccessMask = VkAccessFlags.TransferWrite;
-                srcStageFlags = VkPipelineStageFlags.ComputeShader;
+                // Storage image writes can originate in any shader stage (vertex/fragment/compute).
+                srcStageFlags = VkPipelineStageFlags.ComputeShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader;
                 dstStageFlags = VkPipelineStageFlags.Transfer;
             }
             else if (oldLayout == VkImageLayout.PresentSrcKHR && newLayout == VkImageLayout.TransferSrcOptimal)
@@ -310,6 +312,46 @@ namespace Veldrid.Vk
                 dstAccessMask = VkAccessFlags.DepthStencilAttachmentWrite;
                 srcStageFlags = VkPipelineStageFlags.Transfer;
                 dstStageFlags = VkPipelineStageFlags.EarlyFragmentTests | VkPipelineStageFlags.LateFragmentTests;
+            }
+            else if (oldLayout == VkImageLayout.DepthStencilAttachmentOptimal && newLayout == VkImageLayout.TransferDstOptimal)
+            {
+                // Depth/stencil attachment being overwritten via CopyTexture (e.g. restoring a saved depth buffer).
+                srcAccessMask = VkAccessFlags.DepthStencilAttachmentWrite;
+                dstAccessMask = VkAccessFlags.TransferWrite;
+                srcStageFlags = VkPipelineStageFlags.EarlyFragmentTests | VkPipelineStageFlags.LateFragmentTests;
+                dstStageFlags = VkPipelineStageFlags.Transfer;
+            }
+            else if (oldLayout == VkImageLayout.General && newLayout == VkImageLayout.ColorAttachmentOptimal)
+            {
+                // Storage image (General) repurposed as a color render target.
+                srcAccessMask = VkAccessFlags.ShaderWrite;
+                dstAccessMask = VkAccessFlags.ColorAttachmentWrite;
+                srcStageFlags = VkPipelineStageFlags.ComputeShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader;
+                dstStageFlags = VkPipelineStageFlags.ColorAttachmentOutput;
+            }
+            else if (oldLayout == VkImageLayout.General && newLayout == VkImageLayout.DepthStencilAttachmentOptimal)
+            {
+                // Storage depth image repurposed as a depth/stencil attachment.
+                srcAccessMask = VkAccessFlags.ShaderWrite;
+                dstAccessMask = VkAccessFlags.DepthStencilAttachmentWrite;
+                srcStageFlags = VkPipelineStageFlags.ComputeShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader;
+                dstStageFlags = VkPipelineStageFlags.EarlyFragmentTests | VkPipelineStageFlags.LateFragmentTests;
+            }
+            else if (oldLayout == VkImageLayout.ColorAttachmentOptimal && newLayout == VkImageLayout.General)
+            {
+                // Color render target being bound as a storage image (e.g. for compute post-process).
+                srcAccessMask = VkAccessFlags.ColorAttachmentWrite;
+                dstAccessMask = VkAccessFlags.ShaderRead | VkAccessFlags.ShaderWrite;
+                srcStageFlags = VkPipelineStageFlags.ColorAttachmentOutput;
+                dstStageFlags = VkPipelineStageFlags.ComputeShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader;
+            }
+            else if (oldLayout == VkImageLayout.DepthStencilAttachmentOptimal && newLayout == VkImageLayout.General)
+            {
+                // Depth/stencil attachment being bound as a storage image.
+                srcAccessMask = VkAccessFlags.DepthStencilAttachmentWrite;
+                dstAccessMask = VkAccessFlags.ShaderRead | VkAccessFlags.ShaderWrite;
+                srcStageFlags = VkPipelineStageFlags.EarlyFragmentTests | VkPipelineStageFlags.LateFragmentTests;
+                dstStageFlags = VkPipelineStageFlags.ComputeShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader;
             }
             else
                 Debug.Fail("Invalid image layout transition.");
