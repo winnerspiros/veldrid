@@ -24,7 +24,6 @@ namespace Veldrid.Vk
     {
         private readonly VkGraphicsDevice gd;
         private readonly List<PendingCopy> pendingCopies = new List<PendingCopy>();
-        private readonly Dictionary<SubresourceKey, VkImageLayout> touchedSubresources = new Dictionary<SubresourceKey, VkImageLayout>();
 
         private VkBuffer stagingBuffer;
         private uint stagingOffset;
@@ -39,7 +38,6 @@ namespace Veldrid.Vk
         {
             Debug.Assert(stagingBuffer == null);
             Debug.Assert(pendingCopies.Count == 0);
-            Debug.Assert(touchedSubresources.Count == 0);
             stagingOffset = 0;
             MarkOpen();
         }
@@ -112,12 +110,6 @@ namespace Veldrid.Vk
                 MipLevel = mipLevel,
                 ArrayLayer = arrayLayer
             });
-
-            // Track the original layout for each touched subresource exactly once so that on Submit we can
-            // transition back to whatever it was before (typically ShaderReadOnlyOptimal for sampled textures).
-            var key = new SubresourceKey(vkTex, mipLevel, arrayLayer);
-            if (!touchedSubresources.ContainsKey(key))
-                touchedSubresources.Add(key, vkTex.GetImageLayout(mipLevel, arrayLayer));
         }
 
         // Maximum number of texture copies to include in a single gd.DeviceApi.vkQueueSubmit. Submitting very large batches
@@ -195,7 +187,6 @@ namespace Veldrid.Vk
             stagingBuffer = null;
             stagingOffset = 0;
             pendingCopies.Clear();
-            touchedSubresources.Clear();
         }
 
         protected override void ReleaseToPool()
@@ -212,7 +203,6 @@ namespace Veldrid.Vk
 
             stagingOffset = 0;
             pendingCopies.Clear();
-            touchedSubresources.Clear();
             gd.ReturnTextureUpdateBatch(this);
         }
 

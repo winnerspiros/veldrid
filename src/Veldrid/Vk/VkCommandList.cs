@@ -1982,6 +1982,7 @@ namespace Veldrid.Vk
             if (!gd.HasMeshShader)
                 throw new NotSupportedException("Mesh shaders are not supported by this Vulkan device.");
 
+            preDrawCommand();
             gd.DeviceApi.vkCmdDrawMeshTasksEXT(CommandBuffer, groupCountX, groupCountY, groupCountZ);
         }
 
