@@ -93,7 +93,9 @@ namespace Veldrid.Vk
             else
             {
                 // Round up to the nearest multiple of bufferImageGranularity.
-                size = (size + bufferImageGranularity - 1) / bufferImageGranularity * bufferImageGranularity;
+                // Use the overflow-safe form: ((size - 1) / g + 1) * g instead of
+                // (size + g - 1) / g * g, which overflows when size > ulong.MaxValue - g + 1.
+                size = ((size - 1) / bufferImageGranularity + 1) * bufferImageGranularity;
             }
 
             lock (@lock)
