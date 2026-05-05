@@ -1976,6 +1976,64 @@ namespace Veldrid.Vk
                 };
                 DeviceApi.vkCmdCopyBuffer(cb, copySrcVkBuffer.DeviceBuffer, vkBuffer.DeviceBuffer, 1, &copyRegion);
 
+                // Emit a memory barrier so the TRANSFER_WRITE is visible to all subsequent
+                // GPU consumers of this buffer.  Without this barrier the data is technically
+                // not guaranteed to be visible to the next command-buffer submission even though
+                // both use the same queue (Vulkan spec 6.9 does NOT imply automatic memory
+                // visibility across queue submissions).
+                var dstAccess = VkAccessFlags.None;
+                var dstStage = VkPipelineStageFlags.None;
+                var destUsage = buffer.Usage;
+
+                if ((destUsage & BufferUsage.UniformBuffer) != 0)
+                {
+                    dstAccess |= VkAccessFlags.UniformRead;
+                    dstStage |= VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.ComputeShader;
+                }
+
+                if ((destUsage & BufferUsage.VertexBuffer) != 0)
+                {
+                    dstAccess |= VkAccessFlags.VertexAttributeRead;
+                    dstStage |= VkPipelineStageFlags.VertexInput;
+                }
+
+                if ((destUsage & BufferUsage.IndexBuffer) != 0)
+                {
+                    dstAccess |= VkAccessFlags.IndexRead;
+                    dstStage |= VkPipelineStageFlags.VertexInput;
+                }
+
+                if ((destUsage & (BufferUsage.StructuredBufferReadOnly | BufferUsage.StructuredBufferReadWrite)) != 0)
+                {
+                    dstAccess |= VkAccessFlags.ShaderRead;
+                    dstStage |= VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.ComputeShader;
+                }
+
+                if ((destUsage & BufferUsage.IndirectBuffer) != 0)
+                {
+                    dstAccess |= VkAccessFlags.IndirectCommandRead;
+                    dstStage |= VkPipelineStageFlags.DrawIndirect;
+                }
+
+                if (dstAccess == VkAccessFlags.None)
+                {
+                    dstAccess = VkAccessFlags.MemoryRead;
+                    dstStage = VkPipelineStageFlags.AllCommands;
+                }
+
+                var memBarrier = new VkMemoryBarrier();
+                memBarrier.sType = VkStructureType.MemoryBarrier;
+                memBarrier.srcAccessMask = VkAccessFlags.TransferWrite;
+                memBarrier.dstAccessMask = dstAccess;
+                DeviceApi.vkCmdPipelineBarrier(
+                    cb,
+                    VkPipelineStageFlags.Transfer,
+                    dstStage,
+                    VkDependencyFlags.None,
+                    1, &memBarrier,
+                    0, null,
+                    0, null);
+
                 pool.EndAndSubmit(cb);
                 lock (stagingResourcesLock) submittedStagingBuffers.Add(cb, copySrcVkBuffer);
             }
@@ -2089,14 +2147,33 @@ namespace Veldrid.Vk
             var cResult = DeviceApi.vkCopyMemoryToImageEXT( &copyInfo);
             VulkanUtil.CheckResult(cResult);
 
-            // Transition back to the layout the image was in before.
+            // Transition back to a stable layout.
+            // VkImageLayout.Undefined is only valid as an oldLayout (discard sentinel); it may NOT
+            // be used as newLayout.  When the texture has never been used before (tracked layout is
+            // Undefined) choose the most appropriate initial layout based on the texture's usage.
+            var finalLayout = oldLayout;
+            if (finalLayout == VkImageLayout.Undefined)
+            {
+                if ((vkTex.Usage & TextureUsage.Sampled) != 0)
+                    finalLayout = VkImageLayout.ShaderReadOnlyOptimal;
+                else if ((vkTex.Usage & TextureUsage.DepthStencil) != 0)
+                    finalLayout = VkImageLayout.DepthStencilAttachmentOptimal;
+                else if ((vkTex.Usage & TextureUsage.RenderTarget) != 0)
+                    finalLayout = VkImageLayout.ColorAttachmentOptimal;
+                else
+                    finalLayout = VkImageLayout.General;
+            }
+
             var transitionBack = new VkHostImageLayoutTransitionInfo();
             transitionBack.image = vkTex.OptimalDeviceImage;
             transitionBack.oldLayout = VkImageLayout.TransferDstOptimal;
-            transitionBack.newLayout = oldLayout;
+            transitionBack.newLayout = finalLayout;
             transitionBack.subresourceRange = new VkImageSubresourceRange(aspectMask, mipLevel, 1, arrayLayer, 1);
             tResult = DeviceApi.vkTransitionImageLayoutEXT( 1, &transitionBack);
             VulkanUtil.CheckResult(tResult);
+
+            // Keep the CPU-side layout tracking in sync with the actual image state.
+            vkTex.SetImageLayout(mipLevel, arrayLayer, finalLayout);
         }
 
         internal class SharedCommandPool
