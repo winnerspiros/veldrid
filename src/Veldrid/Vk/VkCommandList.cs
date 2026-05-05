@@ -1327,22 +1327,43 @@ namespace Veldrid.Vk
             // barriers here so every attachment is in the correct layout when vkCmdBeginRendering
             // is called — as required by the Vulkan spec.
             //
-            // VkTexture.TransitionImageLayout is a no-op when old == new, so attachments that are
-            // already in the target layout (e.g. regular framebuffers reused within the same frame)
-            // pay no barrier cost.
+            // Accumulate all attachment barriers into imageBarrierBatch (which is empty at this point —
+            // flushTransitionBarriers() was called just before ensureRenderPassActive in preDrawCommand)
+            // and flush them all in a single vkCmdPipelineBarrier rather than one call per attachment.
+            // This matters most on mobile where reducing pipeline stalls is critical.
             for (int i = 0; i < colorCount; i++)
             {
                 var ca = currentFramebuffer.ColorTargets[i];
                 var vkTex = Util.AssertSubtype<Texture, VkTexture>(ca.Target);
-                vkTex.TransitionImageLayout(CommandBuffer, ca.MipLevel, 1, ca.ArrayLayer, 1, VkImageLayout.ColorAttachmentOptimal);
+
+                if (vkTex.TryGetLayoutTransitionBarrier(ca.MipLevel, 1, ca.ArrayLayer, 1,
+                        VkImageLayout.ColorAttachmentOptimal,
+                        out var barrier, out var src, out var dst))
+                {
+                    imageBarrierBatch.Add(barrier);
+                    barrierBatchSrcStage |= src;
+                    barrierBatchDstStage |= dst;
+                }
             }
 
             if (currentFramebuffer.DepthTarget.HasValue)
             {
                 var ca = currentFramebuffer.DepthTarget.Value;
                 var vkTex = Util.AssertSubtype<Texture, VkTexture>(ca.Target);
-                vkTex.TransitionImageLayout(CommandBuffer, ca.MipLevel, 1, ca.ArrayLayer, 1, VkImageLayout.DepthStencilAttachmentOptimal);
+
+                if (vkTex.TryGetLayoutTransitionBarrier(ca.MipLevel, 1, ca.ArrayLayer, 1,
+                        VkImageLayout.DepthStencilAttachmentOptimal,
+                        out var barrier, out var src, out var dst))
+                {
+                    imageBarrierBatch.Add(barrier);
+                    barrierBatchSrcStage |= src;
+                    barrierBatchDstStage |= dst;
+                }
             }
+
+            // Flush all attachment transitions as a single vkCmdPipelineBarrier (no-op if every
+            // attachment was already in the correct layout, e.g. a framebuffer reused this frame).
+            flushTransitionBarriers();
 
             bool haveAllClearValues = depthClearValue.HasValue || currentFramebuffer.DepthTarget == null;
 

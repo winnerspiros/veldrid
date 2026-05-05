@@ -274,6 +274,24 @@ namespace Veldrid.Vk
                 srcStageFlags = VkPipelineStageFlags.TopOfPipe;
                 dstStageFlags = VkPipelineStageFlags.EarlyFragmentTests | VkPipelineStageFlags.LateFragmentTests;
             }
+            else if (oldLayout == VkImageLayout.TransferSrcOptimal && newLayout == VkImageLayout.ColorAttachmentOptimal)
+            {
+                // A non-sampled render target was used as a CopyTexture source and stays in
+                // TransferSrcOptimal (the sampled back-transition only fires when Sampled is set).
+                // Return it to ColorAttachmentOptimal before the next render pass.
+                srcAccessMask = VkAccessFlags.TransferRead;
+                dstAccessMask = VkAccessFlags.ColorAttachmentWrite;
+                srcStageFlags = VkPipelineStageFlags.Transfer;
+                dstStageFlags = VkPipelineStageFlags.ColorAttachmentOutput;
+            }
+            else if (oldLayout == VkImageLayout.TransferSrcOptimal && newLayout == VkImageLayout.DepthStencilAttachmentOptimal)
+            {
+                // Same as above but for a depth/stencil attachment that was read-back via CopyTexture.
+                srcAccessMask = VkAccessFlags.TransferRead;
+                dstAccessMask = VkAccessFlags.DepthStencilAttachmentWrite;
+                srcStageFlags = VkPipelineStageFlags.Transfer;
+                dstStageFlags = VkPipelineStageFlags.EarlyFragmentTests | VkPipelineStageFlags.LateFragmentTests;
+            }
             else
                 Debug.Fail("Invalid image layout transition.");
         }
