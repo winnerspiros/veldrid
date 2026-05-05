@@ -34,12 +34,13 @@ namespace Veldrid.Vk
         public static string[] EnumerateInstanceLayers()
         {
             uint propCount = 0;
-            var result = vkEnumerateInstanceLayerProperties(ref propCount, null);
+            var result = vkEnumerateInstanceLayerProperties(&propCount, null);
             CheckResult(result);
             if (propCount == 0) return Array.Empty<string>();
 
             var props = new VkLayerProperties[propCount];
-            vkEnumerateInstanceLayerProperties(ref propCount, ref props[0]);
+            fixed (VkLayerProperties* propsPtr = props)
+                vkEnumerateInstanceLayerProperties(&propCount, propsPtr);
 
             string[] ret = new string[propCount];
 
@@ -286,7 +287,8 @@ namespace Veldrid.Vk
             uint layerCount,
             VkImageAspectFlags aspectMask,
             VkImageLayout oldLayout,
-            VkImageLayout newLayout)
+            VkImageLayout newLayout,
+            VkDeviceApi deviceApi)
         {
             Debug.Assert(oldLayout != newLayout);
             var barrier = new VkImageMemoryBarrier();
@@ -305,7 +307,7 @@ namespace Veldrid.Vk
                 out barrier.srcAccessMask, out barrier.dstAccessMask,
                 out var srcStageFlags, out var dstStageFlags);
 
-            gd.DeviceApi.vkCmdPipelineBarrier(
+            deviceApi.vkCmdPipelineBarrier(
                 cb,
                 srcStageFlags,
                 dstStageFlags,
@@ -320,13 +322,14 @@ namespace Veldrid.Vk
             if (!IsVulkanLoaded()) return Array.Empty<string>();
 
             uint propCount = 0;
-            var result = vkEnumerateInstanceExtensionProperties((byte*)null, ref propCount, null);
+            var result = vkEnumerateInstanceExtensionProperties((byte*)null, &propCount, null);
             if (result != VkResult.Success) return Array.Empty<string>();
 
             if (propCount == 0) return Array.Empty<string>();
 
             var props = new VkExtensionProperties[propCount];
-            vkEnumerateInstanceExtensionProperties((byte*)null, ref propCount, ref props[0]);
+            fixed (VkExtensionProperties* propsPtr = props)
+                vkEnumerateInstanceExtensionProperties((byte*)null, &propCount, propsPtr);
 
             string[] ret = new string[propCount];
 

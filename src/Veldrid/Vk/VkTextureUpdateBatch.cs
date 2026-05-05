@@ -171,7 +171,7 @@ namespace Veldrid.Vk
                         copy.Texture.OptimalDeviceImage,
                         VkImageLayout.TransferDstOptimal,
                         1,
-                        ref region);
+                        &region);
                 }
 
                 // Transition sampled subresources back to ShaderReadOnlyOptimal, matching the single-call

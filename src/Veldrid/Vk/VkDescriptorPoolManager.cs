@@ -22,11 +22,12 @@ namespace Veldrid.Vk
             lock (@lock)
             {
                 var pool = getPool(counts);
-                var dsAi = VkDescriptorSetAllocateInfo.New();
+                var dsAi = new VkDescriptorSetAllocateInfo();
                 dsAi.descriptorSetCount = 1;
                 dsAi.pSetLayouts = &setLayout;
                 dsAi.descriptorPool = pool;
-                var result = gd.DeviceApi.vkAllocateDescriptorSets(&dsAi, out var set);
+                VkDescriptorSet set;
+                var result = gd.DeviceApi.vkAllocateDescriptorSets(&dsAi, &set);
                 VulkanUtil.CheckResult(result);
 
                 return new DescriptorAllocationToken(set, pool);
@@ -40,7 +41,7 @@ namespace Veldrid.Vk
                 foreach (var poolInfo in pools)
                 {
                     if (poolInfo.Pool == token.Pool)
-                        poolInfo.Free(gd.Device, token, counts);
+                        poolInfo.Free(gd.DeviceApi, token, counts);
                 }
             }
         }
@@ -90,7 +91,7 @@ namespace Veldrid.Vk
             sizes[6].type = VkDescriptorType.StorageBufferDynamic;
             sizes[6].descriptorCount = descriptor_count;
 
-            var poolCi = VkDescriptorPoolCreateInfo.New();
+            var poolCi = new VkDescriptorPoolCreateInfo();
             poolCi.flags = VkDescriptorPoolCreateFlags.FreeDescriptorSet;
             poolCi.maxSets = total_sets;
             poolCi.pPoolSizes = sizes;
@@ -154,10 +155,10 @@ namespace Veldrid.Vk
                 return false;
             }
 
-            internal void Free(VkDevice device, DescriptorAllocationToken token, DescriptorResourceCounts counts)
+            internal unsafe void Free(VkDeviceApi deviceApi, DescriptorAllocationToken token, DescriptorResourceCounts counts)
             {
                 var set = token.Set;
-                gd.DeviceApi.vkFreeDescriptorSets(Pool, 1, &set);
+                deviceApi.vkFreeDescriptorSets(Pool, 1, &set);
 
                 RemainingSets += 1;
 

@@ -487,7 +487,8 @@ namespace Veldrid.Vk
             }
             CheckResult(result);
             var formats = new VkSurfaceFormatKHR[surfaceFormatCount];
-            result = gd.InstanceApi.vkGetPhysicalDeviceSurfaceFormatsKHR(gd.PhysicalDevice, surface, &surfaceFormatCount, &formats[0]);
+            fixed (VkSurfaceFormatKHR* fmtPtr = formats)
+                result = gd.InstanceApi.vkGetPhysicalDeviceSurfaceFormatsKHR(gd.PhysicalDevice, surface, &surfaceFormatCount, fmtPtr);
             if (result == VkResult.ErrorSurfaceLostKHR)
             {
                 lastCreateSurfaceLost = true;
@@ -531,7 +532,8 @@ namespace Veldrid.Vk
             }
             CheckResult(result);
             var presentModes = new VkPresentModeKHR[presentModeCount];
-            result = gd.InstanceApi.vkGetPhysicalDeviceSurfacePresentModesKHR(gd.PhysicalDevice, surface, &presentModeCount, &presentModes[0]);
+            fixed (VkPresentModeKHR* pmPtr = presentModes)
+                result = gd.InstanceApi.vkGetPhysicalDeviceSurfacePresentModesKHR(gd.PhysicalDevice, surface, &presentModeCount, pmPtr);
             if (result == VkResult.ErrorSurfaceLostKHR)
             {
                 lastCreateSurfaceLost = true;
@@ -1009,7 +1011,8 @@ namespace Veldrid.Vk
 
         private bool queueSupportsPresent(uint queueFamilyIndex, VkSurfaceKHR surface)
         {
-            var result = gd.InstanceApi.vkGetPhysicalDeviceSurfaceSupportKHR(gd.PhysicalDevice, queueFamilyIndex, surface, out supported);
+            VkBool32 supported;
+            var result = gd.InstanceApi.vkGetPhysicalDeviceSurfaceSupportKHR(gd.PhysicalDevice, queueFamilyIndex, surface, &supported);
             CheckResult(result);
             return supported;
         }

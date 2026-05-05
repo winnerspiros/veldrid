@@ -980,9 +980,8 @@ namespace Veldrid.Vk
             // vkEnumerateInstanceVersion is a Vulkan 1.1 function; if absent we fall back to 1.0.
             uint instanceApiVersion = new Vortice.Vulkan.VkVersion(1, 0, 0);
 
-            fixed (byte* fnName = "vkEnumerateInstanceVersion\0"u8)
             {
-                IntPtr fnPtr = vkGetInstanceProcAddr(new VkInstance(), fnName);
+                IntPtr fnPtr = (IntPtr)vkGetInstanceProcAddr(new VkInstance(), "vkEnumerateInstanceVersion\0"u8).Value;
 
                 if (fnPtr != IntPtr.Zero)
                 {
@@ -997,7 +996,7 @@ namespace Veldrid.Vk
 
             var applicationInfo = new VkApplicationInfo
             {
-                apiVersion = instanceApiVersion,
+                apiVersion = new Vortice.Vulkan.VkVersion(instanceApiVersion),
                 applicationVersion = new Vortice.Vulkan.VkVersion(1, 0, 0),
                 engineVersion = new Vortice.Vulkan.VkVersion(1, 0, 0),
                 pApplicationName = s_name,
@@ -1154,16 +1153,16 @@ namespace Veldrid.Vk
 
             for (int i = 0; i < physicalDevices.Length; i++)
             {
-                VkPhysicalDeviceProperties props;
-                InstanceApi.vkGetPhysicalDeviceProperties(physicalDevices[i], &props);
+                VkPhysicalDeviceProperties deviceProps;
+                InstanceApi.vkGetPhysicalDeviceProperties(physicalDevices[i], &deviceProps);
 
-                if (props.deviceType == VkPhysicalDeviceType.DiscreteGpu)
+                if (deviceProps.deviceType == VkPhysicalDeviceType.DiscreteGpu)
                 {
                     PhysicalDevice = physicalDevices[i];
                     break;
                 }
 
-                if (props.deviceType == VkPhysicalDeviceType.IntegratedGpu && physicalDevices[0] != physicalDevices[i])
+                if (deviceProps.deviceType == VkPhysicalDeviceType.IntegratedGpu && physicalDevices[0] != physicalDevices[i])
                 {
                     // Prefer integrated over anything worse, but keep looking for discrete.
                     PhysicalDevice = physicalDevices[i];
@@ -1174,7 +1173,7 @@ namespace Veldrid.Vk
             InstanceApi.vkGetPhysicalDeviceProperties(PhysicalDevice, &props);
             physicalDeviceProperties = props;
             fixed (byte* utf8NamePtr = physicalDeviceProperties.deviceName)
-                deviceName = Encoding.UTF8.GetString(utf8NamePtr, physicalDeviceProperties.deviceName.Length).TrimEnd('\0');
+                deviceName = Encoding.UTF8.GetString(utf8NamePtr, 256).TrimEnd('\0');
 
             DeviceApiVersion = VkVersion.FromPacked(physicalDeviceProperties.apiVersion);
             vendorName = $"id:{physicalDeviceProperties.vendorID:x8}";
@@ -1470,8 +1469,10 @@ namespace Veldrid.Vk
                 deviceCreateInfo.enabledExtensionCount = activeExtensionCount;
                 deviceCreateInfo.ppEnabledExtensionNames = (byte**)activeExtensionsPtr;
 
-                var result = InstanceApi.vkCreateDevice(PhysicalDevice, &deviceCreateInfo, null, &device);
+                VkDevice localDevice;
+                var result = InstanceApi.vkCreateDevice(PhysicalDevice, &deviceCreateInfo, null, &localDevice);
                 CheckResult(result);
+                device = localDevice;
             }
 
             DeviceApi = new VkDeviceApi(InstanceApi, device);
@@ -2027,6 +2028,7 @@ namespace Veldrid.Vk
                 var cb = pool.BeginNewCommandBuffer();
                 VkCommandList.CopyTextureCore_VkCommandBuffer(
                     cb,
+                    DeviceApi,
                     stagingTex, 0, 0, 0, 0, 0,
                     texture, x, y, z, mipLevel, arrayLayer,
                     width, height, depth, 1);
@@ -2113,7 +2115,9 @@ namespace Veldrid.Vk
                 allocateInfo.commandBufferCount = 1;
                 allocateInfo.level = VkCommandBufferLevel.Primary;
                 allocateInfo.commandPool = pool;
-                result = gd.DeviceApi.vkAllocateCommandBuffers(&allocateInfo, out cb);
+                VkCommandBuffer localCb;
+                result = gd.DeviceApi.vkAllocateCommandBuffers(&allocateInfo, &localCb);
+                cb = localCb;
                 CheckResult(result);
             }
 

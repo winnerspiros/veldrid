@@ -81,7 +81,7 @@ namespace Veldrid.Vk
 
         internal override SwapchainSource GetSurfaceSource()
         {
-            return new XlibSwapchainSource(display, window);
+            return new XlibSwapchainSource(display, (IntPtr)(long)window);
         }
     }
 }

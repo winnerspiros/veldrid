@@ -183,7 +183,7 @@ namespace Veldrid.Vk
             if (hasExtMetalSurface)
             {
                 var surfaceCi = new VkMetalSurfaceCreateInfoEXT();
-                surfaceCi.pLayer = metalLayer.NativePtr.ToPointer();
+                surfaceCi.pLayer = (nint)metalLayer.NativePtr.ToPointer();
                 VkSurfaceKHR surface;
                 var result = instApi.vkCreateMetalSurfaceEXT(&surfaceCi, null, &surface);
                 CheckResult(result);
@@ -194,7 +194,7 @@ namespace Veldrid.Vk
                 // Fallback: VK_MVK_macos_surface — use EXT metal surface wherever possible.
                 // On older MoltenVK without EXT_metal_surface this path runs; pLayer == contentView.
                 var surfaceCi = new VkMetalSurfaceCreateInfoEXT();
-                surfaceCi.pLayer = contentView.NativePtr.ToPointer();
+                surfaceCi.pLayer = (nint)contentView.NativePtr.ToPointer();
                 VkSurfaceKHR surface;
                 var result = instApi.vkCreateMetalSurfaceEXT(&surfaceCi, null, &surface);
                 CheckResult(result);
@@ -216,7 +216,7 @@ namespace Veldrid.Vk
 
             var instApi = gd?.InstanceApi ?? new VkInstanceApi(instance);
             var surfaceCi = new VkMetalSurfaceCreateInfoEXT();
-            surfaceCi.pLayer = metalLayer.NativePtr.ToPointer();
+            surfaceCi.pLayer = (nint)metalLayer.NativePtr.ToPointer();
             VkSurfaceKHR surface;
             var result = instApi.vkCreateMetalSurfaceEXT(&surfaceCi, null, &surface);
             CheckResult(result);

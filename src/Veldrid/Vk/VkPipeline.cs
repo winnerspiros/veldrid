@@ -289,7 +289,9 @@ namespace Veldrid.Vk
                 pipelineCi.pNext = &pipelineRenderingCi;
                 pipelineCi.renderPass = VkRenderPass.Null;
 
-                var result = gd.DeviceApi.vkCreateGraphicsPipelines(this.gd.PipelineCache, 1, &pipelineCi, null, out devicePipeline);
+                Vortice.Vulkan.VkPipeline localPipeline;
+                var result = gd.DeviceApi.vkCreateGraphicsPipelines(gd.PipelineCache, 1, &pipelineCi, null, &localPipeline);
+                devicePipeline = localPipeline;
                 CheckResult(result);
             }
             else
@@ -373,11 +375,13 @@ namespace Veldrid.Vk
 
                 pipelineCi.renderPass = renderPass;
 
-                var result = gd.DeviceApi.vkCreateGraphicsPipelines(this.gd.PipelineCache, 1, &pipelineCi, null, out devicePipeline);
+                Vortice.Vulkan.VkPipeline localPipeline;
+                var result = gd.DeviceApi.vkCreateGraphicsPipelines(gd.PipelineCache, 1, &pipelineCi, null, &localPipeline);
+                devicePipeline = localPipeline;
                 CheckResult(result);
             }
 
-            ResourceSetCount = (uint)description.ResourceLayouts.Length;
+            ResourceSetCount= (uint)description.ResourceLayouts.Length;
             DynamicOffsetsCount = 0;
             foreach (ResourceLayout layout in description.ResourceLayouts)
                 DynamicOffsetsCount += layout.DynamicBufferCount;
@@ -444,11 +448,13 @@ namespace Veldrid.Vk
             stageCi.pSpecializationInfo = &specializationInfo;
             pipelineCi.stage = stageCi;
 
-            var result = gd.DeviceApi.vkCreateComputePipelines(this.gd.PipelineCache,
+            Vortice.Vulkan.VkPipeline localPipeline;
+            var result = gd.DeviceApi.vkCreateComputePipelines(gd.PipelineCache,
                 1,
-                ref pipelineCi,
+                &pipelineCi,
                 null,
-                out devicePipeline);
+                &localPipeline);
+            devicePipeline = localPipeline;
             CheckResult(result);
 
             ResourceSetCount = (uint)description.ResourceLayouts.Length;

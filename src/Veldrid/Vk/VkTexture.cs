@@ -112,21 +112,15 @@ namespace Veldrid.Vk
                 VkMemoryRequirements memoryRequirements;
                 bool prefersDedicatedAllocation;
 
-                if (this.gd.GetImageMemoryRequirements2 != null)
                 {
                     var memReqsInfo2 = new VkImageMemoryRequirementsInfo2();
                     memReqsInfo2.image = optimalImage;
                     var memReqs2 = new VkMemoryRequirements2();
                     var dedicatedReqs = new VkMemoryDedicatedRequirements();
                     memReqs2.pNext = &dedicatedReqs;
-                    this.gd.GetImageMemoryRequirements2(this.gd.Device, &memReqsInfo2, &memReqs2);
+                    gd.DeviceApi.vkGetImageMemoryRequirements2(&memReqsInfo2, &memReqs2);
                     memoryRequirements = memReqs2.memoryRequirements;
                     prefersDedicatedAllocation = dedicatedReqs.prefersDedicatedAllocation || dedicatedReqs.requiresDedicatedAllocation;
-                }
-                else
-                {
-                    gd.DeviceApi.vkGetImageMemoryRequirements(optimalImage, out memoryRequirements);
-                    prefersDedicatedAllocation = false;
                 }
 
                 // For transient attachments, prefer LAZILY_ALLOCATED memory so the image lives only
@@ -193,21 +187,15 @@ namespace Veldrid.Vk
                 VkMemoryRequirements bufferMemReqs;
                 bool prefersDedicatedAllocation;
 
-                if (this.gd.GetBufferMemoryRequirements2 != null)
                 {
                     var memReqInfo2 = new VkBufferMemoryRequirementsInfo2();
                     memReqInfo2.buffer = stagingBuffer;
                     var memReqs2 = new VkMemoryRequirements2();
                     var dedicatedReqs = new VkMemoryDedicatedRequirements();
                     memReqs2.pNext = &dedicatedReqs;
-                    this.gd.GetBufferMemoryRequirements2(this.gd.Device, &memReqInfo2, &memReqs2);
+                    gd.DeviceApi.vkGetBufferMemoryRequirements2(&memReqInfo2, &memReqs2);
                     bufferMemReqs = memReqs2.memoryRequirements;
                     prefersDedicatedAllocation = dedicatedReqs.prefersDedicatedAllocation || dedicatedReqs.requiresDedicatedAllocation;
-                }
-                else
-                {
-                    gd.DeviceApi.vkGetBufferMemoryRequirements(stagingBuffer, out bufferMemReqs);
-                    prefersDedicatedAllocation = false;
                 }
 
                 // Use "host cached" memory when available, for better performance of GPU -> CPU transfers
@@ -348,7 +336,8 @@ namespace Veldrid.Vk
                     layerCount,
                     aspectMask,
                     imageLayouts[CalculateSubresource(baseMipLevel, baseArrayLayer)],
-                    newLayout);
+                    newLayout,
+                    gd.DeviceApi);
 
                 for (uint level = 0; level < levelCount; level++)
                 {
@@ -396,7 +385,8 @@ namespace Veldrid.Vk
                             1,
                             aspectMask,
                             oldLayout,
-                            newLayout);
+                            newLayout,
+                            gd.DeviceApi);
 
                         imageLayouts[subresource] = newLayout;
                     }

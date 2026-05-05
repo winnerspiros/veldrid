@@ -215,7 +215,7 @@ namespace Veldrid.Vk
         {
             if (index == 0 || gd.Features.MultipleViewports)
             {
-                var scissor = new VkRect2D((int)x, (int)y, (int)width, (int)height);
+                var scissor = new VkRect2D(new VkOffset2D((int)x, (int)y), new VkExtent2D(width, height));
 
                 if (scissorRects[index] != scissor)
                 {
@@ -303,7 +303,7 @@ namespace Veldrid.Vk
                     ? VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.FragmentShader
                     : VkPipelineStageFlags.VertexInput,
                 VkDependencyFlags.None,
-                1, ref barrier,
+                1, &barrier,
                 0, null,
                 0, null);
         }
@@ -323,6 +323,7 @@ namespace Veldrid.Vk
             ensureNoRenderPass();
             CopyTextureCore_VkCommandBuffer(
                 CommandBuffer,
+                gd.DeviceApi,
                 source, srcX, srcY, srcZ, srcMipLevel, srcBaseArrayLayer,
                 destination, dstX, dstY, dstZ, dstMipLevel, dstBaseArrayLayer,
                 width, height, depth, layerCount);
@@ -335,6 +336,7 @@ namespace Veldrid.Vk
 
         internal static void CopyTextureCore_VkCommandBuffer(
             VkCommandBuffer cb,
+            VkDeviceApi deviceApi,
             Texture source,
             uint srcX, uint srcY, uint srcZ,
             uint srcMipLevel,
@@ -403,14 +405,14 @@ namespace Veldrid.Vk
                     layerCount,
                     VkImageLayout.TransferDstOptimal);
 
-                gd.DeviceApi.vkCmdCopyImage(
+                deviceApi.vkCmdCopyImage(
                     cb,
                     srcVkTexture.OptimalDeviceImage,
                     VkImageLayout.TransferSrcOptimal,
                     dstVkTexture.OptimalDeviceImage,
                     VkImageLayout.TransferDstOptimal,
                     1,
-                    ref region);
+                    &region);
 
                 if ((srcVkTexture.Usage & TextureUsage.Sampled) != 0)
                 {
@@ -486,7 +488,7 @@ namespace Veldrid.Vk
                     imageSubresource = dstSubresource
                 };
 
-                gd.DeviceApi.vkCmdCopyBufferToImage(cb, srcBuffer, dstImage, VkImageLayout.TransferDstOptimal, 1, &regions);
+                deviceApi.vkCmdCopyBufferToImage(cb, srcBuffer, dstImage, VkImageLayout.TransferDstOptimal, 1, &regions);
 
                 if ((dstVkTexture.Usage & TextureUsage.Sampled) != 0)
                 {
@@ -559,7 +561,7 @@ namespace Veldrid.Vk
                     layers[layer] = region;
                 }
 
-                gd.DeviceApi.vkCmdCopyImageToBuffer(cb, srcImage, VkImageLayout.TransferSrcOptimal, dstBuffer, layerCount, layers);
+                deviceApi.vkCmdCopyImageToBuffer(cb, srcImage, VkImageLayout.TransferSrcOptimal, dstBuffer, layerCount, layers);
 
                 if ((srcVkTexture.Usage & TextureUsage.Sampled) != 0)
                 {
@@ -605,7 +607,7 @@ namespace Veldrid.Vk
                                 size = width * pixelSize
                             };
 
-                            gd.DeviceApi.vkCmdCopyBuffer(cb, srcBuffer, dstBuffer, 1, &region);
+                            deviceApi.vkCmdCopyBuffer(cb, srcBuffer, dstBuffer, 1, &region);
                         }
                     }
                 }
@@ -636,7 +638,7 @@ namespace Veldrid.Vk
                                 size = denseRowSize
                             };
 
-                            gd.DeviceApi.vkCmdCopyBuffer(cb, srcBuffer, dstBuffer, 1, &region);
+                            deviceApi.vkCmdCopyBuffer(cb, srcBuffer, dstBuffer, 1, &region);
                         }
                     }
                 }
@@ -696,7 +698,7 @@ namespace Veldrid.Vk
                 vkDestination.OptimalDeviceImage,
                 VkImageLayout.TransferDstOptimal,
                 1,
-                ref region);
+                &region);
 
             if ((vkDestination.Usage & TextureUsage.Sampled) != 0) vkDestination.TransitionImageLayout(CommandBuffer, 0, 1, 0, 1, VkImageLayout.ShaderReadOnlyOptimal);
         }
@@ -768,7 +770,8 @@ namespace Veldrid.Vk
             cbAi.commandPool = pool;
             cbAi.commandBufferCount = 1;
             cbAi.level = VkCommandBufferLevel.Primary;
-            var result = gd.DeviceApi.vkAllocateCommandBuffers(&cbAi, out var cb);
+            VkCommandBuffer cb;
+            var result = gd.DeviceApi.vkAllocateCommandBuffers(&cbAi, &cb);
             CheckResult(result);
             return cb;
         }
@@ -1117,7 +1120,7 @@ namespace Veldrid.Vk
             }
 
             var renderPassBi = new VkRenderPassBeginInfo();
-            renderPassBi.renderArea = new VkRect2D(currentFramebuffer.RenderableWidth, currentFramebuffer.RenderableHeight);
+            renderPassBi.renderArea = new VkRect2D(new VkOffset2D(0, 0), new VkExtent2D(currentFramebuffer.RenderableWidth, currentFramebuffer.RenderableHeight));
             renderPassBi.framebuffer = currentFramebuffer.CurrentFramebuffer;
 
             if (!haveAnyAttachments || !haveAllClearValues)
@@ -1360,7 +1363,7 @@ namespace Veldrid.Vk
             }
 
             var renderingInfo = new VkRenderingInfo();
-            renderingInfo.renderArea = new VkRect2D(currentFramebuffer.RenderableWidth, currentFramebuffer.RenderableHeight);
+            renderingInfo.renderArea = new VkRect2D(new VkOffset2D(0, 0), new VkExtent2D(currentFramebuffer.RenderableWidth, currentFramebuffer.RenderableHeight));
             renderingInfo.layerCount = 1;
             renderingInfo.colorAttachmentCount = (uint)colorCount;
             renderingInfo.pColorAttachments = colorCount > 0 ? colorAttachments : null;
@@ -1762,7 +1765,7 @@ namespace Veldrid.Vk
                 uint mipHeight = Math.Max(height >> 1, 1);
                 uint mipDepth = Math.Max(depth >> 1, 1);
 
-                VkImageBlit region = new VkImageBlit
+                var region = new VkImageBlit
                 {
                     srcSubresource = new VkImageSubresourceLayers
                     {
@@ -1771,9 +1774,6 @@ namespace Veldrid.Vk
                         layerCount = layerCount,
                         mipLevel = level - 1
                     },
-                    srcOffsets[0] = new VkOffset3D(),
-                    srcOffsets[1] = new VkOffset3D { x = (int)width, y = (int)height, z = (int)depth },
-                    dstOffsets[0] = new VkOffset3D(),
                     dstSubresource = new VkImageSubresourceLayers
                     {
                         aspectMask = VkImageAspectFlags.Color,
@@ -1781,8 +1781,11 @@ namespace Veldrid.Vk
                         layerCount = layerCount,
                         mipLevel = level
                     },
-                    dstOffsets[1] = new VkOffset3D { x = (int)mipWidth, y = (int)mipHeight, z = (int)mipDepth }
                 };
+                region.srcOffsets[0] = new VkOffset3D();
+                region.srcOffsets[1] = new VkOffset3D { x = (int)width, y = (int)height, z = (int)depth };
+                region.dstOffsets[0] = new VkOffset3D();
+                region.dstOffsets[1] = new VkOffset3D { x = (int)mipWidth, y = (int)mipHeight, z = (int)mipDepth };
 
                 gd.DeviceApi.vkCmdBlitImage(
                     CommandBuffer,
@@ -1855,7 +1858,7 @@ namespace Veldrid.Vk
             };
 
             // Use KEEP for both combiners (pipeline + image) — the per-draw rate is authoritative.
-            var combiners = stackalloc uint[2];
+            var combiners = stackalloc VkFragmentShadingRateCombinerOpKHR[2];
             combiners[0] = VkFragmentShadingRateCombinerOpKHR.Keep;
             combiners[1] = VkFragmentShadingRateCombinerOpKHR.Keep;
 

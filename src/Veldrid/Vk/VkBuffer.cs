@@ -58,24 +58,14 @@ namespace Veldrid.Vk
             var result = gd.DeviceApi.vkCreateBuffer(&bufferCi, null, out deviceBuffer);
             CheckResult(result);
 
-            bool prefersDedicatedAllocation;
-
-            if (this.gd.GetBufferMemoryRequirements2 != null)
-            {
-                var memReqInfo2 = new VkBufferMemoryRequirementsInfo2();
-                memReqInfo2.buffer = deviceBuffer;
-                var memReqs2 = new VkMemoryRequirements2();
-                var dedicatedReqs = new VkMemoryDedicatedRequirements();
-                memReqs2.pNext = &dedicatedReqs;
-                this.gd.GetBufferMemoryRequirements2(this.gd.Device, &memReqInfo2, &memReqs2);
-                bufferMemoryRequirements = memReqs2.memoryRequirements;
-                prefersDedicatedAllocation = dedicatedReqs.prefersDedicatedAllocation || dedicatedReqs.requiresDedicatedAllocation;
-            }
-            else
-            {
-                gd.DeviceApi.vkGetBufferMemoryRequirements(deviceBuffer, out bufferMemoryRequirements);
-                prefersDedicatedAllocation = false;
-            }
+            var memReqInfo2 = new VkBufferMemoryRequirementsInfo2();
+            memReqInfo2.buffer = deviceBuffer;
+            var memReqs2 = new VkMemoryRequirements2();
+            var dedicatedReqs = new VkMemoryDedicatedRequirements();
+            memReqs2.pNext = &dedicatedReqs;
+            gd.DeviceApi.vkGetBufferMemoryRequirements2(&memReqInfo2, &memReqs2);
+            bufferMemoryRequirements = memReqs2.memoryRequirements;
+            bool prefersDedicatedAllocation = dedicatedReqs.prefersDedicatedAllocation || dedicatedReqs.requiresDedicatedAllocation;
 
             bool isStaging = (usage & BufferUsage.Staging) == BufferUsage.Staging;
             bool hostVisible = isStaging || (usage & BufferUsage.Dynamic) == BufferUsage.Dynamic;
