@@ -3,15 +3,14 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
-using Vulkan;
-using static Vulkan.VulkanNative;
-
+using Vortice.Vulkan;
+using static Vortice.Vulkan.Vulkan;
 namespace Veldrid.Vk
 {
     /// <summary>
     ///     Vulkan implementation of <see cref="BufferUpdateBatch" />: stages every pending region into a
     ///     single growable host-visible buffer, then on <see cref="Submit" /> records one command buffer that
-    ///     performs all the buffer-to-buffer copies and ends with a single <c>vkQueueSubmit</c>.
+    ///     performs all the buffer-to-buffer copies and ends with a single <c>gd.DeviceApi.vkQueueSubmit</c>.
     ///     Mirrors <see cref="VkTextureUpdateBatch" /> for the buffer path.
     ///
     ///     <para>
@@ -57,8 +56,8 @@ namespace Veldrid.Vk
                 return;
             }
 
-            // vkCmdCopyBuffer requires srcOffset and dstOffset to be 4-byte aligned and size to be a
-            // multiple of 4 only when used with vkCmdUpdateBuffer; for vkCmdCopyBuffer the only constraint
+            // gd.DeviceApi.vkCmdCopyBuffer requires srcOffset and dstOffset to be 4-byte aligned and size to be a
+            // multiple of 4 only when used with vkCmdUpdateBuffer; for gd.DeviceApi.vkCmdCopyBuffer the only constraint
             // is that the regions don't exceed buffer bounds. We still 4-align the staging offset to keep
             // adjacent memcpys naturally aligned and to satisfy any driver fast-paths that prefer it.
             stagingOffset = align(stagingOffset, 4u);
@@ -90,7 +89,7 @@ namespace Veldrid.Vk
             var pool = gd.GetFreeCommandPool();
             var cb = pool.BeginNewCommandBuffer();
 
-            // One vkCmdCopyBuffer per destination buffer, batching all regions for that destination.
+            // One gd.DeviceApi.vkCmdCopyBuffer per destination buffer, batching all regions for that destination.
             // Sort by destination identity so identical destinations group naturally; then issue one call
             // per group with a contiguous span of regions backed by a single pooled scratch array.
             pendingCopies.Sort(static (a, b) =>
@@ -110,7 +109,7 @@ namespace Veldrid.Vk
                     for (int j = 0; j < regionCount; j++) regionScratch[j] = pendingCopies[groupStart + j].Region;
 
                     fixed (VkBufferCopy* regionsPtr = regionScratch)
-                        vkCmdCopyBuffer(cb, stagingBuffer.DeviceBuffer, dst.DeviceBuffer, (uint)regionCount, regionsPtr);
+                        gd.DeviceApi.vkCmdCopyBuffer(cb, stagingBuffer.DeviceBuffer, dst.DeviceBuffer, (uint)regionCount, regionsPtr);
                 }
             }
             finally

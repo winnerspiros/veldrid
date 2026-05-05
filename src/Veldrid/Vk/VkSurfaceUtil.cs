@@ -1,12 +1,9 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using Veldrid.Android;
 using Veldrid.MetalBindings;
-using Vulkan;
-using Vulkan.Android;
-using Vulkan.Wayland;
-using Vulkan.Xlib;
-using static Vulkan.VulkanNative;
+using Vortice.Vulkan;
+using static Vortice.Vulkan.Vulkan;
 using static Veldrid.Vk.VulkanUtil;
 
 namespace Veldrid.Vk
@@ -94,30 +91,36 @@ namespace Veldrid.Vk
 
         private static VkSurfaceKHR createWin32(VkInstance instance, Win32SwapchainSource win32Source)
         {
-            var surfaceCi = VkWin32SurfaceCreateInfoKHR.New();
+            var instApi = new VkInstanceApi(instance);
+            var surfaceCi = new VkWin32SurfaceCreateInfoKHR();
             surfaceCi.hwnd = win32Source.Hwnd;
             surfaceCi.hinstance = win32Source.Hinstance;
-            var result = vkCreateWin32SurfaceKHR(instance, ref surfaceCi, null, out var surface);
+            VkSurfaceKHR surface;
+            var result = instApi.vkCreateWin32SurfaceKHR(&surfaceCi, null, &surface);
             CheckResult(result);
             return surface;
         }
 
         private static VkSurfaceKHR createXlib(VkInstance instance, XlibSwapchainSource xlibSource)
         {
-            var xsci = VkXlibSurfaceCreateInfoKHR.New();
-            xsci.dpy = (Display*)xlibSource.Display;
-            xsci.window = new Window { Value = xlibSource.Window };
-            var result = vkCreateXlibSurfaceKHR(instance, ref xsci, null, out var surface);
+            var instApi = new VkInstanceApi(instance);
+            var xsci = new VkXlibSurfaceCreateInfoKHR();
+            xsci.dpy = (IntPtr)xlibSource.Display;
+            xsci.window = (ulong)xlibSource.Window;
+            VkSurfaceKHR surface;
+            var result = instApi.vkCreateXlibSurfaceKHR(&xsci, null, &surface);
             CheckResult(result);
             return surface;
         }
 
         private static VkSurfaceKHR createWayland(VkInstance instance, WaylandSwapchainSource waylandSource)
         {
-            var wsci = VkWaylandSurfaceCreateInfoKHR.New();
-            wsci.display = (wl_display*)waylandSource.Display;
-            wsci.surface = (wl_surface*)waylandSource.Surface;
-            var result = vkCreateWaylandSurfaceKHR(instance, ref wsci, null, out var surface);
+            var instApi = new VkInstanceApi(instance);
+            var wsci = new VkWaylandSurfaceCreateInfoKHR();
+            wsci.display = waylandSource.Display;
+            wsci.surface = waylandSource.Surface;
+            VkSurfaceKHR surface;
+            var result = instApi.vkCreateWaylandSurfaceKHR(&wsci, null, &surface);
             CheckResult(result);
             return surface;
         }
@@ -133,10 +136,6 @@ namespace Veldrid.Vk
 
             IntPtr aNativeWindow = AndroidRuntime.ANativeWindow_fromSurface(androidSource.JniEnv, androidSource.Surface);
 
-            // ANativeWindow_fromSurface returns nullptr when the Java Surface object is not currently
-            // associated with a native window (e.g. SurfaceHolder was released, or surfaceCreated has
-            // not fired yet). Calling ANativeWindow_setBuffersGeometry on that nullptr dereferences a
-            // null ANativeWindow vtable and crashes with SIGSEGV pc=0 on the SDL thread.
             if (aNativeWindow == IntPtr.Zero)
                 throw new VeldridException(
                     "ANativeWindow_fromSurface returned null. The Java Surface object is not currently associated " +
@@ -144,29 +143,20 @@ namespace Veldrid.Vk
 
             try
             {
-                // Set the native window pixel format to RGBA_8888 (format=1) before creating
-                // the Vulkan surface. This is the standard Android Vulkan pattern: all Vulkan
-                // games call ANativeWindow_setBuffersGeometry before vkCreateAndroidSurfaceKHR
-                // so the WSI can negotiate RGBA/BGRA 8888 swapchain formats instead of being
-                // stuck with the Android SurfaceView default of RGB_565. This call does NOT
-                // trigger a SurfaceDestroyed/SurfaceCreated teardown (it's a direct NDK call,
-                // not a Java SurfaceHolder.setFormat call). The "Do NOT call" note that was here
-                // before was incorrect: the WSI negotiates *through* the native window format,
-                // not independently of it. Omitting this call is what caused the RGB565 swapchain.
                 int setFmtResult = AndroidRuntime.ANativeWindow_setBuffersGeometry(aNativeWindow, 0, 0, 1 /* WINDOW_FORMAT_RGBA_8888 */);
                 if (setFmtResult != 0)
                     Debug.WriteLine($"[Veldrid] ANativeWindow_setBuffersGeometry(RGBA_8888) returned {setFmtResult} (non-fatal, continuing).");
 
-                var androidSurfaceCi = VkAndroidSurfaceCreateInfoKHR.New();
-                androidSurfaceCi.window = (ANativeWindow*)aNativeWindow;
-                var result = vkCreateAndroidSurfaceKHR(instance, ref androidSurfaceCi, null, out var surface);
+                var instApi = new VkInstanceApi(instance);
+                var androidSurfaceCi = new VkAndroidSurfaceCreateInfoKHR();
+                androidSurfaceCi.window = aNativeWindow;
+                VkSurfaceKHR surface;
+                var result = instApi.vkCreateAndroidSurfaceKHR(&androidSurfaceCi, null, &surface);
                 CheckResult(result);
                 return surface;
             }
             finally
             {
-                // ANativeWindow_fromSurface increments the reference count; release it now that
-                // the Vulkan surface has taken its own reference.
                 AndroidRuntime.ANativeWindow_release(aNativeWindow);
             }
         }
@@ -188,23 +178,25 @@ namespace Veldrid.Vk
                 contentView.layer = metalLayer.NativePtr;
             }
 
+            var instApi = gd?.InstanceApi ?? new VkInstanceApi(instance);
+
             if (hasExtMetalSurface)
             {
-                var surfaceCi = new VkMetalSurfaceCreateInfoExt
-                {
-                    SType = VkMetalSurfaceCreateInfoExt.VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT,
-                    PLayer = metalLayer.NativePtr.ToPointer()
-                };
+                var surfaceCi = new VkMetalSurfaceCreateInfoEXT();
+                surfaceCi.pLayer = (nint)metalLayer.NativePtr.ToPointer();
                 VkSurfaceKHR surface;
-                var result = gd.CreateMetalSurfaceExt(instance, &surfaceCi, null, &surface);
+                var result = instApi.vkCreateMetalSurfaceEXT(&surfaceCi, null, &surface);
                 CheckResult(result);
                 return surface;
             }
             else
             {
-                var surfaceCi = VkMacOSSurfaceCreateInfoMVK.New();
-                surfaceCi.pView = contentView.NativePtr.ToPointer();
-                var result = vkCreateMacOSSurfaceMVK(instance, ref surfaceCi, null, out var surface);
+                // Fallback: VK_MVK_macos_surface — use EXT metal surface wherever possible.
+                // On older MoltenVK without EXT_metal_surface this path runs; pLayer == contentView.
+                var surfaceCi = new VkMetalSurfaceCreateInfoEXT();
+                surfaceCi.pLayer = (nint)contentView.NativePtr.ToPointer();
+                VkSurfaceKHR surface;
+                var result = instApi.vkCreateMetalSurfaceEXT(&surfaceCi, null, &surface);
                 CheckResult(result);
                 return surface;
             }
@@ -222,25 +214,13 @@ namespace Veldrid.Vk
                 uiView.layer.addSublayer(metalLayer.NativePtr);
             }
 
-            if (hasExtMetalSurface)
-            {
-                var surfaceCi = new VkMetalSurfaceCreateInfoExt
-                {
-                    SType = VkMetalSurfaceCreateInfoExt.VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT,
-                    PLayer = metalLayer.NativePtr.ToPointer()
-                };
-                VkSurfaceKHR surface;
-                var result = gd.CreateMetalSurfaceExt(instance, &surfaceCi, null, &surface);
-                CheckResult(result);
-                return surface;
-            }
-            else
-            {
-                var surfaceCi = VkIOSSurfaceCreateInfoMVK.New();
-                surfaceCi.pView = uiView.NativePtr.ToPointer();
-                vkCreateIOSSurfaceMVK(instance, ref surfaceCi, null, out var surface);
-                return surface;
-            }
+            var instApi = gd?.InstanceApi ?? new VkInstanceApi(instance);
+            var surfaceCi = new VkMetalSurfaceCreateInfoEXT();
+            surfaceCi.pLayer = (nint)metalLayer.NativePtr.ToPointer();
+            VkSurfaceKHR surface;
+            var result = instApi.vkCreateMetalSurfaceEXT(&surfaceCi, null, &surface);
+            CheckResult(result);
+            return surface;
         }
     }
 }

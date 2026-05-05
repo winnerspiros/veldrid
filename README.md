@@ -71,6 +71,22 @@ New shader stages: `ShaderStages.Task` (amplification) and `ShaderStages.Mesh`. 
 | Vulkan Synchronization2 (core 1.3) | `BackendInfoVulkan.HasSynchronization2` |
 | Vulkan Timeline Semaphores (core 1.2) | `BackendInfoVulkan.HasTimelineSemaphore` |
 
+### Vortice.Vulkan Migration (ppy/Vk 1.0.26 → Vortice.Vulkan 3.2.1)
+
+The Vulkan backend was fully migrated from the ppy fork of vulkan-net to `Vortice.Vulkan 3.2.1`.
+
+**Correctness**
+- All Vulkan struct `sType` fields are now set automatically in Vortice constructors — the class of missing-`.New()` silent corruption bugs is eliminated by construction.
+- Debug report callbacks (`vkCreateDebugReportCallbackEXT` / `vkDestroyDebugReportCallbackEXT`) now use `InstanceApi` dispatch — a null proc-addr no longer throws a late `NullReferenceException`; it cleanly returns `VK_ERROR_EXTENSION_NOT_PRESENT`.
+- `vkPhysicalDeviceDriverProperties`, `VkDriverId`, `VkConformanceVersion` are now Vortice-provided types — hand-rolled structs with hardcoded `sType` casts removed.
+- `VK_EXT_swapchain_maintenance1` present-mode hot-swap (`queryCompatiblePresentModes`) was blocked by a leftover `if (false)` migration guard — now active on all supporting drivers. vsync/uncapped toggles no longer rebuild the swapchain.
+
+**Performance**
+- `vkEnumerateInstanceVersion` now calls `Vulkan.vkEnumerateInstanceVersion()` directly (Vortice global function) — removed a `Marshal.GetDelegateForFunctionPointer` delegate trampoline on the device-creation path.
+- All ppy.Vk extension dispatch delegates (`VkGetBufferMemoryRequirements2T`, `VkGetImageMemoryRequirements2T`, `VkGetPhysicalDeviceProperties2T`, `VkCmdPushDescriptorSetKHRT`, `VkCreateMetalSurfaceExtT`, `VkCmdDebugMarker*T`, etc.) removed. Extension calls now go through `VkDeviceApi`/`VkInstanceApi` direct function-pointer dispatch tables — same cost as core calls, fully inlineable by the JIT, no GC pressure.
+- `VkPipeline` shader stage construction: `FixedUtf8String` (heap-allocated `GCHandle`-pinned object per entry-point) replaced with `stackalloc byte[shaders.Length * 256]` — zero heap allocation, zero `GCHandle` overhead per pipeline creation.
+- All `getInstanceProcAddr` / `getDeviceProcAddr` helper methods removed (8 methods, all dead after migration).
+
 ### Vortice.Windows Upgrade (2.4.2 → 3.8.3)
 
 - Native .NET 10 support — no compatibility shims
@@ -105,7 +121,7 @@ New shader stages: `ShaderStages.Task` (amplification) and `ShaderStages.Mesh`. 
 - **Memory allocator** — block-split on allocation updates in-place (no `RemoveAt + Insert`), eliminating O(n) shifts.
 - **Staging buffer pool** — swap-remove O(1) instead of `List.Remove` O(n) when recycling used buffers.
 - **Pre-sized sampled image list** (capacity 32) — no hot-path reallocation during draw/dispatch.
-- `stackalloc` for descriptor sets and dynamic offsets in hot paths.
+- `stackalloc` for descriptor sets, dynamic offsets, and shader-stage entry-point name encoding in hot paths — zero heap allocation on pipeline creation and per-draw paths.
 - UTF-8 `u8` string literals for all proc address lookups — zero runtime encoding overhead.
 - Extension detection: `VK_EXT_memory_budget`, `VK_EXT_host_image_copy`, `VK_EXT_descriptor_indexing`.
 

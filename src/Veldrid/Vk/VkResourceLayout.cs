@@ -1,5 +1,5 @@
-﻿using Vulkan;
-using static Vulkan.VulkanNative;
+using Vortice.Vulkan;
+using static Vortice.Vulkan.Vulkan;
 using static Veldrid.Vk.VulkanUtil;
 
 namespace Veldrid.Vk
@@ -39,7 +39,7 @@ namespace Veldrid.Vk
             : base(ref description)
         {
             this.gd = gd;
-            var dslCi = VkDescriptorSetLayoutCreateInfo.New();
+            var dslCi = new VkDescriptorSetLayoutCreateInfo();
             var elements = description.Elements;
             DescriptorTypes = new VkDescriptorType[elements.Length];
             var bindings = stackalloc VkDescriptorSetLayoutBinding[elements.Length];
@@ -111,13 +111,13 @@ namespace Veldrid.Vk
                 && elements.Length <= gd.MaxPushDescriptors)
             {
                 IsPushDescriptorLayout = true;
-                dslCi.flags = VkDescriptorSetLayoutCreateFlags.PushDescriptorKHR;
+                dslCi.flags = VkDescriptorSetLayoutCreateFlags.PushDescriptor;
             }
 
             dslCi.bindingCount = (uint)elements.Length;
             dslCi.pBindings = bindings;
 
-            var result = vkCreateDescriptorSetLayout(this.gd.Device, ref dslCi, null, out dsl);
+            var result = gd.DeviceApi.vkCreateDescriptorSetLayout(&dslCi, null, out dsl);
             CheckResult(result);
         }
 
@@ -128,7 +128,7 @@ namespace Veldrid.Vk
             if (!disposed)
             {
                 disposed = true;
-                vkDestroyDescriptorSetLayout(gd.Device, dsl, null);
+                gd.DeviceApi.vkDestroyDescriptorSetLayout(dsl, null);
             }
         }
 

@@ -1,14 +1,14 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Diagnostics;
-using Vulkan;
-using static Vulkan.VulkanNative;
+using Vortice.Vulkan;
+using static Vortice.Vulkan.Vulkan;
 using static Veldrid.Vk.VulkanUtil;
 
 namespace Veldrid.Vk
 {
     internal unsafe class VkFramebuffer : VkFramebufferBase
     {
-        public override Vulkan.VkFramebuffer CurrentFramebuffer => deviceFramebuffer;
+        public override Vortice.Vulkan.VkFramebuffer CurrentFramebuffer => deviceFramebuffer;
         public override VkRenderPass RenderPassNoClearInit => renderPassNoClear;
         public override VkRenderPass RenderPassNoClearLoad => renderPassNoClearLoad;
         public override VkRenderPass RenderPassClear => renderPassClear;
@@ -32,7 +32,7 @@ namespace Veldrid.Vk
         }
 
         private readonly VkGraphicsDevice gd;
-        private readonly Vulkan.VkFramebuffer deviceFramebuffer;
+        private readonly Vortice.Vulkan.VkFramebuffer deviceFramebuffer;
         private readonly VkRenderPass renderPassNoClearLoad;
         private readonly VkRenderPass renderPassNoClear;
         private readonly VkRenderPass renderPassClear;
@@ -52,7 +52,7 @@ namespace Veldrid.Vk
         {
             this.gd = gd;
 
-            var renderPassCi = VkRenderPassCreateInfo.New();
+            var renderPassCi = new VkRenderPassCreateInfo();
 
             var attachments = new StackList<VkAttachmentDescription>();
 
@@ -138,7 +138,7 @@ namespace Veldrid.Vk
 
             var subpassDependency = new VkSubpassDependency
             {
-                srcSubpass = SubpassExternal,
+                srcSubpass = VK_SUBPASS_EXTERNAL,
                 srcStageMask = VkPipelineStageFlags.ColorAttachmentOutput,
                 dstStageMask = VkPipelineStageFlags.ColorAttachmentOutput,
                 dstAccessMask = VkAccessFlags.ColorAttachmentRead | VkAccessFlags.ColorAttachmentWrite
@@ -151,7 +151,7 @@ namespace Veldrid.Vk
             renderPassCi.dependencyCount = 1;
             renderPassCi.pDependencies = &subpassDependency;
 
-            var creationResult = vkCreateRenderPass(this.gd.Device, ref renderPassCi, null, out renderPassNoClear);
+            var creationResult = gd.DeviceApi.vkCreateRenderPass(&renderPassCi, null, out renderPassNoClear);
             CheckResult(creationResult);
 
             for (int i = 0; i < colorAttachmentCount; i++)
@@ -168,7 +168,7 @@ namespace Veldrid.Vk
                 if (hasStencil) attachments[attachments.Count - 1].stencilLoadOp = VkAttachmentLoadOp.Load;
             }
 
-            creationResult = vkCreateRenderPass(this.gd.Device, ref renderPassCi, null, out renderPassNoClearLoad);
+            creationResult = gd.DeviceApi.vkCreateRenderPass(&renderPassCi, null, out renderPassNoClearLoad);
             CheckResult(creationResult);
 
             // Load version
@@ -187,7 +187,7 @@ namespace Veldrid.Vk
                 attachments[i].initialLayout = VkImageLayout.Undefined;
             }
 
-            creationResult = vkCreateRenderPass(this.gd.Device, ref renderPassCi, null, out renderPassClear);
+            creationResult = gd.DeviceApi.vkCreateRenderPass(&renderPassCi, null, out renderPassClear);
             CheckResult(creationResult);
 
             // Build renderPassClearSampledInit: for sampled color attachments use loadOp=Clear /
@@ -224,11 +224,11 @@ namespace Veldrid.Vk
 
             if (hasSampledColorTarget)
             {
-                creationResult = vkCreateRenderPass(this.gd.Device, ref renderPassCi, null, out renderPassClearSampledInit);
+                creationResult = gd.DeviceApi.vkCreateRenderPass(&renderPassCi, null, out renderPassClearSampledInit);
                 CheckResult(creationResult);
             }
 
-            var fbCi = VkFramebufferCreateInfo.New();
+            var fbCi = new VkFramebufferCreateInfo();
             uint fbAttachmentsCount = (uint)description.ColorTargets.Length;
             if (description.DepthTarget != null) fbAttachmentsCount += 1;
 
@@ -237,7 +237,7 @@ namespace Veldrid.Vk
             for (int i = 0; i < colorAttachmentCount; i++)
             {
                 var vkColorTarget = Util.AssertSubtype<Texture, VkTexture>(description.ColorTargets[i].Target);
-                var imageViewCi = VkImageViewCreateInfo.New();
+                var imageViewCi = new VkImageViewCreateInfo();
                 imageViewCi.image = vkColorTarget.OptimalDeviceImage;
                 imageViewCi.format = vkColorTarget.VkFormat;
                 imageViewCi.viewType = VkImageViewType.Image2D;
@@ -247,7 +247,7 @@ namespace Veldrid.Vk
                     1,
                     description.ColorTargets[i].ArrayLayer);
                 var dest = fbAttachments + i;
-                var result = vkCreateImageView(this.gd.Device, ref imageViewCi, null, dest);
+                var result = gd.DeviceApi.vkCreateImageView(&imageViewCi, null, dest);
                 CheckResult(result);
                 attachmentViews.Add(*dest);
                 colorViews.Add(*dest);
@@ -258,7 +258,7 @@ namespace Veldrid.Vk
             {
                 var vkDepthTarget = Util.AssertSubtype<Texture, VkTexture>(description.DepthTarget.Value.Target);
                 bool hasStencil = FormatHelpers.IsStencilFormat(vkDepthTarget.Format);
-                var depthViewCi = VkImageViewCreateInfo.New();
+                var depthViewCi = new VkImageViewCreateInfo();
                 depthViewCi.image = vkDepthTarget.OptimalDeviceImage;
                 depthViewCi.format = vkDepthTarget.VkFormat;
                 depthViewCi.viewType = description.DepthTarget.Value.Target.ArrayLayers == 1
@@ -270,7 +270,7 @@ namespace Veldrid.Vk
                     1,
                     description.DepthTarget.Value.ArrayLayer);
                 var dest = fbAttachments + (fbAttachmentsCount - 1);
-                var result = vkCreateImageView(this.gd.Device, ref depthViewCi, null, dest);
+                var result = gd.DeviceApi.vkCreateImageView(&depthViewCi, null, dest);
                 CheckResult(result);
                 attachmentViews.Add(*dest);
                 depthView = *dest;
@@ -306,12 +306,19 @@ namespace Veldrid.Vk
             fbCi.layers = 1;
             fbCi.renderPass = renderPassNoClear;
 
-            creationResult = vkCreateFramebuffer(this.gd.Device, ref fbCi, null, out deviceFramebuffer);
+            creationResult = gd.DeviceApi.vkCreateFramebuffer(&fbCi, null, out deviceFramebuffer);
             CheckResult(creationResult);
 
             if (DepthTarget != null) AttachmentCount += 1;
             AttachmentCount += (uint)ColorTargets.Count;
         }
+
+        // Keep sampled color attachments in ColorAttachmentOptimal during mid-frame FBO switches,
+        // mirroring VkSwapchainFramebuffer. This lets wasAlreadyColorAttachment=true fire on return
+        // to an outer FBO (loadOp=Load), preserving any partial content accumulated before the inner
+        // FBO was bound. TransitionToFinalLayout is still called from End() for the last active FBO,
+        // and transitionImages() emits the ShaderReadOnlyOptimal barrier when textures are sampled.
+        public override void TransitionToFBOSwitchLayout(VkCommandBuffer cb) { }
 
         public override void TransitionToIntermediateLayout(VkCommandBuffer cb)
         {
@@ -368,13 +375,13 @@ namespace Veldrid.Vk
         {
             if (!destroyed)
             {
-                vkDestroyFramebuffer(gd.Device, deviceFramebuffer, null);
-                vkDestroyRenderPass(gd.Device, renderPassNoClear, null);
-                vkDestroyRenderPass(gd.Device, renderPassNoClearLoad, null);
-                vkDestroyRenderPass(gd.Device, renderPassClear, null);
+                gd.DeviceApi.vkDestroyFramebuffer(deviceFramebuffer, null);
+                gd.DeviceApi.vkDestroyRenderPass(renderPassNoClear, null);
+                gd.DeviceApi.vkDestroyRenderPass(renderPassNoClearLoad, null);
+                gd.DeviceApi.vkDestroyRenderPass(renderPassClear, null);
                 if (renderPassClearSampledInit != VkRenderPass.Null)
-                    vkDestroyRenderPass(gd.Device, renderPassClearSampledInit, null);
-                foreach (var view in attachmentViews) vkDestroyImageView(gd.Device, view, null);
+                    gd.DeviceApi.vkDestroyRenderPass(renderPassClearSampledInit, null);
+                foreach (var view in attachmentViews) gd.DeviceApi.vkDestroyImageView(view, null);
 
                 destroyed = true;
             }

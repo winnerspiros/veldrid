@@ -1,14 +1,14 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using Vulkan;
-using static Vulkan.VulkanNative;
+using Vortice.Vulkan;
+using static Vortice.Vulkan.Vulkan;
 using static Veldrid.Vk.VulkanUtil;
 
 namespace Veldrid.Vk
 {
     internal unsafe class VkSwapchainFramebuffer : VkFramebufferBase
     {
-        public override Vulkan.VkFramebuffer CurrentFramebuffer => scFramebuffers[(int)ImageIndex].CurrentFramebuffer;
+        public override Vortice.Vulkan.VkFramebuffer CurrentFramebuffer => scFramebuffers[(int)ImageIndex].CurrentFramebuffer;
 
         public override VkRenderPass RenderPassNoClearInit => scFramebuffers[0].RenderPassNoClearInit;
         public override VkRenderPass RenderPassNoClearLoad => scFramebuffers[0].RenderPassNoClearLoad;
@@ -126,10 +126,11 @@ namespace Veldrid.Vk
 
             // Get the images
             uint scImageCount = 0;
-            var result = vkGetSwapchainImagesKHR(gd.Device, deviceSwapchain, ref scImageCount, null);
+            var result = gd.DeviceApi.vkGetSwapchainImagesKHR(deviceSwapchain, &scImageCount, null);
             CheckResult(result);
             if (scImages.Length < scImageCount) scImages = new VkImage[(int)scImageCount];
-            result = vkGetSwapchainImagesKHR(gd.Device, deviceSwapchain, ref scImageCount, out scImages[0]);
+            fixed (VkImage* imgPtr = scImages)
+                result = gd.DeviceApi.vkGetSwapchainImagesKHR(deviceSwapchain, &scImageCount, imgPtr);
             CheckResult(result);
 
             scImageFormat = surfaceFormat.format;

@@ -1,8 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using Vulkan;
-using static Vulkan.VulkanNative;
+using Vortice.Vulkan;
+using static Vortice.Vulkan.Vulkan;
 using static Veldrid.Vk.VulkanUtil;
 
 namespace Veldrid.Vk
@@ -15,7 +15,7 @@ namespace Veldrid.Vk
 
         public VkSwapchainKHR DeviceSwapchain => deviceSwapchain;
         public uint ImageIndex => currentImageIndex;
-        public Vulkan.VkFence ImageAvailableFence => imageAvailableFence;
+        public Vortice.Vulkan.VkFence ImageAvailableFence => imageAvailableFence;
         public VkSurfaceKHR Surface => surface;
 
         public VkQueue PresentQueue => presentQueue;
@@ -24,7 +24,7 @@ namespace Veldrid.Vk
 
         // True if the swapchain is in a known-bad state and must be re-created before
         // the next present (e.g. transient zero-extent surface, surface-lost recovery
-        // partially completed). SwapBuffersCore reads this and skips vkQueuePresentKHR
+        // partially completed). SwapBuffersCore reads this and skips gd.DeviceApi.vkQueuePresentKHR
         // on this frame, retrying createSwapchain instead.
         public bool NeedsRecreation => needsRecreation;
 
@@ -84,7 +84,7 @@ namespace Veldrid.Vk
         }
 
         // Exposed to VkGraphicsDevice.SwapBuffersCore so the per-present
-        // VkSwapchainPresentModeInfoEXT can carry the active mode.
+        // VkSwapchainPresentModeInfoKHR can carry the active mode.
         public VkPresentModeKHR CurrentPresentMode => currentPresentMode;
 
         // True only when the swapchain was created with a non-trivial compatibility
@@ -105,7 +105,7 @@ namespace Veldrid.Vk
         private VkQueue presentQueue;
         private readonly bool colorSrgb;
         private VkSwapchainKHR deviceSwapchain;
-        private Vulkan.VkFence imageAvailableFence;
+        private Vortice.Vulkan.VkFence imageAvailableFence;
         private bool syncToVBlank;
         private bool? newSyncToVBlank;
         private uint currentImageIndex;
@@ -161,7 +161,7 @@ namespace Veldrid.Vk
 
             if (!getPresentQueueIndex(out presentQueueIndex)) throw new VeldridException("The system does not support presenting the given Vulkan surface.");
 
-            vkGetDeviceQueue(this.gd.Device, presentQueueIndex, 0, out presentQueue);
+            gd.DeviceApi.vkGetDeviceQueue(presentQueueIndex, 0, out presentQueue);
 
             framebuffer = new VkSwapchainFramebuffer(gd, this, surface, description.Width, description.Height, description.DepthFormat);
 
@@ -192,15 +192,15 @@ namespace Veldrid.Vk
                 // before throwing so we don't leak the surface/framebuffer/old chain.
                 framebuffer.Dispose();
                 if (deviceSwapchain != VkSwapchainKHR.Null)
-                    vkDestroySwapchainKHR(this.gd.Device, deviceSwapchain, null);
+                    gd.DeviceApi.vkDestroySwapchainKHR(deviceSwapchain, null);
                 if (surface != VkSurfaceKHR.Null)
-                    vkDestroySurfaceKHR(this.gd.Instance, surface, null);
+                    gd.InstanceApi.vkDestroySurfaceKHR(surface, null);
                 throw new VeldridException("The Vulkan surface was not ready in time; cannot create a swapchain.");
             }
 
-            var fenceCi = VkFenceCreateInfo.New();
+            var fenceCi = new VkFenceCreateInfo();
             fenceCi.flags = VkFenceCreateFlags.None;
-            vkCreateFence(this.gd.Device, ref fenceCi, null, out imageAvailableFence);
+            gd.DeviceApi.vkCreateFence(&fenceCi, null, out imageAvailableFence);
 
             if (AcquireNextImage(this.gd.Device, VkSemaphore.Null, imageAvailableFence))
                 WaitAndResetImageAvailableFence();
@@ -224,7 +224,7 @@ namespace Veldrid.Vk
 
         /// <summary>
         ///     Triggered by <see cref="VkGraphicsDevice.SwapBuffersCore" /> when
-        ///     <c>vkQueuePresentKHR</c> reports <c>VK_ERROR_OUT_OF_DATE_KHR</c> or
+        ///     <c>gd.DeviceApi.vkQueuePresentKHR</c> reports <c>VK_ERROR_OUT_OF_DATE_KHR</c> or
         ///     <c>VK_SUBOPTIMAL_KHR</c> (typical on Android after a rotation /
         ///     fold / DeX-attach). Recreates the swapchain in-place and
         ///     re-acquires so the next frame doesn't have to bounce a second
@@ -238,7 +238,7 @@ namespace Veldrid.Vk
             recreateAndReacquire(framebuffer.Width, framebuffer.Height);
         }
 
-        public bool AcquireNextImage(VkDevice device, VkSemaphore semaphore, Vulkan.VkFence fence)
+        public bool AcquireNextImage(VkDevice device, VkSemaphore semaphore, Vortice.Vulkan.VkFence fence)
         {
             if (newSyncToVBlank != null)
             {
@@ -259,13 +259,11 @@ namespace Veldrid.Vk
             // the render thread. VK_TIMEOUT / VK_NOT_READY are treated like VK_ERROR_OUT_OF_DATE_KHR
             // so the swapchain is force-recreated, converting the hang into a recoverable per-frame stall.
             const ulong acquire_timeout_ns = 100_000_000; // 100 ms
-            var result = vkAcquireNextImageKHR(
-                device,
-                deviceSwapchain,
+            var result = gd.DeviceApi.vkAcquireNextImageKHR(deviceSwapchain,
                 acquire_timeout_ns,
                 semaphore,
                 fence,
-                ref currentImageIndex);
+                out currentImageIndex);
             framebuffer.SetImageIndex(currentImageIndex);
 
             if (result == VkResult.ErrorSurfaceLostKHR)
@@ -306,10 +304,11 @@ namespace Veldrid.Vk
         internal void WaitAndResetImageAvailableFence()
         {
             const ulong fence_wait_timeout_ns = 250_000_000; // 250 ms
-            var result = vkWaitForFences(gd.Device, 1, ref imageAvailableFence, true, fence_wait_timeout_ns);
+            var fence = imageAvailableFence;
+            var result = gd.DeviceApi.vkWaitForFences(1, &fence, true, fence_wait_timeout_ns);
             if (result == VkResult.Success)
             {
-                vkResetFences(gd.Device, 1, ref imageAvailableFence);
+                gd.DeviceApi.vkResetFences(1, &fence);
                 return;
             }
 
@@ -328,17 +327,17 @@ namespace Veldrid.Vk
         private void recreateImageAvailableFence()
         {
             gd.WaitForIdle();
-            vkDestroyFence(gd.Device, imageAvailableFence, null);
-            var fenceCi = VkFenceCreateInfo.New();
+            gd.DeviceApi.vkDestroyFence(imageAvailableFence, null);
+            var fenceCi = new VkFenceCreateInfo();
             fenceCi.flags = VkFenceCreateFlags.None;
-            vkCreateFence(gd.Device, ref fenceCi, null, out imageAvailableFence);
+            gd.DeviceApi.vkCreateFence(&fenceCi, null, out imageAvailableFence);
         }
 
         // After a non-Success acquire the fence may or may not be signaled
         // (SUBOPTIMAL_KHR signals; the others don't). Always rebuild it so the next
         // acquire starts from a known-clean state. The `fence` parameter is kept
         // up-to-date for callers who hold the same handle.
-        private void rebuildFenceAfterFailedAcquire(ref Vulkan.VkFence fence)
+        private void rebuildFenceAfterFailedAcquire(ref Vortice.Vulkan.VkFence fence)
         {
             if (fence != imageAvailableFence) return;
             recreateImageAvailableFence();
@@ -408,7 +407,7 @@ namespace Veldrid.Vk
                 surface = newSurface;
                 if (!getPresentQueueIndex(out var newPresentQueueIndex))
                 {
-                    vkDestroySurfaceKHR(gd.Instance, newSurface, null);
+                    gd.InstanceApi.vkDestroySurfaceKHR(newSurface, null);
                     surface = oldSurface;
                     return false;
                 }
@@ -421,7 +420,7 @@ namespace Veldrid.Vk
                 // must be re-queried by the next createSwapchain call.
                 if (deviceSwapchain != VkSwapchainKHR.Null)
                 {
-                    vkDestroySwapchainKHR(gd.Device, deviceSwapchain, null);
+                    gd.DeviceApi.vkDestroySwapchainKHR(deviceSwapchain, null);
                     deviceSwapchain = VkSwapchainKHR.Null;
                 }
                 compatiblePresentModes = null;
@@ -429,11 +428,11 @@ namespace Veldrid.Vk
                 if (newPresentQueueIndex != presentQueueIndex)
                 {
                     presentQueueIndex = newPresentQueueIndex;
-                    vkGetDeviceQueue(gd.Device, presentQueueIndex, 0, out presentQueue);
+                    gd.DeviceApi.vkGetDeviceQueue(presentQueueIndex, 0, out presentQueue);
                 }
 
                 if (oldSurface != VkSurfaceKHR.Null)
-                    vkDestroySurfaceKHR(gd.Instance, oldSurface, null);
+                    gd.InstanceApi.vkDestroySurfaceKHR(oldSurface, null);
 
                 return true;
             }
@@ -448,7 +447,7 @@ namespace Veldrid.Vk
             lastCreateSurfaceLost = false;
 
             // Obtain the surface capabilities first -- this will indicate whether the surface has been lost.
-            var result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(gd.PhysicalDevice, surface, out var surfaceCapabilities);
+            var result = gd.InstanceApi.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(gd.PhysicalDevice, surface, out var surfaceCapabilities);
             if (result == VkResult.ErrorSurfaceLostKHR)
             {
                 lastCreateSurfaceLost = true;
@@ -480,7 +479,7 @@ namespace Veldrid.Vk
 
             currentImageIndex = 0;
             uint surfaceFormatCount = 0;
-            result = vkGetPhysicalDeviceSurfaceFormatsKHR(gd.PhysicalDevice, surface, ref surfaceFormatCount, null);
+            result = gd.InstanceApi.vkGetPhysicalDeviceSurfaceFormatsKHR(gd.PhysicalDevice, surface, &surfaceFormatCount, null);
             if (result == VkResult.ErrorSurfaceLostKHR)
             {
                 lastCreateSurfaceLost = true;
@@ -488,7 +487,8 @@ namespace Veldrid.Vk
             }
             CheckResult(result);
             var formats = new VkSurfaceFormatKHR[surfaceFormatCount];
-            result = vkGetPhysicalDeviceSurfaceFormatsKHR(gd.PhysicalDevice, surface, ref surfaceFormatCount, out formats[0]);
+            fixed (VkSurfaceFormatKHR* fmtPtr = formats)
+                result = gd.InstanceApi.vkGetPhysicalDeviceSurfaceFormatsKHR(gd.PhysicalDevice, surface, &surfaceFormatCount, fmtPtr);
             if (result == VkResult.ErrorSurfaceLostKHR)
             {
                 lastCreateSurfaceLost = true;
@@ -497,18 +497,18 @@ namespace Veldrid.Vk
             CheckResult(result);
 
             var desiredFormat = colorSrgb
-                ? VkFormat.B8g8r8a8Srgb
-                : VkFormat.B8g8r8a8Unorm;
+                ? VkFormat.B8G8R8A8Srgb
+                : VkFormat.B8G8R8A8Unorm;
 
             var surfaceFormat = new VkSurfaceFormatKHR();
 
             if (formats.Length == 1 && formats[0].format == VkFormat.Undefined)
-                surfaceFormat = new VkSurfaceFormatKHR { colorSpace = VkColorSpaceKHR.SrgbNonlinearKHR, format = desiredFormat };
+                surfaceFormat = new VkSurfaceFormatKHR { colorSpace = VkColorSpaceKHR.SrgbNonLinear, format = desiredFormat };
             else
             {
                 foreach (var format in formats)
                 {
-                    if (format.colorSpace == VkColorSpaceKHR.SrgbNonlinearKHR && format.format == desiredFormat)
+                    if (format.colorSpace == VkColorSpaceKHR.SrgbNonLinear && format.format == desiredFormat)
                     {
                         surfaceFormat = format;
                         break;
@@ -517,14 +517,14 @@ namespace Veldrid.Vk
 
                 if (surfaceFormat.format == VkFormat.Undefined)
                 {
-                    if (colorSrgb && surfaceFormat.format != VkFormat.R8g8b8a8Srgb) throw new VeldridException("Unable to create an sRGB Swapchain for this surface.");
+                    if (colorSrgb && surfaceFormat.format != VkFormat.R8G8B8A8Srgb) throw new VeldridException("Unable to create an sRGB Swapchain for this surface.");
 
                     surfaceFormat = formats[0];
                 }
             }
 
             uint presentModeCount = 0;
-            result = vkGetPhysicalDeviceSurfacePresentModesKHR(gd.PhysicalDevice, surface, ref presentModeCount, null);
+            result = gd.InstanceApi.vkGetPhysicalDeviceSurfacePresentModesKHR(gd.PhysicalDevice, surface, &presentModeCount, null);
             if (result == VkResult.ErrorSurfaceLostKHR)
             {
                 lastCreateSurfaceLost = true;
@@ -532,7 +532,8 @@ namespace Veldrid.Vk
             }
             CheckResult(result);
             var presentModes = new VkPresentModeKHR[presentModeCount];
-            result = vkGetPhysicalDeviceSurfacePresentModesKHR(gd.PhysicalDevice, surface, ref presentModeCount, out presentModes[0]);
+            fixed (VkPresentModeKHR* pmPtr = presentModes)
+                result = gd.InstanceApi.vkGetPhysicalDeviceSurfacePresentModesKHR(gd.PhysicalDevice, surface, &presentModeCount, pmPtr);
             if (result == VkResult.ErrorSurfaceLostKHR)
             {
                 lastCreateSurfaceLost = true;
@@ -562,11 +563,11 @@ namespace Veldrid.Vk
             // FIFO / FIFO_RELAXED / MAILBOX: use minImageCount + 1 (triple-buffering) to
             //   prevent the GPU from stalling on vkAcquireNextImageKHR while the display
             //   controller holds two images across the vblank boundary.
-            uint imageCount = presentMode == VkPresentModeKHR.ImmediateKHR
+            uint imageCount = presentMode == VkPresentModeKHR.Immediate
                 ? Math.Min(maxImageCount, surfaceCapabilities.minImageCount)
                 : Math.Min(maxImageCount, surfaceCapabilities.minImageCount + 1);
 
-            var swapchainCi = VkSwapchainCreateInfoKHR.New();
+            var swapchainCi = new VkSwapchainCreateInfoKHR();
             swapchainCi.surface = surface;
             swapchainCi.presentMode = presentMode;
             swapchainCi.imageFormat = surfaceFormat.format;
@@ -646,9 +647,9 @@ namespace Veldrid.Vk
             // That black screen was actually caused by MAILBOX stalls (#19), oversized texture-update
             // batches (#20), the fragment-shading-rate SIGSEGV (#21), and the push-descriptor null
             // pointer (#22). All four are now fixed; IDENTITY is correct here.
-            var preTransform = VkSurfaceTransformFlagsKHR.IdentityKHR;
+            var preTransform = VkSurfaceTransformFlagsKHR.Identity;
             swapchainCi.preTransform = preTransform;
-            swapchainCi.compositeAlpha = VkCompositeAlphaFlagsKHR.OpaqueKHR;
+            swapchainCi.compositeAlpha = VkCompositeAlphaFlagsKHR.Opaque;
             swapchainCi.clipped = true;
 
             var oldSwapchain = deviceSwapchain;
@@ -683,16 +684,16 @@ namespace Veldrid.Vk
             // spec is explicit: pPresentModes must be valid only during the create call.
             fixed (VkPresentModeKHR* compatibleModesPtr = compatiblePresentModes)
             {
-                var presentModesCi = default(VkSwapchainPresentModesCreateInfoEXT);
+                var presentModesCi = default(VkSwapchainPresentModesCreateInfoKHR);
                 if (compatiblePresentModes != null && compatiblePresentModes.Length > 1)
                 {
-                    presentModesCi = VkSwapchainPresentModesCreateInfoEXT.New();
+                    presentModesCi = new VkSwapchainPresentModesCreateInfoKHR();
                     presentModesCi.presentModeCount = (uint)compatiblePresentModes.Length;
                     presentModesCi.pPresentModes = compatibleModesPtr;
                     swapchainCi.pNext = &presentModesCi;
                 }
 
-                result = vkCreateSwapchainKHR(gd.Device, ref swapchainCi, null, out deviceSwapchain);
+                result = gd.DeviceApi.vkCreateSwapchainKHR(&swapchainCi, null, out deviceSwapchain);
                 if (result == VkResult.ErrorSurfaceLostKHR)
                 {
                     lastCreateSurfaceLost = true;
@@ -702,7 +703,7 @@ namespace Veldrid.Vk
                 CheckResult(result);
             }
 
-            if (oldSwapchain != VkSwapchainKHR.Null) vkDestroySwapchainKHR(gd.Device, oldSwapchain, null);
+            if (oldSwapchain != VkSwapchainKHR.Null) gd.DeviceApi.vkDestroySwapchainKHR(oldSwapchain, null);
 
             // Pass chosenExtent (== swapchainCi.imageExtent) for BOTH the desired
             // dimensions and the swapchain extent so VkSwapchainFramebuffer's
@@ -767,7 +768,7 @@ namespace Veldrid.Vk
             sb.AppendLine($"  minImageCount  : {caps.minImageCount}  maxImageCount: {(caps.maxImageCount == 0 ? "unlimited" : caps.maxImageCount.ToString())}");
             sb.AppendLine($"  chosenImgCount : {chosenImageCount}");
             sb.AppendLine($"  maintenance1   : {(maintenancePNextChained ? "pNext chained" : "not chained")}");
-            sb.AppendLine($"  preTransform   : {chosenPreTransform}  (currentTransform={caps.currentTransform}{(chosenPreTransform == VkSurfaceTransformFlagsKHR.IdentityKHR ? ", compositor will rotate — correct for IDENTITY" : ", compositor passthrough — app must pre-rotate scene")})");
+            sb.AppendLine($"  preTransform   : {chosenPreTransform}  (currentTransform={caps.currentTransform}{(chosenPreTransform == VkSurfaceTransformFlagsKHR.Identity ? ", compositor will rotate — correct for IDENTITY" : ", compositor passthrough — app must pre-rotate scene")})");
 
             Debug.WriteLine(sb.ToString());
         }
@@ -783,7 +784,7 @@ namespace Veldrid.Vk
                 // MAILBOX even though it would replace a queued frame with a newer one:
                 //
                 //   • Qualcomm Adreno (all 7xx-series drivers tested, including 512.676.73)
-                //     stall vkAcquireNextImageKHR / vkQueuePresentKHR under submission
+                //     stall vkAcquireNextImageKHR / gd.DeviceApi.vkQueuePresentKHR under submission
                 //     pressure (texture-upload bursts, first-frame pipeline compilation),
                 //     producing ANR-style black screens. This is architectural, not a
                 //     driver-version-specific bug: MAILBOX requires the driver to retire
@@ -803,16 +804,16 @@ namespace Veldrid.Vk
                 //
                 // FIFO_RELAXED gives the lowest-latency tear-free option that's broadly
                 // safe; FIFO is mandatory per spec and is the universal fallback.
-                if (Array.IndexOf(presentModes, VkPresentModeKHR.FifoRelaxedKHR) >= 0)
-                    return VkPresentModeKHR.FifoRelaxedKHR;
-                return VkPresentModeKHR.FifoKHR;
+                if (Array.IndexOf(presentModes, VkPresentModeKHR.FifoRelaxed) >= 0)
+                    return VkPresentModeKHR.FifoRelaxed;
+                return VkPresentModeKHR.Fifo;
             }
 
-            if (allowTearing && Array.IndexOf(presentModes, VkPresentModeKHR.ImmediateKHR) >= 0)
-                return VkPresentModeKHR.ImmediateKHR; // Lowest latency; tearing is acceptable.
+            if (allowTearing && Array.IndexOf(presentModes, VkPresentModeKHR.Immediate) >= 0)
+                return VkPresentModeKHR.Immediate; // Lowest latency; tearing is acceptable.
 
             // On Android, avoid MAILBOX even in non-vsync mode: Adreno (7xx-series) drivers
-            // stall vkAcquireNextImageKHR / vkQueuePresentKHR indefinitely under heavy
+            // stall vkAcquireNextImageKHR / gd.DeviceApi.vkQueuePresentKHR indefinitely under heavy
             // submission pressure (texture-upload bursts, first-frame pipeline compilation)
             // regardless of the syncToVBlank setting, producing ANR-style black screens.
             // When vsync is off, prefer IMMEDIATE for true uncapped rendering: it presents
@@ -823,19 +824,19 @@ namespace Veldrid.Vk
             // FIFO_RELAXED is the best-effort fallback; FIFO is the mandatory-per-spec last resort.
             if (OperatingSystem.IsAndroid())
             {
-                if (!syncToVBlank && Array.IndexOf(presentModes, VkPresentModeKHR.ImmediateKHR) >= 0)
-                    return VkPresentModeKHR.ImmediateKHR;
-                if (Array.IndexOf(presentModes, VkPresentModeKHR.FifoRelaxedKHR) >= 0)
-                    return VkPresentModeKHR.FifoRelaxedKHR;
-                return VkPresentModeKHR.FifoKHR;
+                if (!syncToVBlank && Array.IndexOf(presentModes, VkPresentModeKHR.Immediate) >= 0)
+                    return VkPresentModeKHR.Immediate;
+                if (Array.IndexOf(presentModes, VkPresentModeKHR.FifoRelaxed) >= 0)
+                    return VkPresentModeKHR.FifoRelaxed;
+                return VkPresentModeKHR.Fifo;
             }
 
-            if (Array.IndexOf(presentModes, VkPresentModeKHR.MailboxKHR) >= 0)
-                return VkPresentModeKHR.MailboxKHR; // Low latency without tearing.
-            if (Array.IndexOf(presentModes, VkPresentModeKHR.ImmediateKHR) >= 0)
-                return VkPresentModeKHR.ImmediateKHR; // Fallback: lower latency than FIFO.
+            if (Array.IndexOf(presentModes, VkPresentModeKHR.Mailbox) >= 0)
+                return VkPresentModeKHR.Mailbox; // Low latency without tearing.
+            if (Array.IndexOf(presentModes, VkPresentModeKHR.Immediate) >= 0)
+                return VkPresentModeKHR.Immediate; // Fallback: lower latency than FIFO.
 
-            return VkPresentModeKHR.FifoKHR;
+            return VkPresentModeKHR.Fifo;
         }
 
         // Returns the set of present modes the swapchain can hot-swap to (always
@@ -843,22 +844,19 @@ namespace Veldrid.Vk
         // or the query failed — caller falls back to recreate-on-toggle.
         private VkPresentModeKHR[] queryCompatiblePresentModes(VkPresentModeKHR anchor, VkPresentModeKHR[] surfaceSupported)
         {
-            if (gd.GetPhysicalDeviceSurfaceCapabilities2 == null)
-                return null;
-
-            var surfaceMode = VkSurfacePresentModeEXT.New();
+            var surfaceMode = new VkSurfacePresentModeKHR();
             surfaceMode.presentMode = anchor;
 
-            var surfaceInfo = VkPhysicalDeviceSurfaceInfo2KHR.New();
+            var surfaceInfo = new VkPhysicalDeviceSurfaceInfo2KHR();
             surfaceInfo.surface = Surface;
             surfaceInfo.pNext = &surfaceMode;
 
             // Two-pass query: first call with pPresentModes = null returns the count.
-            var compat = VkSurfacePresentModeCompatibilityEXT.New();
-            var caps2 = VkSurfaceCapabilities2KHR.New();
+            var compat = new VkSurfacePresentModeCompatibilityKHR();
+            var caps2 = new VkSurfaceCapabilities2KHR();
             caps2.pNext = &compat;
 
-            if (gd.GetPhysicalDeviceSurfaceCapabilities2(gd.PhysicalDevice, &surfaceInfo, &caps2) != VkResult.Success)
+            if (gd.InstanceApi.vkGetPhysicalDeviceSurfaceCapabilities2KHR(gd.PhysicalDevice, &surfaceInfo, &caps2) != VkResult.Success)
                 return null;
 
             uint count = compat.presentModeCount;
@@ -869,12 +867,12 @@ namespace Veldrid.Vk
             fixed (VkPresentModeKHR* modesPtr = modes)
             {
                 compat.pPresentModes = modesPtr;
-                if (gd.GetPhysicalDeviceSurfaceCapabilities2(gd.PhysicalDevice, &surfaceInfo, &caps2) != VkResult.Success)
+                if (gd.InstanceApi.vkGetPhysicalDeviceSurfaceCapabilities2KHR(gd.PhysicalDevice, &surfaceInfo, &caps2) != VkResult.Success)
                     return null;
             }
 
             // Defensive intersection with the surface-supported modes; deduplicate while
-            // ensuring `anchor` is the first entry (required by VkSwapchainPresentModesCreateInfoEXT).
+            // ensuring `anchor` is the first entry (required by VkSwapchainPresentModesCreateInfoKHR).
             var result = new List<VkPresentModeKHR>((int)count) { anchor };
             for (int i = 0; i < count; i++)
             {
@@ -890,7 +888,7 @@ namespace Veldrid.Vk
 
         // Returns true if the present mode that (sync, tearing) imply is in the current
         // swapchain's hot-swap compatibility set, in which case we update currentPresentMode
-        // and the next vkQueuePresentKHR will apply it. Returns false if a recreate is needed.
+        // and the next gd.DeviceApi.vkQueuePresentKHR will apply it. Returns false if a recreate is needed.
         private bool tryHotSwapPresentMode(bool syncToVBlankCandidate, bool allowTearingCandidate)
         {
             if (!gd.HasSwapchainMaintenance1 || compatiblePresentModes == null || compatiblePresentModes.Length <= 1)
@@ -927,7 +925,7 @@ namespace Veldrid.Vk
             return displayTimingLastEarliestPresentTime + displayTimingRefreshDuration;
         }
 
-        // Increment the monotonic present counter after a successful vkQueuePresentKHR.
+        // Increment the monotonic present counter after a successful gd.DeviceApi.vkQueuePresentKHR.
         public void AdvancePresentID()
         {
             displayTimingNextPresentID++;
@@ -939,17 +937,17 @@ namespace Veldrid.Vk
         // keep stack usage bounded (in practice 1–3 entries per frame).
         public void DrainPastPresentationTimings()
         {
-            if (gd.GetPastPresentationTimingGOOGLE == null)
+            if (!gd.HasDisplayTiming)
                 return;
 
             uint count = 0;
-            if (gd.GetPastPresentationTimingGOOGLE(gd.Device, deviceSwapchain, &count, null) != VkResult.Success
+            if (gd.DeviceApi.vkGetPastPresentationTimingGOOGLE(deviceSwapchain, &count, null) != VkResult.Success
                 || count == 0)
                 return;
 
             count = Math.Min(count, 8u);
             var timings = stackalloc VkPastPresentationTimingGOOGLE[(int)count];
-            if (gd.GetPastPresentationTimingGOOGLE(gd.Device, deviceSwapchain, &count, timings) != VkResult.Success)
+            if (gd.DeviceApi.vkGetPastPresentationTimingGOOGLE(deviceSwapchain, &count, timings) != VkResult.Success)
                 return;
 
             for (uint i = 0; i < count; i++)
@@ -970,14 +968,14 @@ namespace Veldrid.Vk
             displayTimingNextPresentID = 0;
             displayTimingLastEarliestPresentTime = 0;
 
-            if (gd.GetRefreshCycleDurationGOOGLE == null)
+            if (!gd.HasDisplayTiming)
             {
                 displayTimingRefreshDuration = 0;
                 return;
             }
 
             var timing = default(VkRefreshCycleDurationGOOGLE);
-            if (gd.GetRefreshCycleDurationGOOGLE(gd.Device, deviceSwapchain, &timing) != VkResult.Success
+            if (gd.DeviceApi.vkGetRefreshCycleDurationGOOGLE(deviceSwapchain, &timing) != VkResult.Success
                 || timing.refreshDuration == 0)
             {
                 displayTimingRefreshDuration = 0;
@@ -1010,21 +1008,18 @@ namespace Veldrid.Vk
 
         private bool queueSupportsPresent(uint queueFamilyIndex, VkSurfaceKHR surface)
         {
-            var result = vkGetPhysicalDeviceSurfaceSupportKHR(
-                gd.PhysicalDevice,
-                queueFamilyIndex,
-                surface,
-                out var supported);
+            VkBool32 supported;
+            var result = gd.InstanceApi.vkGetPhysicalDeviceSurfaceSupportKHR(gd.PhysicalDevice, queueFamilyIndex, surface, &supported);
             CheckResult(result);
             return supported;
         }
 
         private void disposeCore()
         {
-            vkDestroyFence(gd.Device, imageAvailableFence, null);
+            gd.DeviceApi.vkDestroyFence(imageAvailableFence, null);
             framebuffer.Dispose();
-            vkDestroySwapchainKHR(gd.Device, deviceSwapchain, null);
-            vkDestroySurfaceKHR(gd.Instance, Surface, null);
+            gd.DeviceApi.vkDestroySwapchainKHR(deviceSwapchain, null);
+            gd.InstanceApi.vkDestroySurfaceKHR(Surface, null);
 
             disposed = true;
         }

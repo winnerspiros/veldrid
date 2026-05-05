@@ -1,9 +1,8 @@
-﻿#if !EXCLUDE_VULKAN_BACKEND
+#if !EXCLUDE_VULKAN_BACKEND
 using System;
 using System.Collections.ObjectModel;
 using Veldrid.Vk;
-using Vulkan;
-
+using Vortice.Vulkan;
 namespace Veldrid
 {
     /// <summary>
@@ -61,7 +60,7 @@ namespace Veldrid
         /// <summary>
         ///     Indicates whether the device supports VK_KHR_synchronization2 (core in Vulkan 1.3).
         ///     When true, the backend uses <c>vkQueueSubmit2</c> with per-semaphore stage masks
-        ///     instead of the legacy <c>vkQueueSubmit</c> path, reducing CPU overhead per frame.
+        ///     instead of the legacy <c>gd.DeviceApi.vkQueueSubmit</c> path, reducing CPU overhead per frame.
         /// </summary>
         public bool HasSynchronization2 => gd.HasSynchronization2;
 
@@ -74,7 +73,7 @@ namespace Veldrid
         /// <summary>
         ///     Indicates whether VK_GOOGLE_display_timing is active. When true, the backend
         ///     automatically chains <c>VkPresentTimesInfoGOOGLE</c> on every
-        ///     <c>vkQueuePresentKHR</c> call to target the next optimal vblank boundary,
+        ///     <c>gd.DeviceApi.vkQueuePresentKHR</c> call to target the next optimal vblank boundary,
         ///     minimising the time a rendered frame sits in the scanout buffer before the
         ///     display shows it. Feedback from <c>vkGetPastPresentationTimingGOOGLE</c> is
         ///     used to keep the target adaptive to the actual display cadence.
@@ -111,16 +110,16 @@ namespace Veldrid
                 return Array.Empty<byte>();
 
             UIntPtr size = UIntPtr.Zero;
-            var sizeResult = Vulkan.VulkanNative.vkGetPipelineCacheData(gd.Device, pipelineCache, ref size, null);
-            if (sizeResult != Vulkan.VkResult.Success || size == UIntPtr.Zero)
+            var sizeResult = gd.DeviceApi.vkGetPipelineCacheData(pipelineCache, &size, null);
+            if (sizeResult != VkResult.Success || size == UIntPtr.Zero)
                 return Array.Empty<byte>();
 
             byte[] data = new byte[(int)size];
             fixed (byte* dataPtr = data)
             {
-                var dataResult = Vulkan.VulkanNative.vkGetPipelineCacheData(gd.Device, pipelineCache, ref size, dataPtr);
+                var dataResult = gd.DeviceApi.vkGetPipelineCacheData(pipelineCache, &size, dataPtr);
                 // VK_INCOMPLETE means the cache grew between the two calls — treat the partial as truncated.
-                if (dataResult != Vulkan.VkResult.Success && dataResult != Vulkan.VkResult.Incomplete)
+                if (dataResult != VkResult.Success && dataResult != VkResult.Incomplete)
                     return Array.Empty<byte>();
             }
 

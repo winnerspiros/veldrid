@@ -1,7 +1,6 @@
-﻿using Vulkan;
+using Vortice.Vulkan;
 using static Veldrid.Vk.VulkanUtil;
-using static Vulkan.VulkanNative;
-
+using static Vortice.Vulkan.Vulkan;
 namespace Veldrid.Vk
 {
     internal unsafe class VkBuffer : DeviceBuffer
@@ -12,7 +11,7 @@ namespace Veldrid.Vk
         public override uint SizeInBytes { get; }
         public override BufferUsage Usage { get; }
 
-        public Vulkan.VkBuffer DeviceBuffer => deviceBuffer;
+        public Vortice.Vulkan.VkBuffer DeviceBuffer => deviceBuffer;
         public VkMemoryBlock Memory => memory;
 
         public VkMemoryRequirements BufferMemoryRequirements => bufferMemoryRequirements;
@@ -28,7 +27,7 @@ namespace Veldrid.Vk
         }
 
         private readonly VkGraphicsDevice gd;
-        private readonly Vulkan.VkBuffer deviceBuffer;
+        private readonly Vortice.Vulkan.VkBuffer deviceBuffer;
         private readonly VkMemoryBlock memory;
         private readonly VkMemoryRequirements bufferMemoryRequirements;
         private bool destroyed;
@@ -53,30 +52,20 @@ namespace Veldrid.Vk
 
             if ((usage & BufferUsage.IndirectBuffer) == BufferUsage.IndirectBuffer) vkUsage |= VkBufferUsageFlags.IndirectBuffer;
 
-            var bufferCi = VkBufferCreateInfo.New();
+            var bufferCi = new VkBufferCreateInfo();
             bufferCi.size = sizeInBytes;
             bufferCi.usage = vkUsage;
-            var result = vkCreateBuffer(gd.Device, ref bufferCi, null, out deviceBuffer);
+            var result = gd.DeviceApi.vkCreateBuffer(&bufferCi, null, out deviceBuffer);
             CheckResult(result);
 
-            bool prefersDedicatedAllocation;
-
-            if (this.gd.GetBufferMemoryRequirements2 != null)
-            {
-                var memReqInfo2 = VkBufferMemoryRequirementsInfo2KHR.New();
-                memReqInfo2.buffer = deviceBuffer;
-                var memReqs2 = VkMemoryRequirements2KHR.New();
-                var dedicatedReqs = VkMemoryDedicatedRequirementsKHR.New();
-                memReqs2.pNext = &dedicatedReqs;
-                this.gd.GetBufferMemoryRequirements2(this.gd.Device, &memReqInfo2, &memReqs2);
-                bufferMemoryRequirements = memReqs2.memoryRequirements;
-                prefersDedicatedAllocation = dedicatedReqs.prefersDedicatedAllocation || dedicatedReqs.requiresDedicatedAllocation;
-            }
-            else
-            {
-                vkGetBufferMemoryRequirements(gd.Device, deviceBuffer, out bufferMemoryRequirements);
-                prefersDedicatedAllocation = false;
-            }
+            var memReqInfo2 = new VkBufferMemoryRequirementsInfo2();
+            memReqInfo2.buffer = deviceBuffer;
+            var memReqs2 = new VkMemoryRequirements2();
+            var dedicatedReqs = new VkMemoryDedicatedRequirements();
+            memReqs2.pNext = &dedicatedReqs;
+            gd.DeviceApi.vkGetBufferMemoryRequirements2(&memReqInfo2, &memReqs2);
+            bufferMemoryRequirements = memReqs2.memoryRequirements;
+            bool prefersDedicatedAllocation = dedicatedReqs.prefersDedicatedAllocation || dedicatedReqs.requiresDedicatedAllocation;
 
             bool isStaging = (usage & BufferUsage.Staging) == BufferUsage.Staging;
             bool hostVisible = isStaging || (usage & BufferUsage.Dynamic) == BufferUsage.Dynamic;
@@ -108,7 +97,7 @@ namespace Veldrid.Vk
                 VkImage.Null,
                 deviceBuffer);
             memory = memoryToken;
-            result = vkBindBufferMemory(gd.Device, deviceBuffer, memory.DeviceMemory, memory.Offset);
+            result = gd.DeviceApi.vkBindBufferMemory(deviceBuffer, memory.DeviceMemory, memory.Offset);
             CheckResult(result);
 
             RefCount = new ResourceRefCount(disposeCore);
@@ -128,7 +117,7 @@ namespace Veldrid.Vk
             if (!destroyed)
             {
                 destroyed = true;
-                vkDestroyBuffer(gd.Device, deviceBuffer, null);
+                gd.DeviceApi.vkDestroyBuffer(deviceBuffer, null);
                 gd.MemoryManager.Free(Memory);
             }
         }

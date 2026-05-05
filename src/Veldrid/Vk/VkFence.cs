@@ -1,13 +1,12 @@
-﻿using Vulkan;
-using static Vulkan.VulkanNative;
-
+using Vortice.Vulkan;
+using static Vortice.Vulkan.Vulkan;
 namespace Veldrid.Vk
 {
     internal unsafe class VkFence : Fence
     {
-        public Vulkan.VkFence DeviceFence => fence;
+        public Vortice.Vulkan.VkFence DeviceFence => fence;
 
-        public override bool Signaled => vkGetFenceStatus(gd.Device, fence) == VkResult.Success;
+        public override bool Signaled => gd.DeviceApi.vkGetFenceStatus(fence) == VkResult.Success;
         public override bool IsDisposed => destroyed;
 
         public override string Name
@@ -21,16 +20,16 @@ namespace Veldrid.Vk
         }
 
         private readonly VkGraphicsDevice gd;
-        private readonly Vulkan.VkFence fence;
+        private readonly Vortice.Vulkan.VkFence fence;
         private string name;
         private bool destroyed;
 
         public VkFence(VkGraphicsDevice gd, bool signaled)
         {
             this.gd = gd;
-            var fenceCi = VkFenceCreateInfo.New();
+            var fenceCi = new VkFenceCreateInfo();
             fenceCi.flags = signaled ? VkFenceCreateFlags.Signaled : VkFenceCreateFlags.None;
-            var result = vkCreateFence(this.gd.Device, ref fenceCi, null, out fence);
+            var result = gd.DeviceApi.vkCreateFence(&fenceCi, null, out fence);
             VulkanUtil.CheckResult(result);
         }
 
@@ -40,7 +39,7 @@ namespace Veldrid.Vk
         {
             if (!destroyed)
             {
-                vkDestroyFence(gd.Device, fence, null);
+                gd.DeviceApi.vkDestroyFence(fence, null);
                 destroyed = true;
             }
         }

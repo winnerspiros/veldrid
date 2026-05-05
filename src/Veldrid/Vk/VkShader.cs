@@ -1,6 +1,6 @@
-﻿using System;
-using Vulkan;
-using static Vulkan.VulkanNative;
+using System;
+using Vortice.Vulkan;
+using static Vortice.Vulkan.Vulkan;
 using static Veldrid.Vk.VulkanUtil;
 
 namespace Veldrid.Vk
@@ -31,13 +31,13 @@ namespace Veldrid.Vk
         {
             this.gd = gd;
 
-            var shaderModuleCi = VkShaderModuleCreateInfo.New();
+            var shaderModuleCi = new VkShaderModuleCreateInfo();
 
             fixed (byte* codePtr = description.ShaderBytes)
             {
                 shaderModuleCi.codeSize = (UIntPtr)description.ShaderBytes.Length;
                 shaderModuleCi.pCode = (uint*)codePtr;
-                var result = vkCreateShaderModule(gd.Device, ref shaderModuleCi, null, out shaderModule);
+                var result = gd.DeviceApi.vkCreateShaderModule(&shaderModuleCi, null, out shaderModule);
                 CheckResult(result);
             }
         }
@@ -49,7 +49,7 @@ namespace Veldrid.Vk
             if (!disposed)
             {
                 disposed = true;
-                vkDestroyShaderModule(gd.Device, ShaderModule, null);
+                gd.DeviceApi.vkDestroyShaderModule(ShaderModule, null);
             }
         }
 
