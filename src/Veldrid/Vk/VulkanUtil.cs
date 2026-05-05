@@ -122,9 +122,9 @@ namespace Veldrid.Vk
             }
             else if (oldLayout == VkImageLayout.General && newLayout == VkImageLayout.ShaderReadOnlyOptimal)
             {
-                srcAccessMask = VkAccessFlags.TransferRead;
+                srcAccessMask = VkAccessFlags.ShaderWrite;
                 dstAccessMask = VkAccessFlags.ShaderRead;
-                srcStageFlags = VkPipelineStageFlags.Transfer;
+                srcStageFlags = VkPipelineStageFlags.ComputeShader;
                 dstStageFlags = VkPipelineStageFlags.FragmentShader;
             }
             else if (oldLayout == VkImageLayout.ShaderReadOnlyOptimal && newLayout == VkImageLayout.General)
@@ -187,7 +187,7 @@ namespace Veldrid.Vk
             {
                 srcAccessMask = VkAccessFlags.DepthStencilAttachmentWrite;
                 dstAccessMask = VkAccessFlags.ShaderRead;
-                srcStageFlags = VkPipelineStageFlags.LateFragmentTests;
+                srcStageFlags = VkPipelineStageFlags.EarlyFragmentTests | VkPipelineStageFlags.LateFragmentTests;
                 dstStageFlags = VkPipelineStageFlags.FragmentShader;
             }
             else if (oldLayout == VkImageLayout.ColorAttachmentOptimal && newLayout == VkImageLayout.PresentSrcKHR)
@@ -216,7 +216,7 @@ namespace Veldrid.Vk
                 srcAccessMask = VkAccessFlags.TransferWrite;
                 dstAccessMask = VkAccessFlags.DepthStencilAttachmentWrite;
                 srcStageFlags = VkPipelineStageFlags.Transfer;
-                dstStageFlags = VkPipelineStageFlags.LateFragmentTests;
+                dstStageFlags = VkPipelineStageFlags.EarlyFragmentTests | VkPipelineStageFlags.LateFragmentTests;
             }
             else if (oldLayout == VkImageLayout.General && newLayout == VkImageLayout.TransferSrcOptimal)
             {
@@ -272,7 +272,7 @@ namespace Veldrid.Vk
                 srcAccessMask = VkAccessFlags.None;
                 dstAccessMask = VkAccessFlags.DepthStencilAttachmentWrite;
                 srcStageFlags = VkPipelineStageFlags.TopOfPipe;
-                dstStageFlags = VkPipelineStageFlags.EarlyFragmentTests;
+                dstStageFlags = VkPipelineStageFlags.EarlyFragmentTests | VkPipelineStageFlags.LateFragmentTests;
             }
             else
                 Debug.Fail("Invalid image layout transition.");

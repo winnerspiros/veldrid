@@ -93,7 +93,7 @@ namespace Veldrid.Vk
             else
             {
                 // Round up to the nearest multiple of bufferImageGranularity.
-                size = (size / bufferImageGranularity + 1) * bufferImageGranularity;
+                size = (size + bufferImageGranularity - 1) / bufferImageGranularity * bufferImageGranularity;
             }
 
             lock (@lock)
@@ -385,7 +385,7 @@ namespace Veldrid.Vk
                             mappedPtr,
                             false);
                         freeBlocks.Insert(i, mergedBlock);
-                        contiguousLength = 0;
+                        contiguousLength = 1;
                     }
                 }
             }
