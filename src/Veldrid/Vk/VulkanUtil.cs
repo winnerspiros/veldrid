@@ -109,9 +109,10 @@ namespace Veldrid.Vk
             else if (oldLayout == VkImageLayout.Preinitialized && newLayout == VkImageLayout.General)
             {
                 srcAccessMask = VkAccessFlags.None;
-                dstAccessMask = VkAccessFlags.ShaderRead;
+                // Storage images can be both read AND written from any shader stage.
+                dstAccessMask = VkAccessFlags.ShaderRead | VkAccessFlags.ShaderWrite;
                 srcStageFlags = VkPipelineStageFlags.TopOfPipe;
-                dstStageFlags = VkPipelineStageFlags.ComputeShader;
+                dstStageFlags = VkPipelineStageFlags.ComputeShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader;
             }
             else if (oldLayout == VkImageLayout.Preinitialized && newLayout == VkImageLayout.ShaderReadOnlyOptimal)
             {
@@ -351,6 +352,24 @@ namespace Veldrid.Vk
                 srcAccessMask = VkAccessFlags.DepthStencilAttachmentWrite;
                 dstAccessMask = VkAccessFlags.ShaderRead | VkAccessFlags.ShaderWrite;
                 srcStageFlags = VkPipelineStageFlags.EarlyFragmentTests | VkPipelineStageFlags.LateFragmentTests;
+                dstStageFlags = VkPipelineStageFlags.ComputeShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader;
+            }
+            else if (oldLayout == VkImageLayout.TransferSrcOptimal && newLayout == VkImageLayout.General)
+            {
+                // A storage image used as a CopyTexture source (no Sampled back-transition) is left in
+                // TransferSrcOptimal.  When next bound as a storage image, bring it back to General.
+                srcAccessMask = VkAccessFlags.TransferRead;
+                dstAccessMask = VkAccessFlags.ShaderRead | VkAccessFlags.ShaderWrite;
+                srcStageFlags = VkPipelineStageFlags.Transfer;
+                dstStageFlags = VkPipelineStageFlags.ComputeShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader;
+            }
+            else if (oldLayout == VkImageLayout.TransferDstOptimal && newLayout == VkImageLayout.General)
+            {
+                // A storage image used as a CopyTexture destination (no Sampled back-transition) is left in
+                // TransferDstOptimal.  When next bound as a storage image, bring it back to General.
+                srcAccessMask = VkAccessFlags.TransferWrite;
+                dstAccessMask = VkAccessFlags.ShaderRead | VkAccessFlags.ShaderWrite;
+                srcStageFlags = VkPipelineStageFlags.Transfer;
                 dstStageFlags = VkPipelineStageFlags.ComputeShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader;
             }
             else
