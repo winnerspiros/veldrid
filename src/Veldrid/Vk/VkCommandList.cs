@@ -1883,6 +1883,15 @@ namespace Veldrid.Vk
             uint height = vkTex.Height;
             uint depth = vkTex.Depth;
 
+            // Compute the correct aspect mask for the blit subresource ranges.
+            // Using VkImageAspectFlags.Color on a depth-format image is a Vulkan spec
+            // violation and triggers validation errors.
+            var blitAspect = (vkTex.Usage & TextureUsage.DepthStencil) != 0
+                ? FormatHelpers.IsStencilFormat(vkTex.Format)
+                    ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+                    : VkImageAspectFlags.Depth
+                : VkImageAspectFlags.Color;
+
             for (uint level = 1; level < vkTex.MipLevels; level++)
             {
                 vkTex.TransitionImageLayoutNonmatching(CommandBuffer, level - 1, 1, 0, layerCount, VkImageLayout.TransferSrcOptimal);
@@ -1897,14 +1906,14 @@ namespace Veldrid.Vk
                 {
                     srcSubresource = new VkImageSubresourceLayers
                     {
-                        aspectMask = VkImageAspectFlags.Color,
+                        aspectMask = blitAspect,
                         baseArrayLayer = 0,
                         layerCount = layerCount,
                         mipLevel = level - 1
                     },
                     dstSubresource = new VkImageSubresourceLayers
                     {
-                        aspectMask = VkImageAspectFlags.Color,
+                        aspectMask = blitAspect,
                         baseArrayLayer = 0,
                         layerCount = layerCount,
                         mipLevel = level
@@ -1927,7 +1936,20 @@ namespace Veldrid.Vk
                 depth = mipDepth;
             }
 
-            if ((vkTex.Usage & TextureUsage.Sampled) != 0) vkTex.TransitionImageLayoutNonmatching(CommandBuffer, 0, vkTex.MipLevels, 0, layerCount, VkImageLayout.ShaderReadOnlyOptimal);
+            // After the mip-generation loop all levels are in either TransferSrcOptimal (0..N-2)
+            // or TransferDstOptimal (N-1). Transition back to the stable layout that matches the
+            // texture's usage so subsequent render-pass initialLayout references and layout-
+            // tracking in beginCurrentDynamicRendering/preDrawCommand stay correct.
+            //
+            // Without this, non-sampled RenderTarget textures left in TransferSrcOptimal would
+            // mismatch the baked initialLayout=ColorAttachmentOptimal in the legacy render pass,
+            // causing a Vulkan validation error and potential GPU hang on tile-based hardware.
+            if ((vkTex.Usage & TextureUsage.Sampled) != 0)
+                vkTex.TransitionImageLayoutNonmatching(CommandBuffer, 0, vkTex.MipLevels, 0, layerCount, VkImageLayout.ShaderReadOnlyOptimal);
+            else if ((vkTex.Usage & TextureUsage.RenderTarget) != 0)
+                vkTex.TransitionImageLayoutNonmatching(CommandBuffer, 0, vkTex.MipLevels, 0, layerCount, VkImageLayout.ColorAttachmentOptimal);
+            else if ((vkTex.Usage & TextureUsage.DepthStencil) != 0)
+                vkTex.TransitionImageLayoutNonmatching(CommandBuffer, 0, vkTex.MipLevels, 0, layerCount, VkImageLayout.DepthStencilAttachmentOptimal);
         }
 
         private protected override void PushDebugGroupCore(string name)
