@@ -634,12 +634,15 @@ namespace Veldrid.Vk
                 if (!FormatHelpers.IsCompressedFormat(source.Format))
                 {
                     uint pixelSize = FormatSizeHelpers.GetSizeInBytes(srcVkTexture.Format);
+                    uint regionCount = zLimit * height;
+                    var copyRegions = new VkBufferCopy[regionCount];
+                    int idx = 0;
 
                     for (uint zz = 0; zz < zLimit; zz++)
                     {
                         for (uint yy = 0; yy < height; yy++)
                         {
-                            var region = new VkBufferCopy
+                            copyRegions[idx++] = new VkBufferCopy
                             {
                                 srcOffset = srcLayout.offset
                                             + srcLayout.depthPitch * (zz + srcZ)
@@ -651,10 +654,11 @@ namespace Veldrid.Vk
                                             + pixelSize * dstX,
                                 size = width * pixelSize
                             };
-
-                            deviceApi.vkCmdCopyBuffer(cb, srcBuffer, dstBuffer, 1, &region);
                         }
                     }
+
+                    fixed (VkBufferCopy* regionsPtr = copyRegions)
+                        deviceApi.vkCmdCopyBuffer(cb, srcBuffer, dstBuffer, regionCount, regionsPtr);
                 }
                 else // IsCompressedFormat
                 {
@@ -665,12 +669,15 @@ namespace Veldrid.Vk
                     uint compressedDstX = dstX / 4;
                     uint compressedDstY = dstY / 4;
                     uint blockSizeInBytes = FormatHelpers.GetBlockSizeInBytes(source.Format);
+                    uint regionCount = zLimit * numRows;
+                    var copyRegions = new VkBufferCopy[regionCount];
+                    int idx = 0;
 
                     for (uint zz = 0; zz < zLimit; zz++)
                     {
                         for (uint row = 0; row < numRows; row++)
                         {
-                            var region = new VkBufferCopy
+                            copyRegions[idx++] = new VkBufferCopy
                             {
                                 srcOffset = srcLayout.offset
                                             + srcLayout.depthPitch * (zz + srcZ)
@@ -682,10 +689,11 @@ namespace Veldrid.Vk
                                             + blockSizeInBytes * compressedDstX,
                                 size = denseRowSize
                             };
-
-                            deviceApi.vkCmdCopyBuffer(cb, srcBuffer, dstBuffer, 1, &region);
                         }
                     }
+
+                    fixed (VkBufferCopy* regionsPtr = copyRegions)
+                        deviceApi.vkCmdCopyBuffer(cb, srcBuffer, dstBuffer, regionCount, regionsPtr);
                 }
             }
         }
@@ -723,8 +731,10 @@ namespace Veldrid.Vk
             currentStagingInfo.Resources.Add(vkSource.RefCount);
             var vkDestination = Util.AssertSubtype<Texture, VkTexture>(destination);
             currentStagingInfo.Resources.Add(vkDestination.RefCount);
-            var aspectFlags = (source.Usage & TextureUsage.DepthStencil) == TextureUsage.DepthStencil
-                ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+            var aspectFlags = (source.Usage & TextureUsage.DepthStencil) != 0
+                ? FormatHelpers.IsStencilFormat(source.Format)
+                    ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+                    : VkImageAspectFlags.Depth
                 : VkImageAspectFlags.Color;
             var region = new VkImageResolve
             {

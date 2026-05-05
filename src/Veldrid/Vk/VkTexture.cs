@@ -261,8 +261,10 @@ namespace Veldrid.Vk
 
             if (!staging)
             {
-                var aspect = (Usage & TextureUsage.DepthStencil) == TextureUsage.DepthStencil
-                    ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+                var aspect = (Usage & TextureUsage.DepthStencil) != 0
+                    ? FormatHelpers.IsStencilFormat(Format)
+                        ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+                        : VkImageAspectFlags.Depth
                     : VkImageAspectFlags.Color;
                 var imageSubresource = new VkImageSubresource
                 {
