@@ -54,7 +54,9 @@ namespace Veldrid.Vk
 
             var renderPassCi = new VkRenderPassCreateInfo();
 
-            var attachments = new StackList<VkAttachmentDescription>();
+            // Size512Bytes holds 512/36 ≈ 14 VkAttachmentDescription entries — safely covers the
+            // Vulkan maximum of 8 color + 1 depth = 9 attachments with room to spare.
+            var attachments = new StackList<VkAttachmentDescription, Size512Bytes>();
 
             uint colorAttachmentCount = (uint)ColorTargets.Count;
             var colorAttachmentRefs = new StackList<VkAttachmentReference>();

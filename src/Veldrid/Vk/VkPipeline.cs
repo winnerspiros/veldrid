@@ -312,20 +312,25 @@ namespace Veldrid.Vk
 
                 // TODO: A huge portion of this next part is duplicated in VkFramebuffer.cs.
 
-                var colorAttachmentDescs = new StackList<VkAttachmentDescription>();
+                // colorAttachmentRefs: VkAttachmentReference is 8 bytes; 256-byte StackList holds up to 32 — enough
+                // for the Vulkan maximum of 8 color attachments.  We build the attachment descriptions inline
+                // and add them directly to `attachments` to avoid a separate bounded buffer.
                 var colorAttachmentRefs = new StackList<VkAttachmentReference>();
 
                 for (uint i = 0; i < outputDesc.ColorAttachments.Length; i++)
                 {
-                    colorAttachmentDescs[i].format = VkFormats.VdToVkPixelFormat(outputDesc.ColorAttachments[i].Format);
-                    colorAttachmentDescs[i].samples = vkSampleCount;
-                    colorAttachmentDescs[i].loadOp = VkAttachmentLoadOp.DontCare;
-                    colorAttachmentDescs[i].storeOp = VkAttachmentStoreOp.Store;
-                    colorAttachmentDescs[i].stencilLoadOp = VkAttachmentLoadOp.DontCare;
-                    colorAttachmentDescs[i].stencilStoreOp = VkAttachmentStoreOp.DontCare;
-                    colorAttachmentDescs[i].initialLayout = VkImageLayout.Undefined;
-                    colorAttachmentDescs[i].finalLayout = VkImageLayout.ShaderReadOnlyOptimal;
-                    attachments.Add(colorAttachmentDescs[i]);
+                    var colorAttachmentDesc = new VkAttachmentDescription
+                    {
+                        format = VkFormats.VdToVkPixelFormat(outputDesc.ColorAttachments[i].Format),
+                        samples = vkSampleCount,
+                        loadOp = VkAttachmentLoadOp.DontCare,
+                        storeOp = VkAttachmentStoreOp.Store,
+                        stencilLoadOp = VkAttachmentLoadOp.DontCare,
+                        stencilStoreOp = VkAttachmentStoreOp.DontCare,
+                        initialLayout = VkImageLayout.Undefined,
+                        finalLayout = VkImageLayout.ShaderReadOnlyOptimal
+                    };
+                    attachments.Add(colorAttachmentDesc);
 
                     colorAttachmentRefs[i].attachment = i;
                     colorAttachmentRefs[i].layout = VkImageLayout.ColorAttachmentOptimal;
