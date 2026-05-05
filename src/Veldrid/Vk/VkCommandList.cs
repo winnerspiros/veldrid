@@ -899,6 +899,31 @@ namespace Veldrid.Vk
                 if (resourceSetsChanged[currentSlot])
                 {
                     resourceSetsChanged[currentSlot] = false;
+
+                    // After a pipeline switch clearSets() nullifies all Sets but leaves
+                    // changed bits true. Skip null slots (treat like an unchanged slot:
+                    // flush any in-progress batch and advance the first-set cursor).
+                    if (resourceSets[currentSlot].Set == null)
+                    {
+                        if (currentBatchCount != 0)
+                        {
+                            gd.DeviceApi.vkCmdBindDescriptorSets(
+                                CommandBuffer,
+                                bindPoint,
+                                pipelineLayout,
+                                currentBatchFirstSet,
+                                currentBatchCount,
+                                descriptorSets,
+                                currentBatchDynamicOffsetCount,
+                                dynamicOffsets);
+                            currentBatchCount = 0;
+                            currentBatchDynamicOffsetCount = 0;
+                        }
+
+                        currentBatchFirstSet = currentSlot + 1;
+                        continue;
+                    }
+
                     var vkSet = Util.AssertSubtype<ResourceSet, VkResourceSet>(resourceSets[currentSlot].Set);
 
                     // Increment ref count on first use of a set.
@@ -943,10 +968,12 @@ namespace Veldrid.Vk
 
                         bool batchEnded = currentSlot == resourceSetCount - 1;
 
-                        // Check if next slot breaks the batch (unchanged or push descriptor).
+                        // Check if next slot breaks the batch (unchanged, null, or push descriptor).
                         if (!batchEnded && currentSlot + 1 < resourceSetCount)
                         {
                             if (!resourceSetsChanged[currentSlot + 1])
+                                batchEnded = true;
+                            else if (resourceSets[currentSlot + 1].Set == null)
                                 batchEnded = true;
                             else
                             {
@@ -1060,6 +1087,9 @@ namespace Veldrid.Vk
 
             for (uint currentSlot = 0; currentSlot < currentComputePipeline.ResourceSetCount; currentSlot++)
             {
+                if (currentComputeResourceSets[currentSlot].Set == null)
+                    continue;
+
                 var vkSet = Util.AssertSubtype<ResourceSet, VkResourceSet>(
                     currentComputeResourceSets[currentSlot].Set);
 
