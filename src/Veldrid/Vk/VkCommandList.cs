@@ -854,6 +854,19 @@ namespace Veldrid.Vk
                         {
                             var vkSet = Util.AssertSubtype<ResourceSet, VkResourceSet>(currentGraphicsResourceSets[slot].Set);
                             appendTransitions(vkSet.SampledTextures, VkImageLayout.ShaderReadOnlyOptimal);
+
+                            // Graphics shaders can also bind storage images (TextureReadWrite).
+                            // Transition them to General, just as the compute dispatch path does.
+                            appendTransitions(vkSet.StorageTextures, VkImageLayout.General);
+
+                            // Dual-use storage textures (Sampled | Storage) must return to
+                            // ShaderReadOnlyOptimal before the next draw so they can be sampled.
+                            for (int texIdx = 0; texIdx < vkSet.StorageTextures.Count; texIdx++)
+                            {
+                                var storageTex = vkSet.StorageTextures[texIdx];
+                                if ((storageTex.Usage & TextureUsage.Sampled) != 0)
+                                    preDrawSampledImages.Add(storageTex);
+                            }
                         }
                     }
                 }

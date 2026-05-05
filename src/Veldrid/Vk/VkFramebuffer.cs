@@ -146,6 +146,22 @@ namespace Veldrid.Vk
                 dstAccessMask = VkAccessFlags.ColorAttachmentRead | VkAccessFlags.ColorAttachmentWrite
             };
 
+            // Extend the external dependency to cover depth/stencil when the framebuffer has
+            // a depth attachment.  The external-to-subpass transition for a depth attachment
+            // occurs in EarlyFragmentTests/LateFragmentTests, not ColorAttachmentOutput.
+            // Omitting these stage/access masks produces a Vulkan validation warning:
+            // "vkCreateRenderPass: pDependency[0] srcStageMask does not include any stages that
+            //  use the layout set in pAttachments[…].initialLayout."
+            if (DepthTarget != null)
+            {
+                subpassDependency.srcStageMask |= VkPipelineStageFlags.EarlyFragmentTests
+                                                  | VkPipelineStageFlags.LateFragmentTests;
+                subpassDependency.dstStageMask |= VkPipelineStageFlags.EarlyFragmentTests
+                                                  | VkPipelineStageFlags.LateFragmentTests;
+                subpassDependency.dstAccessMask |= VkAccessFlags.DepthStencilAttachmentRead
+                                                   | VkAccessFlags.DepthStencilAttachmentWrite;
+            }
+
             renderPassCi.attachmentCount = attachments.Count;
             renderPassCi.pAttachments = (VkAttachmentDescription*)attachments.Data;
             renderPassCi.subpassCount = 1;

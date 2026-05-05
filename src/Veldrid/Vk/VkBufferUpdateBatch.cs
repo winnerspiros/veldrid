@@ -96,6 +96,12 @@ namespace Veldrid.Vk
                 RuntimeHelpers.GetHashCode(a.Destination).CompareTo(RuntimeHelpers.GetHashCode(b.Destination)));
 
             var regionScratch = ArrayPool<VkBufferCopy>.Shared.Rent(pendingCopies.Count);
+
+            // Accumulate dstAccessMask / dstStageFlags across all destination buffers so we can
+            // emit one VkMemoryBarrier that covers every pending copy (TRANSFER_WRITE → all consumers).
+            var combinedDstAccess = VkAccessFlags.None;
+            var combinedDstStage = VkPipelineStageFlags.None;
+
             try
             {
                 int i = 0;
@@ -110,12 +116,62 @@ namespace Veldrid.Vk
 
                     fixed (VkBufferCopy* regionsPtr = regionScratch)
                         gd.DeviceApi.vkCmdCopyBuffer(cb, stagingBuffer.DeviceBuffer, dst.DeviceBuffer, (uint)regionCount, regionsPtr);
+
+                    // Accumulate the consumer masks for this destination.
+                    var destUsage = dst.Usage;
+                    if ((destUsage & BufferUsage.UniformBuffer) != 0)
+                    {
+                        combinedDstAccess |= VkAccessFlags.UniformRead;
+                        combinedDstStage |= VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.ComputeShader;
+                    }
+                    if ((destUsage & BufferUsage.VertexBuffer) != 0)
+                    {
+                        combinedDstAccess |= VkAccessFlags.VertexAttributeRead;
+                        combinedDstStage |= VkPipelineStageFlags.VertexInput;
+                    }
+                    if ((destUsage & BufferUsage.IndexBuffer) != 0)
+                    {
+                        combinedDstAccess |= VkAccessFlags.IndexRead;
+                        combinedDstStage |= VkPipelineStageFlags.VertexInput;
+                    }
+                    if ((destUsage & (BufferUsage.StructuredBufferReadOnly | BufferUsage.StructuredBufferReadWrite)) != 0)
+                    {
+                        combinedDstAccess |= VkAccessFlags.ShaderRead;
+                        combinedDstStage |= VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.ComputeShader;
+                    }
+                    if ((destUsage & BufferUsage.IndirectBuffer) != 0)
+                    {
+                        combinedDstAccess |= VkAccessFlags.IndirectCommandRead;
+                        combinedDstStage |= VkPipelineStageFlags.DrawIndirect;
+                    }
                 }
             }
             finally
             {
                 ArrayPool<VkBufferCopy>.Shared.Return(regionScratch);
             }
+
+            // Emit a single memory barrier making all TRANSFER_WRITE operations visible to every
+            // GPU consumer type present in the batch.  Omitting this barrier is a Vulkan spec
+            // violation that can cause stale data to be read by subsequent draw/dispatch commands.
+            if (combinedDstAccess == VkAccessFlags.None)
+            {
+                combinedDstAccess = VkAccessFlags.MemoryRead;
+                combinedDstStage = VkPipelineStageFlags.AllCommands;
+            }
+
+            var memBarrier = new VkMemoryBarrier();
+            memBarrier.sType = VkStructureType.MemoryBarrier;
+            memBarrier.srcAccessMask = VkAccessFlags.TransferWrite;
+            memBarrier.dstAccessMask = combinedDstAccess;
+            gd.DeviceApi.vkCmdPipelineBarrier(
+                cb,
+                VkPipelineStageFlags.Transfer,
+                combinedDstStage,
+                VkDependencyFlags.None,
+                1, &memBarrier,
+                0, null,
+                0, null);
 
             pool.EndAndSubmit(cb);
             gd.RegisterSubmittedStagingBuffer(cb, stagingBuffer);

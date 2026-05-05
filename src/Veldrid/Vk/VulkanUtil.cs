@@ -124,15 +124,17 @@ namespace Veldrid.Vk
             {
                 srcAccessMask = VkAccessFlags.ShaderWrite;
                 dstAccessMask = VkAccessFlags.ShaderRead;
-                srcStageFlags = VkPipelineStageFlags.ComputeShader | VkPipelineStageFlags.FragmentShader;
+                // Storage image writes can originate in any shader stage (vertex/fragment/compute).
+                srcStageFlags = VkPipelineStageFlags.ComputeShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader;
                 dstStageFlags = VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.ComputeShader;
             }
             else if (oldLayout == VkImageLayout.ShaderReadOnlyOptimal && newLayout == VkImageLayout.General)
             {
                 srcAccessMask = VkAccessFlags.ShaderRead;
-                dstAccessMask = VkAccessFlags.ShaderRead;
+                dstAccessMask = VkAccessFlags.ShaderRead | VkAccessFlags.ShaderWrite;
                 srcStageFlags = VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.ComputeShader;
-                dstStageFlags = VkPipelineStageFlags.ComputeShader;
+                // Storage image reads/writes can also happen in graphics shaders, not only compute.
+                dstStageFlags = VkPipelineStageFlags.ComputeShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader;
             }
             else if (oldLayout == VkImageLayout.TransferSrcOptimal && newLayout == VkImageLayout.ShaderReadOnlyOptimal)
             {
