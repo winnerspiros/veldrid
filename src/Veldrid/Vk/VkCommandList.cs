@@ -1918,10 +1918,42 @@ namespace Veldrid.Vk
                     : VkImageAspectFlags.Depth
                 : VkImageAspectFlags.Color;
 
+            // Scratch space for the 2 image barriers emitted before each blit.
+            var barriers = stackalloc VkImageMemoryBarrier[2];
+
             for (uint level = 1; level < vkTex.MipLevels; level++)
             {
-                vkTex.TransitionImageLayoutNonmatching(CommandBuffer, level - 1, 1, 0, layerCount, VkImageLayout.TransferSrcOptimal);
-                vkTex.TransitionImageLayoutNonmatching(CommandBuffer, level, 1, 0, layerCount, VkImageLayout.TransferDstOptimal);
+                // Batch the two per-iteration layout transitions (src mip→TransferSrcOptimal and
+                // dst mip→TransferDstOptimal) into a single vkCmdPipelineBarrier call.
+                // Each barrier call carries fixed CPU overhead (syscall + driver validation);
+                // merging them halves that cost, which matters for textures with many mip levels.
+                bool hasSrc = vkTex.TryGetLayoutTransitionBarrier(
+                    level - 1, 1, 0, layerCount,
+                    VkImageLayout.TransferSrcOptimal,
+                    out var srcBarrier, out var srcStageA, out var dstStageA);
+
+                bool hasDst = vkTex.TryGetLayoutTransitionBarrier(
+                    level, 1, 0, layerCount,
+                    VkImageLayout.TransferDstOptimal,
+                    out var dstBarrier, out var srcStageB, out var dstStageB);
+
+                int barrierCount = 0;
+                VkPipelineStageFlags combinedSrc = VkPipelineStageFlags.None;
+                VkPipelineStageFlags combinedDst = VkPipelineStageFlags.None;
+
+                if (hasSrc) { barriers[barrierCount++] = srcBarrier; combinedSrc |= srcStageA; combinedDst |= dstStageA; }
+                if (hasDst) { barriers[barrierCount++] = dstBarrier; combinedSrc |= srcStageB; combinedDst |= dstStageB; }
+
+                if (barrierCount > 0)
+                {
+                    gd.DeviceApi.vkCmdPipelineBarrier(
+                        CommandBuffer,
+                        combinedSrc, combinedDst,
+                        VkDependencyFlags.None,
+                        0, null,
+                        0, null,
+                        (uint)barrierCount, barriers);
+                }
 
                 var deviceImage = vkTex.OptimalDeviceImage;
                 uint mipWidth = Math.Max(width >> 1, 1);

@@ -89,11 +89,12 @@ namespace Veldrid.Vk
             var pool = gd.GetFreeCommandPool();
             var cb = pool.BeginNewCommandBuffer();
 
-            // One gd.DeviceApi.vkCmdCopyBuffer per destination buffer, batching all regions for that destination.
-            // Sort by destination identity so identical destinations group naturally; then issue one call
-            // per group with a contiguous span of regions backed by a single pooled scratch array.
+            // Sort by the underlying VkBuffer handle (a unique uint64 device address) so that all
+            // pending copies to the same destination land in contiguous slots. Using
+            // RuntimeHelpers.GetHashCode (object identity hash) would also group same-object entries,
+            // but hash collisions can interleave two different destinations and defeat the batching.
             pendingCopies.Sort(static (a, b) =>
-                RuntimeHelpers.GetHashCode(a.Destination).CompareTo(RuntimeHelpers.GetHashCode(b.Destination)));
+                a.Destination.DeviceBuffer.Handle.CompareTo(b.Destination.DeviceBuffer.Handle));
 
             var regionScratch = ArrayPool<VkBufferCopy>.Shared.Rent(pendingCopies.Count);
 

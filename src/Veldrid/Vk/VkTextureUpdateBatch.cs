@@ -81,8 +81,13 @@ namespace Veldrid.Vk
             uint bufferRowLength = Math.Max(width, blockSize);
             uint bufferImageHeight = Math.Max(height, blockSize);
 
+            // Use IsStencilFormat to decide whether to include the stencil aspect —
+            // using Depth|Stencil for a depth-only format (e.g. D16_UNorm, D32_Float)
+            // is a Vulkan spec violation and triggers validation errors.
             var aspect = (vkTex.Usage & TextureUsage.DepthStencil) != 0
-                ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+                ? FormatHelpers.IsStencilFormat(vkTex.Format)
+                    ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+                    : VkImageAspectFlags.Depth
                 : VkImageAspectFlags.Color;
 
             var region = new VkBufferImageCopy
