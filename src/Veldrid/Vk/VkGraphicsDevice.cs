@@ -63,6 +63,10 @@ namespace Veldrid.Vk
 
         // VK_KHR_dynamic_rendering
         public bool HasDynamicRendering { get; private set; }
+        // When true, VkCommandList must call vkCmdBeginRenderingKHR/vkCmdEndRenderingKHR
+        // instead of the core-1.3 vkCmdBeginRendering/vkCmdEndRendering.
+        // Set when the driver exposes only the KHR extension alias (pre-1.3 extension).
+        internal bool UseKhrDynamicRendering { get; private set; }
 
         // VK_EXT_memory_budget
         public bool HasMemoryBudget { get; private set; }
@@ -85,6 +89,9 @@ namespace Veldrid.Vk
 
         // VK_KHR_synchronization2 (core in Vulkan 1.3).
         public bool HasSynchronization2 { get; private set; }
+        // When true, submitCommandsCore must call vkQueueSubmit2KHR instead of vkQueueSubmit2.
+        // Set when the driver exposes vkQueueSubmit2KHR but not vkQueueSubmit2 (pre-1.3 extension).
+        private bool useQueueSubmit2Khr;
 
         // VK_KHR_timeline_semaphore (core in Vulkan 1.2).
         public bool HasTimelineSemaphore { get; private set; }
@@ -822,12 +829,16 @@ namespace Veldrid.Vk
 
                 lock (graphicsQueueLock)
                 {
-                    var result = DeviceApi.vkQueueSubmit2(graphicsQueue, 1, &si2, vkFence);
+                    var result = useQueueSubmit2Khr
+                        ? DeviceApi.vkQueueSubmit2KHR(graphicsQueue, 1, &si2, vkFence)
+                        : DeviceApi.vkQueueSubmit2(graphicsQueue, 1, &si2, vkFence);
                     CheckResult(result);
 
                     if (useExtraFence)
                     {
-                        result = DeviceApi.vkQueueSubmit2(graphicsQueue, 0, null, submissionFence);
+                        result = useQueueSubmit2Khr
+                            ? DeviceApi.vkQueueSubmit2KHR(graphicsQueue, 0, null, submissionFence)
+                            : DeviceApi.vkQueueSubmit2(graphicsQueue, 0, null, submissionFence);
                         CheckResult(result);
                     }
                 }
@@ -1498,53 +1509,107 @@ namespace Veldrid.Vk
                 deviceProps2.pNext = &pushDescProps;
                 InstanceApi.vkGetPhysicalDeviceProperties2(PhysicalDevice, &deviceProps2);
                 MaxPushDescriptors = pushDescProps.maxPushDescriptors;
-                // CmdPushDescriptorSetKHR is accessed via DeviceApi.vkCmdPushDescriptorSetKHR.
-                HasPushDescriptors = MaxPushDescriptors > 0;
+                HasPushDescriptors = MaxPushDescriptors > 0
+                                  && DeviceApi.vkCmdPushDescriptorSetKHR_ptr.Value != null;
             }
 
-            // VK_KHR_dynamic_rendering: always available via DeviceApi when extension/core feature loaded.
-            HasDynamicRendering = hasDynamicRendering;
+            // VK_KHR_dynamic_rendering: validate that the actual function pointers were
+            // loaded by vkGetDeviceProcAddr. On some drivers (observed on Adreno with
+            // pre-release Android system images) the extension may be listed in device
+            // properties but the function pointers silently return null.
+            // Try core names first; fall back to KHR extension aliases.
+            if (hasDynamicRendering)
+            {
+                bool beginOk = DeviceApi.vkCmdBeginRendering_ptr.Value != null;
+                bool endOk   = DeviceApi.vkCmdEndRendering_ptr.Value != null;
+
+                if (!beginOk && DeviceApi.vkCmdBeginRenderingKHR_ptr.Value != null)
+                {
+                    beginOk = true;
+                    UseKhrDynamicRendering = true;
+                }
+                if (!endOk && DeviceApi.vkCmdEndRenderingKHR_ptr.Value != null)
+                    endOk = true;
+
+                HasDynamicRendering = beginOk && endOk;
+                if (!HasDynamicRendering)
+                    Debug.WriteLine("[Veldrid] VK_KHR_dynamic_rendering: extension listed but begin/end function pointers are null — disabled.");
+            }
 
             HasMemoryBudget = hasMemoryBudget;
 
-            // VK_EXT_host_image_copy: load function pointers.
+            // VK_EXT_host_image_copy: validate function pointer before enabling.
             if (hasHostImageCopy)
-            {                HasHostImageCopy = true;
+            {
+                HasHostImageCopy = DeviceApi.vkCopyMemoryToImageEXT_ptr.Value != null;
+                if (!HasHostImageCopy)
+                    Debug.WriteLine("[Veldrid] VK_EXT_host_image_copy: extension listed but vkCopyMemoryToImageEXT is null — disabled.");
             }
 
             // VK_EXT_descriptor_indexing: detection only (core in Vulkan 1.2).
             // No function pointers to load — just expose the flag for future bindless usage.
             HasDescriptorIndexing = hasDescriptorIndexing;
 
-            // VK_KHR_fragment_shading_rate: load function pointer for per-draw VRS.
+            // VK_KHR_fragment_shading_rate: validate the function pointer.
+            // Without an explicit check some Android drivers (Adreno 7xx) return a non-null
+            // but broken stub; with the pNext feature opt-in above the driver should now
+            // return a correct pointer, but guard against the null case as well.
             if (hasFragmentShadingRate)
-            {                HasFragmentShadingRate = true;
+            {
+                HasFragmentShadingRate = DeviceApi.vkCmdSetFragmentShadingRateKHR_ptr.Value != null;
+                if (!HasFragmentShadingRate)
+                    Debug.WriteLine("[Veldrid] VK_KHR_fragment_shading_rate: extension listed but vkCmdSetFragmentShadingRateKHR is null — disabled.");
             }
 
-            // VK_EXT_mesh_shader: load function pointer for mesh shader dispatch.
+            // VK_EXT_mesh_shader: validate function pointer before enabling.
             if (hasMeshShader)
-            {                HasMeshShader = true;
+            {
+                HasMeshShader = DeviceApi.vkCmdDrawMeshTasksEXT_ptr.Value != null;
+                if (!HasMeshShader)
+                    Debug.WriteLine("[Veldrid] VK_EXT_mesh_shader: extension listed but vkCmdDrawMeshTasksEXT is null — disabled.");
             }
 
             // VK_EXT_swapchain_maintenance1: no device function pointers required by
             // our usage (only struct chaining at create- and present-time).
             HasSwapchainMaintenance1 = hasSwapchainMaintenance1;
 
-            // VK_KHR_synchronization2: load vkQueueSubmit2. When the extension is the
-            // promoted-to-core Vulkan 1.3 variant no KHR suffix is needed; fall back to
-            // the KHR entry point for 1.2 drivers that expose only the extension form.
-            HasSynchronization2 = hasSynchronization2;
+            // VK_KHR_synchronization2: validate vkQueueSubmit2. The core-1.3 variant
+            // is tried first; fall back to the KHR extension alias for 1.2 drivers.
+            // Disable entirely if neither pointer is available (shouldn't happen on a
+            // conformant 1.3 device, but guard defensively).
             if (hasSynchronization2)
-            {            }
+            {
+                if (DeviceApi.vkQueueSubmit2_ptr.Value != null)
+                {
+                    HasSynchronization2 = true;
+                }
+                else if (DeviceApi.vkQueueSubmit2KHR_ptr.Value != null)
+                {
+                    HasSynchronization2 = true;
+                    useQueueSubmit2Khr = true;
+                }
+                else
+                {
+                    HasSynchronization2 = false;
+                    Debug.WriteLine("[Veldrid] VK_KHR_synchronization2: extension listed but neither vkQueueSubmit2 nor vkQueueSubmit2KHR is available — disabled.");
+                }
+            }
 
             HasTimelineSemaphore = hasTimelineSemaphore;
 
             HasPipelineCreationCacheControl = hasPipelineCreationCacheControl;
 
-            // VK_GOOGLE_display_timing: load function pointers used by VkSwapchain to
-            // query the display refresh cadence and schedule per-present vblank targets.
+            // VK_GOOGLE_display_timing: validate both function pointers before enabling.
+            // On some drivers (observed on Adreno + pre-release Android system images)
+            // the extension is listed but vkGetDeviceProcAddr returns null for its
+            // functions. Guard here so initDisplayTiming() doesn't crash through a null
+            // pointer (PC = 0x0, SIGSEGV) at swapchain creation time.
             if (hasDisplayTiming)
-            {                HasDisplayTiming = true;
+            {
+                HasDisplayTiming = DeviceApi.vkGetRefreshCycleDurationGOOGLE_ptr.Value != null
+                                && DeviceApi.vkGetPastPresentationTimingGOOGLE_ptr.Value != null;
+                if (!HasDisplayTiming)
+                    Debug.WriteLine("[Veldrid] VK_GOOGLE_display_timing: extension listed but function pointers are null — disabled.");
             }
         }
 

@@ -1406,7 +1406,10 @@ namespace Veldrid.Vk
                 }
             }
 
-            gd.DeviceApi.vkCmdBeginRendering(CommandBuffer, &renderingInfo);
+            if (gd.UseKhrDynamicRendering)
+                gd.DeviceApi.vkCmdBeginRenderingKHR(CommandBuffer, &renderingInfo);
+            else
+                gd.DeviceApi.vkCmdBeginRendering(CommandBuffer, &renderingInfo);
 
             // Use a sentinel render pass value to indicate dynamic rendering is active.
             // Any non-null value signals "inside a render pass" to ensureRenderPassActive / ensureNoRenderPass.
@@ -1421,7 +1424,10 @@ namespace Veldrid.Vk
             if (activeRenderPass == dynamicRenderingSentinel)
             {
                 // Dynamic rendering path.
-                gd.DeviceApi.vkCmdEndRendering(CommandBuffer);
+                if (gd.UseKhrDynamicRendering)
+                    gd.DeviceApi.vkCmdEndRenderingKHR(CommandBuffer);
+                else
+                    gd.DeviceApi.vkCmdEndRendering(CommandBuffer);
             }
             else
             {
