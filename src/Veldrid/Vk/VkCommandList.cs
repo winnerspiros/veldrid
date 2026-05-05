@@ -290,18 +290,57 @@ namespace Veldrid.Vk
 
             gd.DeviceApi.vkCmdCopyBuffer(CommandBuffer, srcVkBuffer.DeviceBuffer, dstVkBuffer.DeviceBuffer, 1, &region);
 
-            bool needToProtectUniform = destination.Usage.HasFlag(BufferUsage.UniformBuffer);
+            // Build access/stage masks covering all ways the destination buffer may be consumed.
+            var dstAccess = VkAccessFlags.None;
+            var dstStage = VkPipelineStageFlags.None;
+            var destUsage = destination.Usage;
+
+            if ((destUsage & BufferUsage.UniformBuffer) != 0)
+            {
+                dstAccess |= VkAccessFlags.UniformRead;
+                dstStage |= VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.ComputeShader;
+            }
+
+            if ((destUsage & BufferUsage.VertexBuffer) != 0)
+            {
+                dstAccess |= VkAccessFlags.VertexAttributeRead;
+                dstStage |= VkPipelineStageFlags.VertexInput;
+            }
+
+            if ((destUsage & BufferUsage.IndexBuffer) != 0)
+            {
+                dstAccess |= VkAccessFlags.IndexRead;
+                dstStage |= VkPipelineStageFlags.VertexInput;
+            }
+
+            if ((destUsage & (BufferUsage.StructuredBufferReadOnly | BufferUsage.StructuredBufferReadWrite)) != 0)
+            {
+                dstAccess |= VkAccessFlags.ShaderRead;
+                dstStage |= VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.ComputeShader;
+            }
+
+            if ((destUsage & BufferUsage.IndirectBuffer) != 0)
+            {
+                dstAccess |= VkAccessFlags.IndirectCommandRead;
+                dstStage |= VkPipelineStageFlags.DrawIndirect;
+            }
+
+            // Fallback for buffers with no explicit GPU-read usage (e.g. Staging-only).
+            if (dstAccess == VkAccessFlags.None)
+            {
+                dstAccess = VkAccessFlags.MemoryRead;
+                dstStage = VkPipelineStageFlags.AllCommands;
+            }
 
             VkMemoryBarrier barrier;
             barrier.sType = VkStructureType.MemoryBarrier;
             barrier.srcAccessMask = VkAccessFlags.TransferWrite;
-            barrier.dstAccessMask = needToProtectUniform ? VkAccessFlags.UniformRead : VkAccessFlags.VertexAttributeRead;
+            barrier.dstAccessMask = dstAccess;
             barrier.pNext = null;
             gd.DeviceApi.vkCmdPipelineBarrier(
                 CommandBuffer,
-                VkPipelineStageFlags.Transfer, needToProtectUniform
-                    ? VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.FragmentShader
-                    : VkPipelineStageFlags.VertexInput,
+                VkPipelineStageFlags.Transfer,
+                dstStage,
                 VkDependencyFlags.None,
                 1, &barrier,
                 0, null,

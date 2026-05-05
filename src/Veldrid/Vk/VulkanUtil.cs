@@ -89,14 +89,14 @@ namespace Veldrid.Vk
             {
                 srcAccessMask = VkAccessFlags.ShaderRead;
                 dstAccessMask = VkAccessFlags.TransferRead;
-                srcStageFlags = VkPipelineStageFlags.FragmentShader;
+                srcStageFlags = VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.ComputeShader;
                 dstStageFlags = VkPipelineStageFlags.Transfer;
             }
             else if (oldLayout == VkImageLayout.ShaderReadOnlyOptimal && newLayout == VkImageLayout.TransferDstOptimal)
             {
                 srcAccessMask = VkAccessFlags.ShaderRead;
                 dstAccessMask = VkAccessFlags.TransferWrite;
-                srcStageFlags = VkPipelineStageFlags.FragmentShader;
+                srcStageFlags = VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.ComputeShader;
                 dstStageFlags = VkPipelineStageFlags.Transfer;
             }
             else if (oldLayout == VkImageLayout.Preinitialized && newLayout == VkImageLayout.TransferSrcOptimal)
@@ -118,20 +118,20 @@ namespace Veldrid.Vk
                 srcAccessMask = VkAccessFlags.None;
                 dstAccessMask = VkAccessFlags.ShaderRead;
                 srcStageFlags = VkPipelineStageFlags.TopOfPipe;
-                dstStageFlags = VkPipelineStageFlags.FragmentShader;
+                dstStageFlags = VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.ComputeShader;
             }
             else if (oldLayout == VkImageLayout.General && newLayout == VkImageLayout.ShaderReadOnlyOptimal)
             {
                 srcAccessMask = VkAccessFlags.ShaderWrite;
                 dstAccessMask = VkAccessFlags.ShaderRead;
-                srcStageFlags = VkPipelineStageFlags.ComputeShader;
-                dstStageFlags = VkPipelineStageFlags.FragmentShader;
+                srcStageFlags = VkPipelineStageFlags.ComputeShader | VkPipelineStageFlags.FragmentShader;
+                dstStageFlags = VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.ComputeShader;
             }
             else if (oldLayout == VkImageLayout.ShaderReadOnlyOptimal && newLayout == VkImageLayout.General)
             {
                 srcAccessMask = VkAccessFlags.ShaderRead;
                 dstAccessMask = VkAccessFlags.ShaderRead;
-                srcStageFlags = VkPipelineStageFlags.FragmentShader;
+                srcStageFlags = VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.ComputeShader;
                 dstStageFlags = VkPipelineStageFlags.ComputeShader;
             }
             else if (oldLayout == VkImageLayout.TransferSrcOptimal && newLayout == VkImageLayout.ShaderReadOnlyOptimal)
@@ -139,14 +139,14 @@ namespace Veldrid.Vk
                 srcAccessMask = VkAccessFlags.TransferRead;
                 dstAccessMask = VkAccessFlags.ShaderRead;
                 srcStageFlags = VkPipelineStageFlags.Transfer;
-                dstStageFlags = VkPipelineStageFlags.FragmentShader;
+                dstStageFlags = VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.ComputeShader;
             }
             else if (oldLayout == VkImageLayout.TransferDstOptimal && newLayout == VkImageLayout.ShaderReadOnlyOptimal)
             {
                 srcAccessMask = VkAccessFlags.TransferWrite;
                 dstAccessMask = VkAccessFlags.ShaderRead;
                 srcStageFlags = VkPipelineStageFlags.Transfer;
-                dstStageFlags = VkPipelineStageFlags.FragmentShader;
+                dstStageFlags = VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.ComputeShader;
             }
             else if (oldLayout == VkImageLayout.TransferSrcOptimal && newLayout == VkImageLayout.TransferDstOptimal)
             {
@@ -181,14 +181,14 @@ namespace Veldrid.Vk
                 srcAccessMask = VkAccessFlags.ColorAttachmentWrite;
                 dstAccessMask = VkAccessFlags.ShaderRead;
                 srcStageFlags = VkPipelineStageFlags.ColorAttachmentOutput;
-                dstStageFlags = VkPipelineStageFlags.FragmentShader;
+                dstStageFlags = VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.ComputeShader;
             }
             else if (oldLayout == VkImageLayout.DepthStencilAttachmentOptimal && newLayout == VkImageLayout.ShaderReadOnlyOptimal)
             {
                 srcAccessMask = VkAccessFlags.DepthStencilAttachmentWrite;
                 dstAccessMask = VkAccessFlags.ShaderRead;
                 srcStageFlags = VkPipelineStageFlags.EarlyFragmentTests | VkPipelineStageFlags.LateFragmentTests;
-                dstStageFlags = VkPipelineStageFlags.FragmentShader;
+                dstStageFlags = VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.ComputeShader;
             }
             else if (oldLayout == VkImageLayout.ColorAttachmentOptimal && newLayout == VkImageLayout.PresentSrcKHR)
             {
@@ -255,8 +255,25 @@ namespace Veldrid.Vk
                 // used as a render target in this pass.
                 srcAccessMask = VkAccessFlags.ShaderRead;
                 dstAccessMask = VkAccessFlags.ColorAttachmentWrite;
-                srcStageFlags = VkPipelineStageFlags.FragmentShader;
+                srcStageFlags = VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.ComputeShader;
                 dstStageFlags = VkPipelineStageFlags.ColorAttachmentOutput;
+            }
+            else if (oldLayout == VkImageLayout.ShaderReadOnlyOptimal && newLayout == VkImageLayout.DepthStencilAttachmentOptimal)
+            {
+                // A depth texture sampled in the previous frame is reused as a depth attachment
+                // (e.g. shadow-map double-buffering or depth pre-pass re-binding).
+                srcAccessMask = VkAccessFlags.ShaderRead;
+                dstAccessMask = VkAccessFlags.DepthStencilAttachmentWrite;
+                srcStageFlags = VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.ComputeShader;
+                dstStageFlags = VkPipelineStageFlags.EarlyFragmentTests | VkPipelineStageFlags.LateFragmentTests;
+            }
+            else if (oldLayout == VkImageLayout.DepthStencilAttachmentOptimal && newLayout == VkImageLayout.TransferSrcOptimal)
+            {
+                // Depth/stencil texture being read back via CopyTexture.
+                srcAccessMask = VkAccessFlags.DepthStencilAttachmentWrite;
+                dstAccessMask = VkAccessFlags.TransferRead;
+                srcStageFlags = VkPipelineStageFlags.EarlyFragmentTests | VkPipelineStageFlags.LateFragmentTests;
+                dstStageFlags = VkPipelineStageFlags.Transfer;
             }
             else if (oldLayout == VkImageLayout.Undefined && newLayout == VkImageLayout.ColorAttachmentOptimal)
             {
