@@ -415,8 +415,26 @@ namespace Veldrid.Vk
 
             if (stagingBuffer != Vortice.Vulkan.VkBuffer.Null) return false;
 
-            var oldLayout = imageLayouts[CalculateSubresource(baseMipLevel, baseArrayLayer)];
-            if (oldLayout == newLayout) return false;
+            // Scan ALL requested subresources to find the first one that needs transitioning.
+            // Reading only mip 0 would silently skip the barrier when mip 0 is already in
+            // newLayout but other mip levels (e.g. after a partial CopyTexture or
+            // GenerateMipmaps) are still in their previous layout.
+            VkImageLayout oldLayout = newLayout;
+            bool needsTransition = false;
+            for (uint level = 0; level < levelCount && !needsTransition; level++)
+            {
+                for (uint layer = 0; layer < layerCount && !needsTransition; layer++)
+                {
+                    var subLayout = imageLayouts[CalculateSubresource(baseMipLevel + level, baseArrayLayer + layer)];
+                    if (subLayout != newLayout)
+                    {
+                        oldLayout = subLayout;
+                        needsTransition = true;
+                    }
+                }
+            }
+
+            if (!needsTransition) return false;
 
             VkImageAspectFlags aspectMask;
 

@@ -823,6 +823,9 @@ namespace Veldrid.Vk
             // Emit all accumulated transitions as a single gd.DeviceApi.vkCmdPipelineBarrier.
             flushTransitionBarriers();
 
+            if (currentGraphicsPipeline == null)
+                throw new VeldridException("A graphics pipeline must be bound before drawing.");
+
             ensureRenderPassActive();
 
             flushNewResourceSets(
@@ -838,6 +841,8 @@ namespace Veldrid.Vk
         // the texture is already in the requested layout, so clean textures cost only an array read.
         private void appendTransitions(List<VkTexture> textures, VkImageLayout layout)
         {
+            if (textures.Count == 0) return;
+
             for (int i = 0; i < textures.Count; i++)
             {
                 var tex = textures[i];
@@ -1084,6 +1089,9 @@ namespace Veldrid.Vk
         private void preDispatchCommand()
         {
             ensureNoRenderPass();
+
+            if (currentComputePipeline == null)
+                throw new VeldridException("A compute pipeline must be bound before dispatching.");
 
             for (uint currentSlot = 0; currentSlot < currentComputePipeline.ResourceSetCount; currentSlot++)
             {
