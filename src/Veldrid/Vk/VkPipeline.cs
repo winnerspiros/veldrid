@@ -1,4 +1,6 @@
+using System;
 using System.Runtime.CompilerServices;
+using System.Text;
 using Vortice.Vulkan;
 using static Vortice.Vulkan.Vulkan;
 using static Veldrid.Vk.VulkanUtil;
@@ -228,15 +230,23 @@ namespace Veldrid.Vk
 
             var shaders = description.ShaderSet.Shaders;
             var stages = new StackList<VkPipelineShaderStageCreateInfo>();
+            // Encode entry-point names as null-terminated UTF-8 on the stack (max 256 bytes each).
+            // This avoids a GCHandle-pinned heap allocation per shader stage.
+            const int maxEntryPointBytes = 256;
+            byte* entryPointsBuf = stackalloc byte[shaders.Length * maxEntryPointBytes];
 
-            foreach (var shader in shaders)
+            for (int si = 0; si < shaders.Length; si++)
             {
+                var shader = shaders[si];
                 var vkShader = Util.AssertSubtype<Shader, VkShader>(shader);
+                byte* nameDst = entryPointsBuf + si * maxEntryPointBytes;
+                int written = Encoding.UTF8.GetBytes(shader.EntryPoint, new Span<byte>(nameDst, maxEntryPointBytes - 1));
+                nameDst[written] = 0;
+
                 var stageCi = new VkPipelineShaderStageCreateInfo();
                 stageCi.module = vkShader.ShaderModule;
                 stageCi.stage = VkFormats.VdToVkShaderStages(shader.Stage);
-                // stageCI.pName = CommonStrings.main; // Meh
-                stageCi.pName = new FixedUtf8String(shader.EntryPoint); // TODO: DONT ALLOCATE HERE
+                stageCi.pName = nameDst;
                 stageCi.pSpecializationInfo = &specializationInfo;
                 stages.Add(stageCi);
             }
@@ -381,7 +391,7 @@ namespace Veldrid.Vk
                 CheckResult(result);
             }
 
-            ResourceSetCount= (uint)description.ResourceLayouts.Length;
+            ResourceSetCount = (uint)description.ResourceLayouts.Length;
             DynamicOffsetsCount = 0;
             foreach (ResourceLayout layout in description.ResourceLayouts)
                 DynamicOffsetsCount += layout.DynamicBufferCount;

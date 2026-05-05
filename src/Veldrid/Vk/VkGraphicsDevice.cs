@@ -969,23 +969,12 @@ namespace Veldrid.Vk
 
             var instanceCi = new VkInstanceCreateInfo();
 
-            // Query the highest supported Vulkan instance version.
-            // vkEnumerateInstanceVersion is a Vulkan 1.1 function; if absent we fall back to 1.0.
-            uint instanceApiVersion = new Vortice.Vulkan.VkVersion(1, 0, 0);
-
-            {
-                IntPtr fnPtr = (IntPtr)vkGetInstanceProcAddr(new VkInstance(), "vkEnumerateInstanceVersion\0"u8).Value;
-
-                if (fnPtr != IntPtr.Zero)
-                {
-                    var enumerateInstanceVersion =
-                        Marshal.GetDelegateForFunctionPointer<VkEnumerateInstanceVersionT>(fnPtr);
-
-                    uint supportedVersion;
-                    if (enumerateInstanceVersion(&supportedVersion) == VkResult.Success)
-                        instanceApiVersion = supportedVersion;
-                }
-            }
+            // Query the highest supported Vulkan instance version via the Vortice global function.
+            // Vortice handles the Vulkan 1.0 fallback internally (VK_VERSION_1_0 when absent).
+            var queriedVersion = vkEnumerateInstanceVersion();
+            uint instanceApiVersion = queriedVersion.Value != 0
+                ? queriedVersion.Value
+                : new Vortice.Vulkan.VkVersion(1, 0, 0);
 
             var applicationInfo = new VkApplicationInfo
             {
@@ -1559,61 +1548,6 @@ namespace Veldrid.Vk
             }
         }
 
-        // UTF-8 literal overloads: zero runtime encoding cost; 'u8' string literals are null-terminated.
-        private IntPtr getInstanceProcAddr(ReadOnlySpan<byte> nameUtf8)
-        {
-            return (IntPtr)(void*)vkGetInstanceProcAddr(instance, nameUtf8).Value;
-        }
-
-        private T getInstanceProcAddr<T>(ReadOnlySpan<byte> nameUtf8)
-        {
-            IntPtr funcPtr = getInstanceProcAddr(nameUtf8);
-            if (funcPtr != IntPtr.Zero) return Marshal.GetDelegateForFunctionPointer<T>(funcPtr);
-
-            return default;
-        }
-
-        private IntPtr getInstanceProcAddr(string name)
-        {
-            return (IntPtr)(void*)vkGetInstanceProcAddr(instance, name).Value;
-        }
-
-        private T getInstanceProcAddr<T>(string name)
-        {
-            IntPtr funcPtr = getInstanceProcAddr(name);
-            if (funcPtr != IntPtr.Zero) return Marshal.GetDelegateForFunctionPointer<T>(funcPtr);
-
-            return default;
-        }
-
-        // UTF-8 literal overloads: zero runtime encoding cost; 'u8' string literals are null-terminated.
-        private IntPtr getDeviceProcAddr(ReadOnlySpan<byte> nameUtf8)
-        {
-            fixed (byte* utf8Ptr = nameUtf8)
-                return (IntPtr)(void*)InstanceApi.vkGetDeviceProcAddr(device, utf8Ptr).Value;
-        }
-
-        private T getDeviceProcAddr<T>(ReadOnlySpan<byte> nameUtf8)
-        {
-            IntPtr funcPtr = getDeviceProcAddr(nameUtf8);
-            if (funcPtr != IntPtr.Zero) return Marshal.GetDelegateForFunctionPointer<T>(funcPtr);
-
-            return default;
-        }
-
-        private IntPtr getDeviceProcAddr(string name)
-        {
-            return (IntPtr)(void*)InstanceApi.vkGetDeviceProcAddr(device, name).Value;
-        }
-
-        private T getDeviceProcAddr<T>(string name)
-        {
-            IntPtr funcPtr = getDeviceProcAddr(name);
-            if (funcPtr != IntPtr.Zero) return Marshal.GetDelegateForFunctionPointer<T>(funcPtr);
-
-            return default;
-        }
-
         private void getQueueFamilyIndices(VkSurfaceKHR surface)
         {
             uint queueFamilyCount = 0;
@@ -2155,6 +2089,4 @@ namespace Veldrid.Vk
         }
     }
 
-    // Used for dynamic proc-addr lookup of vkEnumerateInstanceVersion (Vulkan 1.1 instance-level function).
-    internal unsafe delegate VkResult VkEnumerateInstanceVersionT(uint* pApiVersion);
 }
