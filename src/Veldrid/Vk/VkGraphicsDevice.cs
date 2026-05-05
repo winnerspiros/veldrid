@@ -354,13 +354,9 @@ namespace Veldrid.Vk
             var debugCallbackCi = new VkDebugReportCallbackCreateInfoEXT();
             debugCallbackCi.flags = flags;
             debugCallbackCi.pfnCallback = &staticDebugCallback;
-            IntPtr createFnPtr = getInstanceProcAddr("vkCreateDebugReportCallbackEXT"u8);
-
-            if (createFnPtr == IntPtr.Zero) return;
-
-            var createDelegate = Marshal.GetDelegateForFunctionPointer<VkCreateDebugReportCallbackExtD>(createFnPtr);
-            var result = createDelegate(instance, &debugCallbackCi, IntPtr.Zero, out debugCallbackHandle);
-            CheckResult(result);
+            VkDebugReportCallbackEXT handle;
+            var result = InstanceApi.vkCreateDebugReportCallbackEXT(&debugCallbackCi, null, &handle);
+            if (result == VkResult.Success) debugCallbackHandle = handle;
         }
 
         public VkExtensionProperties[] GetDeviceExtensionProperties()
@@ -655,11 +651,8 @@ namespace Veldrid.Vk
 
             if (debugCallbackHandle.Handle != 0)
             {
+                InstanceApi.vkDestroyDebugReportCallbackEXT(debugCallbackHandle, null);
                 debugCallbackHandle = default;
-                IntPtr destroyFuncPtr = getInstanceProcAddr("vkDestroyDebugReportCallbackEXT"u8);
-                var destroyDel
-                    = Marshal.GetDelegateForFunctionPointer<VkDestroyDebugReportCallbackExtD>(destroyFuncPtr);
-                destroyDel(instance, debugCallbackHandle, null);
             }
 
             DescriptorPoolManager.DestroyAll();
@@ -707,7 +700,7 @@ namespace Veldrid.Vk
 
             instanceCi.pApplicationInfo = &applicationInfo;
 
-            var result = vkCreateInstance(ref instanceCi, null, out var testInstance);
+            var result = vkCreateInstance(in instanceCi, null, out var testInstance);
             if (result != VkResult.Success) return false;
 
             var testInstApi = new VkInstanceApi(testInstance);
@@ -1104,7 +1097,7 @@ namespace Veldrid.Vk
             instanceCi.enabledLayerCount = instanceLayers.Count;
             if (instanceLayers.Count > 0) instanceCi.ppEnabledLayerNames = (byte**)instanceLayers.Data;
 
-            var result = vkCreateInstance(ref instanceCi, null, out instance);
+            var result = vkCreateInstance(in instanceCi, null, out instance);
             CheckResult(result);
             InstanceApi = new VkInstanceApi(instance);
 
@@ -1489,19 +1482,21 @@ namespace Veldrid.Vk
             if (hasDriverProperties)
             {
                 var deviceProps = new VkPhysicalDeviceProperties2();
-                var driverProps = new VkPhysicalDeviceDriverProperties();
+                var driverProps = new Vortice.Vulkan.VkPhysicalDeviceDriverProperties();
 
                 deviceProps.pNext = &driverProps;
                 InstanceApi.vkGetPhysicalDeviceProperties2(PhysicalDevice, &deviceProps);
 
-                string driverName = Encoding.UTF8.GetString(
-                    driverProps.DriverName, VkPhysicalDeviceDriverProperties.DRIVER_NAME_LENGTH).TrimEnd('\0');
+                // driverProps is a local stack variable; take its address directly (no fixed needed).
+                // Marshal.OffsetOf resolves the fixed-buffer field offsets at runtime.
+                var dp = &driverProps;
+                int nameOffset = (int)Marshal.OffsetOf<Vortice.Vulkan.VkPhysicalDeviceDriverProperties>("driverName");
+                int infoOffset = (int)Marshal.OffsetOf<Vortice.Vulkan.VkPhysicalDeviceDriverProperties>("driverInfo");
+                string driverName = Encoding.UTF8.GetString((byte*)dp + nameOffset, 256).TrimEnd('\0');
+                string driverInfo = Encoding.UTF8.GetString((byte*)dp + infoOffset, 256).TrimEnd('\0');
 
-                string driverInfo = Encoding.UTF8.GetString(
-                    driverProps.DriverInfo, VkPhysicalDeviceDriverProperties.DRIVER_INFO_LENGTH).TrimEnd('\0');
-
-                var conforming = driverProps.ConformanceVersion;
-                apiVersion = new GraphicsApiVersion(conforming.Major, conforming.Minor, conforming.Subminor, conforming.Patch);
+                var conforming = driverProps.conformanceVersion;
+                apiVersion = new GraphicsApiVersion(conforming.major, conforming.minor, conforming.subminor, conforming.patch);
                 DriverName = driverName;
                 DriverInfo = driverInfo;
             }
@@ -2160,90 +2155,6 @@ namespace Veldrid.Vk
         }
     }
 
-    internal unsafe delegate VkResult VkCreateDebugReportCallbackExtD(
-        VkInstance instance,
-        VkDebugReportCallbackCreateInfoEXT* createInfo,
-        IntPtr allocatorPtr,
-        out VkDebugReportCallbackEXT ret);
-
-    internal unsafe delegate void VkDestroyDebugReportCallbackExtD(
-        VkInstance instance,
-        VkDebugReportCallbackEXT callback,
-        VkAllocationCallbacks* pAllocator);
-
-    internal unsafe delegate VkResult VkDebugMarkerSetObjectNameExtT(VkDevice device, VkDebugMarkerObjectNameInfoEXT* pNameInfo);
-
-    internal unsafe delegate void VkCmdDebugMarkerBeginExtT(VkCommandBuffer commandBuffer, VkDebugMarkerMarkerInfoEXT* pMarkerInfo);
-
-    internal delegate void VkCmdDebugMarkerEndExtT(VkCommandBuffer commandBuffer);
-
-    internal unsafe delegate void VkCmdDebugMarkerInsertExtT(VkCommandBuffer commandBuffer, VkDebugMarkerMarkerInfoEXT* pMarkerInfo);
-
-    internal unsafe delegate void VkGetBufferMemoryRequirements2T(VkDevice device, VkBufferMemoryRequirementsInfo2* pInfo, VkMemoryRequirements2* pMemoryRequirements);
-
-    internal unsafe delegate void VkGetImageMemoryRequirements2T(VkDevice device, VkImageMemoryRequirementsInfo2* pInfo, VkMemoryRequirements2* pMemoryRequirements);
-
-    internal unsafe delegate void VkGetPhysicalDeviceProperties2T(VkPhysicalDevice physicalDevice, void* properties);
-
+    // Used for dynamic proc-addr lookup of vkEnumerateInstanceVersion (Vulkan 1.1 instance-level function).
     internal unsafe delegate VkResult VkEnumerateInstanceVersionT(uint* pApiVersion);
-
-    // VK_KHR_push_descriptor
-    internal unsafe delegate void VkCmdPushDescriptorSetKHRT(
-        VkCommandBuffer commandBuffer,
-        VkPipelineBindPoint pipelineBindPoint,
-        VkPipelineLayout layout,
-        uint set,
-        uint descriptorWriteCount,
-        VkWriteDescriptorSet* pDescriptorWrites);
-
-    // VK_EXT_metal_surface
-
-    internal unsafe delegate VkResult VkCreateMetalSurfaceExtT(
-        VkInstance instance,
-        VkMetalSurfaceCreateInfoExt* pCreateInfo,
-        VkAllocationCallbacks* pAllocator,
-        VkSurfaceKHR* pSurface);
-
-#pragma warning disable CS0649 // Field is never assigned to, and will always have its default value
-    internal unsafe struct VkMetalSurfaceCreateInfoExt
-    {
-        public const VkStructureType VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT = (VkStructureType)1000217000;
-
-        public VkStructureType SType;
-        public void* PNext;
-        public uint Flags;
-        public void* PLayer;
-    }
-
-    internal unsafe struct VkPhysicalDeviceDriverProperties
-    {
-        public const int DRIVER_NAME_LENGTH = 256;
-        public const int DRIVER_INFO_LENGTH = 256;
-        public const VkStructureType VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES = (VkStructureType)1000196000;
-
-        public VkStructureType SType;
-        public void* PNext;
-        public VkDriverId DriverID;
-        public fixed byte DriverName[DRIVER_NAME_LENGTH];
-        public fixed byte DriverInfo[DRIVER_INFO_LENGTH];
-        public VkConformanceVersion ConformanceVersion;
-
-        public static VkPhysicalDeviceDriverProperties New()
-        {
-            return new VkPhysicalDeviceDriverProperties { SType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES };
-        }
-    }
-
-    internal enum VkDriverId
-    {
-    }
-
-    internal struct VkConformanceVersion
-    {
-        public byte Major;
-        public byte Minor;
-        public byte Subminor;
-        public byte Patch;
-    }
-#pragma warning restore CS0649 // Field is never assigned to, and will always have its default value
 }

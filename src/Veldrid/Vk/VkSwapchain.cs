@@ -844,9 +844,6 @@ namespace Veldrid.Vk
         // or the query failed — caller falls back to recreate-on-toggle.
         private VkPresentModeKHR[] queryCompatiblePresentModes(VkPresentModeKHR anchor, VkPresentModeKHR[] surfaceSupported)
         {
-            if (false /* GetPhysicalDeviceSurfaceCapabilities2 now via InstanceApi */)
-                return null;
-
             var surfaceMode = new VkSurfacePresentModeKHR();
             surfaceMode.presentMode = anchor;
 
