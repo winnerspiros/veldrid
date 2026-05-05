@@ -1417,8 +1417,6 @@ namespace Veldrid.Vk
             // attachment was already in the correct layout, e.g. a framebuffer reused this frame).
             flushTransitionBarriers();
 
-            bool haveAllClearValues = depthClearValue.HasValue || currentFramebuffer.DepthTarget == null;
-
             for (int i = 0; i < colorCount; i++)
             {
                 colorAttachments[i] = new VkRenderingAttachmentInfo();
@@ -1468,9 +1466,6 @@ namespace Veldrid.Vk
                         colorAttachments[i].loadOp = VkAttachmentLoadOp.Load;
                     }
                 }
-
-                if (!validColorClearValues[i] && !newFramebuffer)
-                    haveAllClearValues = false;
             }
 
             var renderingInfo = new VkRenderingInfo();

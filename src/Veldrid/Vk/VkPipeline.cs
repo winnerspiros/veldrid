@@ -377,6 +377,20 @@ namespace Veldrid.Vk
                     dstAccessMask = VkAccessFlags.ColorAttachmentRead | VkAccessFlags.ColorAttachmentWrite
                 };
 
+                // Extend the external dependency to cover depth/stencil stages when present,
+                // matching the fix applied to VkFramebuffer. Without this, the validation layer
+                // reports that the srcStageMask does not include stages that use the attachment's
+                // initialLayout (Undefined → DepthStencilAttachmentOptimal transition).
+                if (outputDesc.DepthAttachment != null)
+                {
+                    subpassDependency.srcStageMask |= VkPipelineStageFlags.EarlyFragmentTests
+                                                      | VkPipelineStageFlags.LateFragmentTests;
+                    subpassDependency.dstStageMask |= VkPipelineStageFlags.EarlyFragmentTests
+                                                      | VkPipelineStageFlags.LateFragmentTests;
+                    subpassDependency.dstAccessMask |= VkAccessFlags.DepthStencilAttachmentRead
+                                                       | VkAccessFlags.DepthStencilAttachmentWrite;
+                }
+
                 renderPassCi.attachmentCount = attachments.Count;
                 renderPassCi.pAttachments = (VkAttachmentDescription*)attachments.Data;
                 renderPassCi.subpassCount = 1;
