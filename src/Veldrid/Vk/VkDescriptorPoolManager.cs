@@ -54,20 +54,18 @@ namespace Veldrid.Vk
 
         private VkDescriptorPool getPool(DescriptorResourceCounts counts)
         {
-            lock (@lock)
+            // Called only from Allocate(), which already holds @lock.
+            foreach (var poolInfo in pools)
             {
-                foreach (var poolInfo in pools)
-                {
-                    if (poolInfo.Allocate(counts))
-                        return poolInfo.Pool;
-                }
-
-                var newPool = createNewPool();
-                pools.Add(newPool);
-                bool result = newPool.Allocate(counts);
-                Debug.Assert(result);
-                return newPool.Pool;
+                if (poolInfo.Allocate(counts))
+                    return poolInfo.Pool;
             }
+
+            var newPool = createNewPool();
+            pools.Add(newPool);
+            bool result = newPool.Allocate(counts);
+            Debug.Assert(result);
+            return newPool.Pool;
         }
 
         private unsafe PoolInfo createNewPool()
