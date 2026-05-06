@@ -28,6 +28,11 @@ namespace Veldrid.Vk
         private VkBuffer stagingBuffer;
         private uint stagingOffset;
 
+        // Reused across Submit() calls to track unique subresources touched per chunk.
+        // Stored as a field to avoid a heap allocation on every Submit() call (the batch
+        // object is pooled and reused across frames via ReturnTextureUpdateBatch/Reopen).
+        private readonly HashSet<SubresourceKey> chunkSubresources = new HashSet<SubresourceKey>();
+
         public VkTextureUpdateBatch(VkGraphicsDevice gd)
         {
             this.gd = gd;
@@ -130,9 +135,6 @@ namespace Veldrid.Vk
             if (pendingCopies.Count == 0) return;
 
             int total = pendingCopies.Count;
-
-            // Reuse a single set across chunks to collect unique subresources per chunk without re-allocating.
-            var chunkSubresources = new HashSet<SubresourceKey>();
 
             for (int start = 0; start < total; start += MaxCopiesPerSubmit)
             {

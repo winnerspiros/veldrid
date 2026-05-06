@@ -881,15 +881,21 @@ namespace Veldrid.Vk
         // Appends layout transitions for each texture in the list to imageBarrierBatch without
         // emitting any Vulkan commands.
         //
-        // Iterates per-mip-level rather than using a single full-range barrier because a texture
-        // can have subresources in different layouts after a partial CopyTexture or ResolveTexture
-        // (e.g. srcMip=2 left in TransferSrcOptimal while all other mips remain in
-        // ShaderReadOnlyOptimal). Emitting a range barrier with the wrong oldLayout is a Vulkan
-        // spec violation that can silently corrupt tile-cache state on mobile GPUs.
+        // Iterates per-mip-level AND per-array-layer rather than using a single full-range barrier
+        // because a texture can have subresources in different layouts:
         //
-        // Per-mip calls are cheap: TryGetLayoutTransitionBarrier returns false immediately
-        // (1 array read) when the subresource is already in the target layout, so the common
-        // case (all mips already correct) costs only MipLevels array reads per texture.
+        //   • After a partial CopyTexture/ResolveTexture, one mip may be in TransferSrcOptimal
+        //     while others remain in ShaderReadOnlyOptimal.
+        //   • After rendering to a specific array layer via a framebuffer attachment, that layer
+        //     is in ColorAttachmentOptimal while other layers remain in ShaderReadOnlyOptimal.
+        //
+        // Emitting a range barrier (all layers) with the first mismatched layer's oldLayout is a
+        // Vulkan spec violation: §12.8 requires every subresource in the barrier's range to be in
+        // the declared oldLayout.  On tile-based GPU this can silently corrupt tile-cache state.
+        //
+        // Per-subresource calls are cheap: TryGetLayoutTransitionBarrier returns false immediately
+        // (1 array read) when the subresource is already in the target layout, so the common case
+        // (all subresources already correct) costs only MipLevels × ArrayLayers reads per texture.
         private void appendTransitions(List<VkTexture> textures, VkImageLayout layout)
         {
             if (textures.Count == 0) return;
@@ -900,12 +906,15 @@ namespace Veldrid.Vk
 
                 for (uint mip = 0; mip < tex.MipLevels; mip++)
                 {
-                    if (tex.TryGetLayoutTransitionBarrier(mip, 1, 0, tex.ActualArrayLayers, layout,
-                            out var barrier, out var src, out var dst))
+                    for (uint layer = 0; layer < tex.ActualArrayLayers; layer++)
                     {
-                        imageBarrierBatch.Add(barrier);
-                        barrierBatchSrcStage |= src;
-                        barrierBatchDstStage |= dst;
+                        if (tex.TryGetLayoutTransitionBarrier(mip, 1, layer, 1, layout,
+                                out var barrier, out var src, out var dst))
+                        {
+                            imageBarrierBatch.Add(barrier);
+                            barrierBatchSrcStage |= src;
+                            barrierBatchDstStage |= dst;
+                        }
                     }
                 }
             }
@@ -1231,6 +1240,54 @@ namespace Veldrid.Vk
                         .GetImageLayout(firstTarget.MipLevel, firstTarget.ArrayLayer);
                     midFrameReturn = firstTargetLayout == VkImageLayout.ColorAttachmentOptimal;
                 }
+
+                // Emit explicit pre-render-pass barriers to bring each attachment to its declared
+                // initialLayout. VkRenderPass requires the image to be in initialLayout when
+                // vkCmdBeginRenderPass is called (Vulkan spec §12.8.2), but attachments may be in
+                // unexpected layouts if they were last used in the Transfer stage (e.g. after
+                // VkTextureUpdateBatch or CopyTextureCore). For renderPassClear the initialLayout
+                // is VK_IMAGE_LAYOUT_UNDEFINED (which accepts any actual layout per §12.8.2), so
+                // TryGetLayoutTransitionBarrier will no-op for those cases — we emit barriers
+                // unconditionally here for simplicity and correctness.
+                //
+                // This mirrors beginCurrentDynamicRendering which also emits explicit barriers.
+                // Note: imageBarrierBatch is always empty here because flushTransitionBarriers()
+                // was called by preDrawCommand before ensureRenderPassActive, and this method is
+                // called from SetFramebufferCore/End() where no barriers have been queued.
+                for (int i = 0; i < currentFramebuffer.ColorTargets.Count; i++)
+                {
+                    var ca = currentFramebuffer.ColorTargets[i];
+                    var vkTex = Util.AssertSubtype<Texture, VkTexture>(ca.Target);
+                    var targetLayout = (vkTex.Usage & TextureUsage.Sampled) != 0
+                        ? VkImageLayout.ShaderReadOnlyOptimal
+                        : VkImageLayout.ColorAttachmentOptimal;
+                    if (vkTex.TryGetLayoutTransitionBarrier(ca.MipLevel, 1, ca.ArrayLayer, 1,
+                            targetLayout, out var barrier, out var src, out var dst))
+                    {
+                        imageBarrierBatch.Add(barrier);
+                        barrierBatchSrcStage |= src;
+                        barrierBatchDstStage |= dst;
+                    }
+                }
+
+                if (currentFramebuffer.DepthTarget.HasValue)
+                {
+                    var ca = currentFramebuffer.DepthTarget.Value;
+                    var vkTex = Util.AssertSubtype<Texture, VkTexture>(ca.Target);
+                    var targetLayout = (vkTex.Usage & TextureUsage.Sampled) != 0
+                        ? VkImageLayout.ShaderReadOnlyOptimal
+                        : VkImageLayout.DepthStencilAttachmentOptimal;
+                    if (vkTex.TryGetLayoutTransitionBarrier(ca.MipLevel, 1, ca.ArrayLayer, 1,
+                            targetLayout, out var barrier, out var src, out var dst))
+                    {
+                        imageBarrierBatch.Add(barrier);
+                        barrierBatchSrcStage |= src;
+                        barrierBatchDstStage |= dst;
+                    }
+                }
+
+                flushTransitionBarriers();
+
                 if (newFramebuffer && !midFrameReturn && currentFramebuffer.RenderPassClearSampledInit != VkRenderPass.Null)
                 {
                     // Inject transparent-black into the clear-value slots for any sampled color
