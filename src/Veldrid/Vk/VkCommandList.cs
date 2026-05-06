@@ -1277,11 +1277,30 @@ namespace Veldrid.Vk
                 // Note: imageBarrierBatch is always empty here because flushTransitionBarriers()
                 // was called by preDrawCommand before ensureRenderPassActive, and this method is
                 // called from SetFramebufferCore/End() where no barriers have been queued.
+                //
+                // The correct target layout depends on which render pass will be used:
+                //   renderPassNoClearLoad (mid-frame re-use): ALL attachments → Color/DepthStencilAttachmentOptimal
+                //     regardless of Sampled flag (initialLayout=ColorAttachmentOptimal for all color,
+                //     DepthStencilAttachmentOptimal for depth in that render pass).
+                //   renderPassClearSampledInit (first bind of sampled FBO): depth → DepthStencilAttachmentOptimal
+                //     regardless of Sampled (only sampled *color* gets initialLayout=Undefined there).
+                //   renderPassNoClearInit (first bind, normal): Sampled → ShaderReadOnlyOptimal,
+                //     non-sampled → Color/DepthStencilAttachmentOptimal.
+                //
+                // Transitioning Sampled attachments to ShaderReadOnlyOptimal when the render pass
+                // declares initialLayout=ColorAttachmentOptimal / DepthStencilAttachmentOptimal
+                // would violate Vulkan spec §12.8.2 and produce undefined behaviour on tile GPUs.
+                bool willUseNoClearLoad = !newFramebuffer || midFrameReturn;
+                bool willUseClearSampledInit = !willUseNoClearLoad
+                    && currentFramebuffer.RenderPassClearSampledInit != VkRenderPass.Null;
+
                 for (int i = 0; i < currentFramebuffer.ColorTargets.Count; i++)
                 {
                     var ca = currentFramebuffer.ColorTargets[i];
                     var vkTex = Util.AssertSubtype<Texture, VkTexture>(ca.Target);
-                    var targetLayout = (vkTex.Usage & TextureUsage.Sampled) != 0
+                    // renderPassNoClearLoad declares initialLayout=ColorAttachmentOptimal for ALL
+                    // color attachments — do not transition sampled attachments to ShaderReadOnly.
+                    var targetLayout = (!willUseNoClearLoad && (vkTex.Usage & TextureUsage.Sampled) != 0)
                         ? VkImageLayout.ShaderReadOnlyOptimal
                         : VkImageLayout.ColorAttachmentOptimal;
                     if (vkTex.TryGetLayoutTransitionBarrier(ca.MipLevel, 1, ca.ArrayLayer, 1,
@@ -1297,7 +1316,11 @@ namespace Veldrid.Vk
                 {
                     var ca = currentFramebuffer.DepthTarget.Value;
                     var vkTex = Util.AssertSubtype<Texture, VkTexture>(ca.Target);
-                    var targetLayout = (vkTex.Usage & TextureUsage.Sampled) != 0
+                    // renderPassNoClearLoad and renderPassClearSampledInit both declare
+                    // initialLayout=DepthStencilAttachmentOptimal for depth regardless of Sampled.
+                    // Only renderPassNoClearInit uses ShaderReadOnlyOptimal for sampled depth.
+                    var targetLayout = (!willUseNoClearLoad && !willUseClearSampledInit
+                                        && (vkTex.Usage & TextureUsage.Sampled) != 0)
                         ? VkImageLayout.ShaderReadOnlyOptimal
                         : VkImageLayout.DepthStencilAttachmentOptimal;
                     if (vkTex.TryGetLayoutTransitionBarrier(ca.MipLevel, 1, ca.ArrayLayer, 1,
