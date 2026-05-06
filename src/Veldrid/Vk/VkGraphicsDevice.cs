@@ -63,9 +63,12 @@ namespace Veldrid.Vk
 
         // VK_KHR_dynamic_rendering
         public bool HasDynamicRendering { get; private set; }
-        // When true, VkCommandList must call vkCmdBeginRenderingKHR/vkCmdEndRenderingKHR
-        // instead of the core-1.3 vkCmdBeginRendering/vkCmdEndRendering.
-        // Set when the driver exposes only the KHR extension alias (pre-1.3 extension).
+        // When true, VkCommandList must call vkCmdBeginRenderingKHR instead of vkCmdBeginRendering.
+        // Set in two cases:
+        //   1. The driver exposes only the KHR extension alias (core vkCmdBeginRendering is null).
+        //   2. The driver has the null-vkCmdEndRendering bug (UseKhrEndRendering=true) and
+        //      vkCmdBeginRenderingKHR is available — on affected Android 16 Adreno drivers,
+        //      vkCmdBeginRendering may be a non-null but broken stub that crashes at PC=0.
         internal bool UseKhrDynamicRendering { get; private set; }
         // When true, endCurrentRenderPass must call vkCmdEndRenderingKHR instead of vkCmdEndRendering.
         // Set when vkCmdEndRendering (core 1.3) is null but vkCmdEndRenderingKHR (extension alias) is
@@ -1532,7 +1535,9 @@ namespace Veldrid.Vk
             //
             // Dispatch flags set here:
             //   UseKhrDynamicRendering = true  → vkCmdBeginRenderingKHR is used for begin
-            //                                    (core vkCmdBeginRendering is null)
+            //                                    (core vkCmdBeginRendering is null, OR the
+            //                                    driver has the null-vkCmdEndRendering bug
+            //                                    and the KHR begin alias is available)
             //   UseKhrEndRendering = true       → vkCmdEndRenderingKHR is used for end
             //                                    (core vkCmdEndRendering is null)
             //
@@ -1540,12 +1545,13 @@ namespace Veldrid.Vk
             // when either is true (see VkCommandList.endCurrentRenderPass).
             if (hasDynamicRendering)
             {
+                bool khrBeginAvailable = DeviceApi.vkCmdBeginRenderingKHR_ptr.Value != null;
                 bool beginOk = DeviceApi.vkCmdBeginRendering_ptr.Value != null;
                 bool endOk   = DeviceApi.vkCmdEndRendering_ptr.Value != null;
 
                 bool khrEndAvailable = DeviceApi.vkCmdEndRenderingKHR_ptr.Value != null;
 
-                if (!beginOk && DeviceApi.vkCmdBeginRenderingKHR_ptr.Value != null)
+                if (!beginOk && khrBeginAvailable)
                 {
                     // Only commit to the KHR-begin path when the matching KHR-end alias is
                     // also present; endCurrentRenderPass calls vkCmdEndRenderingKHR whenever
@@ -1566,6 +1572,17 @@ namespace Veldrid.Vk
                     // of calling through the null core pointer (→ SIGSEGV at PC=0).
                     UseKhrEndRendering = true;
                 }
+
+                // When the driver has the null-vkCmdEndRendering bug (UseKhrEndRendering=true)
+                // AND vkCmdBeginRenderingKHR is available, also prefer the KHR begin path.
+                // Android 16 Adreno 7xx drivers that omit vkCmdEndRendering can simultaneously
+                // expose vkCmdBeginRendering as a non-null but broken stub — calling it crashes
+                // at PC=0 (SIGSEGV, SI_TKILL). Using vkCmdBeginRenderingKHR avoids the broken
+                // core stub entirely.  UseKhrDynamicRendering=true implies the KHR end path in
+                // endCurrentRenderPass as well, so UseKhrEndRendering becomes redundant here
+                // but is kept for clarity.
+                if (UseKhrEndRendering && khrBeginAvailable)
+                    UseKhrDynamicRendering = true;
 
                 HasDynamicRendering = beginOk && endOk;
                 if (!HasDynamicRendering)
