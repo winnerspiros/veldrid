@@ -210,14 +210,16 @@ namespace Veldrid.Vk
             else if (oldLayout == VkImageLayout.TransferDstOptimal && newLayout == VkImageLayout.ColorAttachmentOptimal)
             {
                 srcAccessMask = VkAccessFlags.TransferWrite;
-                dstAccessMask = VkAccessFlags.ColorAttachmentWrite;
+                // ColorAttachmentRead covers blend reads of the just-uploaded content.
+                dstAccessMask = VkAccessFlags.ColorAttachmentRead | VkAccessFlags.ColorAttachmentWrite;
                 srcStageFlags = VkPipelineStageFlags.Transfer;
                 dstStageFlags = VkPipelineStageFlags.ColorAttachmentOutput;
             }
             else if (oldLayout == VkImageLayout.TransferDstOptimal && newLayout == VkImageLayout.DepthStencilAttachmentOptimal)
             {
                 srcAccessMask = VkAccessFlags.TransferWrite;
-                dstAccessMask = VkAccessFlags.DepthStencilAttachmentWrite;
+                // DepthStencilAttachmentRead covers depth-test reads of the uploaded content.
+                dstAccessMask = VkAccessFlags.DepthStencilAttachmentRead | VkAccessFlags.DepthStencilAttachmentWrite;
                 srcStageFlags = VkPipelineStageFlags.Transfer;
                 dstStageFlags = VkPipelineStageFlags.EarlyFragmentTests | VkPipelineStageFlags.LateFragmentTests;
             }
@@ -249,8 +251,9 @@ namespace Veldrid.Vk
                 // Swapchain image released by the presentation engine, transitioning to a render target.
                 // Required by the dynamic rendering path: vkCmdBeginRendering does not perform implicit
                 // layout transitions the way VkRenderPass does via initialLayout/finalLayout.
+                // ColorAttachmentRead covers blend reads of the swapchain image content.
                 srcAccessMask = VkAccessFlags.MemoryRead;
-                dstAccessMask = VkAccessFlags.ColorAttachmentWrite;
+                dstAccessMask = VkAccessFlags.ColorAttachmentRead | VkAccessFlags.ColorAttachmentWrite;
                 srcStageFlags = VkPipelineStageFlags.BottomOfPipe;
                 dstStageFlags = VkPipelineStageFlags.ColorAttachmentOutput;
             }
@@ -258,8 +261,9 @@ namespace Veldrid.Vk
             {
                 // Ping-pong / post-process buffer that was sampled in the previous pass and is now
                 // used as a render target in this pass.
+                // ColorAttachmentRead covers blend reads that mix new output with the prior content.
                 srcAccessMask = VkAccessFlags.ShaderRead;
-                dstAccessMask = VkAccessFlags.ColorAttachmentWrite;
+                dstAccessMask = VkAccessFlags.ColorAttachmentRead | VkAccessFlags.ColorAttachmentWrite;
                 srcStageFlags = VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.ComputeShader;
                 dstStageFlags = VkPipelineStageFlags.ColorAttachmentOutput;
             }
@@ -267,8 +271,9 @@ namespace Veldrid.Vk
             {
                 // A depth texture sampled in the previous frame is reused as a depth attachment
                 // (e.g. shadow-map double-buffering or depth pre-pass re-binding).
+                // DepthStencilAttachmentRead covers the depth-test reads of existing depth values.
                 srcAccessMask = VkAccessFlags.ShaderRead;
-                dstAccessMask = VkAccessFlags.DepthStencilAttachmentWrite;
+                dstAccessMask = VkAccessFlags.DepthStencilAttachmentRead | VkAccessFlags.DepthStencilAttachmentWrite;
                 srcStageFlags = VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.ComputeShader;
                 dstStageFlags = VkPipelineStageFlags.EarlyFragmentTests | VkPipelineStageFlags.LateFragmentTests;
             }
@@ -301,16 +306,18 @@ namespace Veldrid.Vk
                 // A non-sampled render target was used as a CopyTexture source and stays in
                 // TransferSrcOptimal (the sampled back-transition only fires when Sampled is set).
                 // Return it to ColorAttachmentOptimal before the next render pass.
+                // ColorAttachmentRead covers blend reads of the render target content.
                 srcAccessMask = VkAccessFlags.TransferRead;
-                dstAccessMask = VkAccessFlags.ColorAttachmentWrite;
+                dstAccessMask = VkAccessFlags.ColorAttachmentRead | VkAccessFlags.ColorAttachmentWrite;
                 srcStageFlags = VkPipelineStageFlags.Transfer;
                 dstStageFlags = VkPipelineStageFlags.ColorAttachmentOutput;
             }
             else if (oldLayout == VkImageLayout.TransferSrcOptimal && newLayout == VkImageLayout.DepthStencilAttachmentOptimal)
             {
                 // Same as above but for a depth/stencil attachment that was read-back via CopyTexture.
+                // DepthStencilAttachmentRead covers depth-test reads of the existing depth values.
                 srcAccessMask = VkAccessFlags.TransferRead;
-                dstAccessMask = VkAccessFlags.DepthStencilAttachmentWrite;
+                dstAccessMask = VkAccessFlags.DepthStencilAttachmentRead | VkAccessFlags.DepthStencilAttachmentWrite;
                 srcStageFlags = VkPipelineStageFlags.Transfer;
                 dstStageFlags = VkPipelineStageFlags.EarlyFragmentTests | VkPipelineStageFlags.LateFragmentTests;
             }
@@ -325,16 +332,18 @@ namespace Veldrid.Vk
             else if (oldLayout == VkImageLayout.General && newLayout == VkImageLayout.ColorAttachmentOptimal)
             {
                 // Storage image (General) repurposed as a color render target.
+                // ColorAttachmentRead covers blend reads of the prior storage-image content.
                 srcAccessMask = VkAccessFlags.ShaderWrite;
-                dstAccessMask = VkAccessFlags.ColorAttachmentWrite;
+                dstAccessMask = VkAccessFlags.ColorAttachmentRead | VkAccessFlags.ColorAttachmentWrite;
                 srcStageFlags = VkPipelineStageFlags.ComputeShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader;
                 dstStageFlags = VkPipelineStageFlags.ColorAttachmentOutput;
             }
             else if (oldLayout == VkImageLayout.General && newLayout == VkImageLayout.DepthStencilAttachmentOptimal)
             {
                 // Storage depth image repurposed as a depth/stencil attachment.
+                // DepthStencilAttachmentRead covers depth-test reads of the existing depth values.
                 srcAccessMask = VkAccessFlags.ShaderWrite;
-                dstAccessMask = VkAccessFlags.DepthStencilAttachmentWrite;
+                dstAccessMask = VkAccessFlags.DepthStencilAttachmentRead | VkAccessFlags.DepthStencilAttachmentWrite;
                 srcStageFlags = VkPipelineStageFlags.ComputeShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader;
                 dstStageFlags = VkPipelineStageFlags.EarlyFragmentTests | VkPipelineStageFlags.LateFragmentTests;
             }
