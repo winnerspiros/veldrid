@@ -1495,7 +1495,15 @@ namespace Veldrid.Vk
                 }
                 else
                 {
-                    depthAttachment.loadOp = newFramebuffer ? VkAttachmentLoadOp.DontCare : VkAttachmentLoadOp.Load;
+                    // For transient depth buffers (LAZILY_ALLOCATED, never sampled/read back),
+                    // DontCare on the first bind of a new framebuffer is correct and optimal —
+                    // the tile memory is never filled from DRAM. For non-transient depth, always
+                    // Load to preserve whatever content the app last wrote (e.g. depth prepass
+                    // results carried across frames). This matches the legacy VkRenderPass path
+                    // which always uses loadOp=Load in RenderPassNoClearInit for depth.
+                    depthAttachment.loadOp = (newFramebuffer && isTransientDepth)
+                        ? VkAttachmentLoadOp.DontCare
+                        : VkAttachmentLoadOp.Load;
                 }
 
                 renderingInfo.pDepthAttachment = &depthAttachment;
@@ -1586,8 +1594,10 @@ namespace Veldrid.Vk
                                        | VkAccessFlags.DepthStencilAttachmentRead
                                        | VkAccessFlags.DepthStencilAttachmentWrite
                                        | VkAccessFlags.ShaderRead
+                                       | VkAccessFlags.ShaderWrite
                                        | VkAccessFlags.InputAttachmentRead
-                                       | VkAccessFlags.TransferRead;
+                                       | VkAccessFlags.TransferRead
+                                       | VkAccessFlags.TransferWrite;
 
             gd.DeviceApi.vkCmdPipelineBarrier(
                 CommandBuffer,
@@ -1988,6 +1998,10 @@ namespace Veldrid.Vk
                 vkTex.TransitionImageLayoutNonmatching(CommandBuffer, 0, vkTex.MipLevels, 0, layerCount, VkImageLayout.ColorAttachmentOptimal);
             else if ((vkTex.Usage & TextureUsage.DepthStencil) != 0)
                 vkTex.TransitionImageLayoutNonmatching(CommandBuffer, 0, vkTex.MipLevels, 0, layerCount, VkImageLayout.DepthStencilAttachmentOptimal);
+            else
+                // Pure storage textures (no Sampled/RenderTarget/DepthStencil flags) must end in
+                // General so subsequent storage image binds see the correct tracked layout.
+                vkTex.TransitionImageLayoutNonmatching(CommandBuffer, 0, vkTex.MipLevels, 0, layerCount, VkImageLayout.General);
         }
 
         private protected override void PushDebugGroupCore(string name)

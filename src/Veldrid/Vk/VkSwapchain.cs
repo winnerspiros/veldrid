@@ -517,7 +517,7 @@ namespace Veldrid.Vk
 
                 if (surfaceFormat.format == VkFormat.Undefined)
                 {
-                    if (colorSrgb && surfaceFormat.format != VkFormat.R8G8B8A8Srgb) throw new VeldridException("Unable to create an sRGB Swapchain for this surface.");
+                    if (colorSrgb) throw new VeldridException("Unable to create an sRGB Swapchain for this surface.");
 
                     surfaceFormat = formats[0];
                 }
