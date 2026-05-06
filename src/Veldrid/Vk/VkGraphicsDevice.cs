@@ -1549,6 +1549,19 @@ namespace Veldrid.Vk
                 bool khrBeginAvailable = DeviceApi.vkCmdBeginRenderingKHR_ptr.Value != null;
                 bool endOk   = DeviceApi.vkCmdEndRendering_ptr.Value != null;
                 bool khrEndAvailable = DeviceApi.vkCmdEndRenderingKHR_ptr.Value != null;
+                bool isAndroidAdreno = OperatingSystem.IsAndroid()
+                    && physicalDeviceProperties.vendorID == 0x5143; // Qualcomm
+
+                // Some Android Adreno drivers expose non-null core dynamic-rendering entry points
+                // that crash at call-site (pc=0), while the KHR aliases are valid. Prefer KHR
+                // aliases when both are available to avoid dispatching through broken core stubs.
+                if (isAndroidAdreno && khrBeginAvailable && khrEndAvailable)
+                {
+                    beginOk = true;
+                    endOk = true;
+                    UseKhrDynamicRendering = true;
+                    UseKhrEndRendering = true;
+                }
 
                 if (!beginOk && khrBeginAvailable)
                 {
