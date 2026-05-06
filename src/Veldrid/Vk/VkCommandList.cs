@@ -508,13 +508,30 @@ namespace Veldrid.Vk
                 var srcLayout = srcVkTexture.GetSubresourceLayout(
                     srcVkTexture.CalculateSubresource(srcMipLevel, srcBaseArrayLayer));
                 var dstImage = dstVkTexture.OptimalDeviceImage;
-                dstVkTexture.TransitionImageLayout(
-                    cb,
-                    dstMipLevel,
-                    1,
-                    dstBaseArrayLayer,
-                    layerCount,
-                    VkImageLayout.TransferDstOptimal);
+
+                // Pre-copy: transition destination layers to TransferDstOptimal.
+                // Use per-layer TryGetLayoutTransitionBarrier (matching the optimal→optimal path)
+                // instead of a single range TransitionImageLayout call: the destination layers may
+                // be in mixed layouts after partial prior copies (e.g. one layer was a render target,
+                // another was never used). A range barrier with the first layer's oldLayout applied
+                // to all layers is a Vulkan spec violation (§12.8) and corrupts tile-cache state on
+                // TBDR GPUs. Batch all resulting barriers into a single vkCmdPipelineBarrier call.
+                {
+                    var preCopyBarriers = stackalloc VkImageMemoryBarrier[(int)layerCount];
+                    int n = 0;
+                    VkPipelineStageFlags preSrc = VkPipelineStageFlags.None, preDst = VkPipelineStageFlags.None;
+
+                    for (uint layer = 0; layer < layerCount; layer++)
+                    {
+                        if (dstVkTexture.TryGetLayoutTransitionBarrier(dstMipLevel, 1, dstBaseArrayLayer + layer, 1,
+                                VkImageLayout.TransferDstOptimal, out var b, out var s, out var d))
+                        { preCopyBarriers[n++] = b; preSrc |= s; preDst |= d; }
+                    }
+
+                    if (n > 0)
+                        deviceApi.vkCmdPipelineBarrier(cb, preSrc, preDst, VkDependencyFlags.None,
+                            0, null, 0, null, (uint)n, preCopyBarriers);
+                }
 
                 var dstSubresource = new VkImageSubresourceLayers
                 {
@@ -558,27 +575,51 @@ namespace Veldrid.Vk
 
                 deviceApi.vkCmdCopyBufferToImage(cb, srcBuffer, dstImage, VkImageLayout.TransferDstOptimal, 1, &regions);
 
+                // Post-copy: transition sampled destination layers back to ShaderReadOnlyOptimal.
+                // Also per-layer for the same spec-correctness reason as the pre-copy barriers.
                 if ((dstVkTexture.Usage & TextureUsage.Sampled) != 0)
                 {
-                    dstVkTexture.TransitionImageLayout(
-                        cb,
-                        dstMipLevel,
-                        1,
-                        dstBaseArrayLayer,
-                        layerCount,
-                        VkImageLayout.ShaderReadOnlyOptimal);
+                    var postCopyBarriers = stackalloc VkImageMemoryBarrier[(int)layerCount];
+                    int n = 0;
+                    VkPipelineStageFlags postSrc = VkPipelineStageFlags.None, postDst = VkPipelineStageFlags.None;
+
+                    for (uint layer = 0; layer < layerCount; layer++)
+                    {
+                        if (dstVkTexture.TryGetLayoutTransitionBarrier(dstMipLevel, 1, dstBaseArrayLayer + layer, 1,
+                                VkImageLayout.ShaderReadOnlyOptimal, out var b, out var s, out var d))
+                        { postCopyBarriers[n++] = b; postSrc |= s; postDst |= d; }
+                    }
+
+                    if (n > 0)
+                        deviceApi.vkCmdPipelineBarrier(cb, postSrc, postDst, VkDependencyFlags.None,
+                            0, null, 0, null, (uint)n, postCopyBarriers);
                 }
             }
             else if (!sourceIsStaging)
             {
                 var srcImage = srcVkTexture.OptimalDeviceImage;
-                srcVkTexture.TransitionImageLayout(
-                    cb,
-                    srcMipLevel,
-                    1,
-                    srcBaseArrayLayer,
-                    layerCount,
-                    VkImageLayout.TransferSrcOptimal);
+
+                // Pre-copy: transition source layers to TransferSrcOptimal.
+                // Use per-layer TryGetLayoutTransitionBarrier (same spec-correctness reason as the
+                // optimal→optimal path): source layers may be in mixed layouts (e.g. one rendered
+                // to, another still in ShaderReadOnlyOptimal). A range barrier with the wrong
+                // oldLayout for any layer is a Vulkan spec violation (§12.8).
+                {
+                    var preCopyBarriers = stackalloc VkImageMemoryBarrier[(int)layerCount];
+                    int n = 0;
+                    VkPipelineStageFlags preSrc = VkPipelineStageFlags.None, preDst = VkPipelineStageFlags.None;
+
+                    for (uint layer = 0; layer < layerCount; layer++)
+                    {
+                        if (srcVkTexture.TryGetLayoutTransitionBarrier(srcMipLevel, 1, srcBaseArrayLayer + layer, 1,
+                                VkImageLayout.TransferSrcOptimal, out var b, out var s, out var d))
+                        { preCopyBarriers[n++] = b; preSrc |= s; preDst |= d; }
+                    }
+
+                    if (n > 0)
+                        deviceApi.vkCmdPipelineBarrier(cb, preSrc, preDst, VkDependencyFlags.None,
+                            0, null, 0, null, (uint)n, preCopyBarriers);
+                }
 
                 var dstBuffer = dstVkTexture.StagingBuffer;
 
@@ -633,15 +674,24 @@ namespace Veldrid.Vk
 
                 deviceApi.vkCmdCopyImageToBuffer(cb, srcImage, VkImageLayout.TransferSrcOptimal, dstBuffer, layerCount, layers);
 
+                // Post-copy: transition sampled source layers back to ShaderReadOnlyOptimal.
+                // Per-layer for the same spec-correctness reason as the pre-copy barriers.
                 if ((srcVkTexture.Usage & TextureUsage.Sampled) != 0)
                 {
-                    srcVkTexture.TransitionImageLayout(
-                        cb,
-                        srcMipLevel,
-                        1,
-                        srcBaseArrayLayer,
-                        layerCount,
-                        VkImageLayout.ShaderReadOnlyOptimal);
+                    var postCopyBarriers = stackalloc VkImageMemoryBarrier[(int)layerCount];
+                    int n = 0;
+                    VkPipelineStageFlags postSrc = VkPipelineStageFlags.None, postDst = VkPipelineStageFlags.None;
+
+                    for (uint layer = 0; layer < layerCount; layer++)
+                    {
+                        if (srcVkTexture.TryGetLayoutTransitionBarrier(srcMipLevel, 1, srcBaseArrayLayer + layer, 1,
+                                VkImageLayout.ShaderReadOnlyOptimal, out var b, out var s, out var d))
+                        { postCopyBarriers[n++] = b; postSrc |= s; postDst |= d; }
+                    }
+
+                    if (n > 0)
+                        deviceApi.vkCmdPipelineBarrier(cb, postSrc, postDst, VkDependencyFlags.None,
+                            0, null, 0, null, (uint)n, postCopyBarriers);
                 }
             }
             else
@@ -798,14 +848,35 @@ namespace Veldrid.Vk
                 &region);
 
             if ((vkDestination.Usage & TextureUsage.Sampled) != 0)
-                vkDestination.TransitionImageLayout(CommandBuffer, 0, 1, 0, 1, VkImageLayout.ShaderReadOnlyOptimal);
+            {
+                if (vkDestination.TryGetLayoutTransitionBarrier(0, 1, 0, 1,
+                        VkImageLayout.ShaderReadOnlyOptimal, out var barrier, out var src, out var dst))
+                {
+                    imageBarrierBatch.Add(barrier);
+                    barrierBatchSrcStage |= src;
+                    barrierBatchDstStage |= dst;
+                }
+            }
 
             // Transition sampled source back to ShaderReadOnlyOptimal, consistent with
             // CopyTextureCore which also performs an immediate post-copy back-transition.
             // Without this the source stays in TransferSrcOptimal until appendTransitions
             // lazily picks it up on the next draw, adding an avoidable deferred transition.
             if ((vkSource.Usage & TextureUsage.Sampled) != 0)
-                vkSource.TransitionImageLayout(CommandBuffer, 0, 1, 0, 1, VkImageLayout.ShaderReadOnlyOptimal);
+            {
+                if (vkSource.TryGetLayoutTransitionBarrier(0, 1, 0, 1,
+                        VkImageLayout.ShaderReadOnlyOptimal, out var barrier, out var src, out var dst))
+                {
+                    imageBarrierBatch.Add(barrier);
+                    barrierBatchSrcStage |= src;
+                    barrierBatchDstStage |= dst;
+                }
+            }
+
+            // Flush both post-resolve transitions (dst and src) as a single vkCmdPipelineBarrier
+            // rather than two separate TransitionImageLayout calls. On Mali/Adreno reducing the
+            // number of pipeline barriers matters for tile-pass scheduling.
+            flushTransitionBarriers();
         }
 
         protected override void SetFramebufferCore(Framebuffer fb)
