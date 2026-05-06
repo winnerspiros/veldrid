@@ -1729,12 +1729,16 @@ namespace Veldrid.Vk
                 else
                 {
                     // For transient depth buffers (LAZILY_ALLOCATED, never sampled/read back),
-                    // DontCare on the first bind of a new framebuffer is correct and optimal —
-                    // the tile memory is never filled from DRAM. For non-transient depth, always
-                    // Load to preserve whatever content the app last wrote (e.g. depth prepass
-                    // results carried across frames). This matches the legacy VkRenderPass path
-                    // which always uses loadOp=Load in RenderPassNoClearInit for depth.
-                    depthAttachment.loadOp = (newFramebuffer && isTransientDepth)
+                    // always use DontCare — the storeOp is always DontCare, so content is
+                    // discarded at the end of every render pass.  Any subsequent render pass
+                    // (whether newFramebuffer=true or a mid-frame re-entry after a CopyTexture /
+                    // Dispatch that called endCurrentRenderPass) would load undefined garbage from
+                    // tile RAM with loadOp=Load, causing spurious depth-test failures on TBDR GPUs
+                    // (Adreno / Mali).  DontCare also lets the driver skip the DRAM→tile fill,
+                    // preserving the LAZILY_ALLOCATED memory bandwidth win.
+                    // For non-transient depth, always Load to preserve whatever content the app
+                    // last wrote (e.g. depth-prepass results carried across frames).
+                    depthAttachment.loadOp = isTransientDepth
                         ? VkAttachmentLoadOp.DontCare
                         : VkAttachmentLoadOp.Load;
                 }
