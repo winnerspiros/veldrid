@@ -97,12 +97,12 @@ namespace Veldrid.Vk
 
     internal unsafe struct Size128Bytes
     {
-        public fixed byte Data[64];
+        public fixed byte Data[128];
     }
 
     internal unsafe struct Size512Bytes
     {
-        public fixed byte Data[1024];
+        public fixed byte Data[512];
     }
 
     internal unsafe struct Size1024Bytes

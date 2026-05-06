@@ -94,9 +94,11 @@ namespace Veldrid.Vk
                 imageCi.extent.width = Width;
                 imageCi.extent.height = Height;
                 imageCi.extent.depth = Depth;
-                // Preinitialized layout is only valid for images backed by host-visible memory.
-                // Transient images use lazily-allocated (tile-only) memory and must start as Undefined.
-                imageCi.initialLayout = isTransient ? VkImageLayout.Undefined : VkImageLayout.Preinitialized;
+                // Vulkan spec §12.8: "If the image uses a non-VK_IMAGE_TILING_LINEAR tiling, then
+                // initialLayout must be VK_IMAGE_LAYOUT_UNDEFINED." All VkTexture optimal images use
+                // VK_IMAGE_TILING_OPTIMAL, so Preinitialized is a spec violation here. Using Undefined
+                // for every optimal image is correct; the contents are always written before first read.
+                imageCi.initialLayout = VkImageLayout.Undefined;
                 imageCi.usage = VkFormats.VdToVkTextureUsage(Usage);
                 imageCi.tiling = VkImageTiling.Optimal;
                 imageCi.format = VkFormat;
@@ -153,8 +155,8 @@ namespace Veldrid.Vk
                 CheckResult(result);
 
                 imageLayouts = new VkImageLayout[subresourceCount];
-                var initialLayout = isTransient ? VkImageLayout.Undefined : VkImageLayout.Preinitialized;
-                for (int i = 0; i < imageLayouts.Length; i++) imageLayouts[i] = initialLayout;
+                // CPU tracking starts at Undefined to mirror the spec-mandated initialLayout above.
+                for (int i = 0; i < imageLayouts.Length; i++) imageLayouts[i] = VkImageLayout.Undefined;
             }
             else // isStaging
             {
@@ -261,8 +263,10 @@ namespace Veldrid.Vk
 
             if (!staging)
             {
-                var aspect = (Usage & TextureUsage.DepthStencil) == TextureUsage.DepthStencil
-                    ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+                var aspect = (Usage & TextureUsage.DepthStencil) != 0
+                    ? FormatHelpers.IsStencilFormat(Format)
+                        ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+                        : VkImageAspectFlags.Depth
                     : VkImageAspectFlags.Color;
                 var imageSubresource = new VkImageSubresource
                 {
@@ -346,54 +350,6 @@ namespace Veldrid.Vk
             }
         }
 
-        internal void TransitionImageLayoutNonmatching(
-            VkCommandBuffer cb,
-            uint baseMipLevel,
-            uint levelCount,
-            uint baseArrayLayer,
-            uint layerCount,
-            VkImageLayout newLayout)
-        {
-            if (stagingBuffer != Vortice.Vulkan.VkBuffer.Null) return;
-
-            for (uint level = baseMipLevel; level < baseMipLevel + levelCount; level++)
-            {
-                for (uint layer = baseArrayLayer; layer < baseArrayLayer + layerCount; layer++)
-                {
-                    uint subresource = CalculateSubresource(level, layer);
-                    var oldLayout = imageLayouts[subresource];
-
-                    if (oldLayout != newLayout)
-                    {
-                        VkImageAspectFlags aspectMask;
-
-                        if ((Usage & TextureUsage.DepthStencil) != 0)
-                        {
-                            aspectMask = FormatHelpers.IsStencilFormat(Format)
-                                ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
-                                : VkImageAspectFlags.Depth;
-                        }
-                        else
-                            aspectMask = VkImageAspectFlags.Color;
-
-                        VulkanUtil.TransitionImageLayout(
-                            cb,
-                            OptimalDeviceImage,
-                            level,
-                            1,
-                            layer,
-                            1,
-                            aspectMask,
-                            oldLayout,
-                            newLayout,
-                            gd.DeviceApi);
-
-                        imageLayouts[subresource] = newLayout;
-                    }
-                }
-            }
-        }
-
         // Fills a VkImageMemoryBarrier for transitioning from the current layout to newLayout and
         // updates imageLayouts so the texture tracks the new state immediately. Does NOT emit any
         // gd.DeviceApi.vkCmdPipelineBarrier — callers are expected to accumulate several barriers and flush them
@@ -415,8 +371,26 @@ namespace Veldrid.Vk
 
             if (stagingBuffer != Vortice.Vulkan.VkBuffer.Null) return false;
 
-            var oldLayout = imageLayouts[CalculateSubresource(baseMipLevel, baseArrayLayer)];
-            if (oldLayout == newLayout) return false;
+            // Scan ALL requested subresources to find the first one that needs transitioning.
+            // Reading only mip 0 would silently skip the barrier when mip 0 is already in
+            // newLayout but other mip levels (e.g. after a partial CopyTexture or
+            // GenerateMipmaps) are still in their previous layout.
+            VkImageLayout oldLayout = newLayout;
+            bool needsTransition = false;
+            for (uint level = 0; level < levelCount && !needsTransition; level++)
+            {
+                for (uint layer = 0; layer < layerCount && !needsTransition; layer++)
+                {
+                    var subLayout = imageLayouts[CalculateSubresource(baseMipLevel + level, baseArrayLayer + layer)];
+                    if (subLayout != newLayout)
+                    {
+                        oldLayout = subLayout;
+                        needsTransition = true;
+                    }
+                }
+            }
+
+            if (!needsTransition) return false;
 
             VkImageAspectFlags aspectMask;
 

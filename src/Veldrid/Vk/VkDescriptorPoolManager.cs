@@ -54,20 +54,21 @@ namespace Veldrid.Vk
 
         private VkDescriptorPool getPool(DescriptorResourceCounts counts)
         {
-            lock (@lock)
+            // getPool is only ever called from Allocate(), which already holds @lock.
+            // Do NOT add a nested lock(@lock) here — System.Threading.Lock on .NET 10 is
+            // non-reentrant and would deadlock immediately.  The caller's lock is sufficient
+            // to make this method thread-safe.
+            foreach (var poolInfo in pools)
             {
-                foreach (var poolInfo in pools)
-                {
-                    if (poolInfo.Allocate(counts))
-                        return poolInfo.Pool;
-                }
-
-                var newPool = createNewPool();
-                pools.Add(newPool);
-                bool result = newPool.Allocate(counts);
-                Debug.Assert(result);
-                return newPool.Pool;
+                if (poolInfo.Allocate(counts))
+                    return poolInfo.Pool;
             }
+
+            var newPool = createNewPool();
+            pools.Add(newPool);
+            bool result = newPool.Allocate(counts);
+            Debug.Assert(result);
+            return newPool.Pool;
         }
 
         private unsafe PoolInfo createNewPool()
@@ -163,9 +164,11 @@ namespace Veldrid.Vk
                 RemainingSets += 1;
 
                 UniformBufferCount += counts.UniformBufferCount;
+                UniformBufferDynamicCount += counts.UniformBufferDynamicCount;
                 SampledImageCount += counts.SampledImageCount;
                 SamplerCount += counts.SamplerCount;
                 StorageBufferCount += counts.StorageBufferCount;
+                StorageBufferDynamicCount += counts.StorageBufferDynamicCount;
                 StorageImageCount += counts.StorageImageCount;
             }
         }

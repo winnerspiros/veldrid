@@ -54,7 +54,9 @@ namespace Veldrid.Vk
 
             var renderPassCi = new VkRenderPassCreateInfo();
 
-            var attachments = new StackList<VkAttachmentDescription>();
+            // Size512Bytes holds 512/36 ≈ 14 VkAttachmentDescription entries — safely covers the
+            // Vulkan maximum of 8 color + 1 depth = 9 attachments with room to spare.
+            var attachments = new StackList<VkAttachmentDescription, Size512Bytes>();
 
             uint colorAttachmentCount = (uint)ColorTargets.Count;
             var colorAttachmentRefs = new StackList<VkAttachmentReference>();
@@ -139,10 +141,42 @@ namespace Veldrid.Vk
             var subpassDependency = new VkSubpassDependency
             {
                 srcSubpass = VK_SUBPASS_EXTERNAL,
-                srcStageMask = VkPipelineStageFlags.ColorAttachmentOutput,
+                // Include shader stages so that when renderPassNoClearInit is used with
+                // initialLayout=ShaderReadOnlyOptimal for sampled color attachments, the
+                // implicit layout transition (ShaderReadOnlyOptimal→ColorAttachmentOptimal)
+                // is sequenced after prior shader reads of the same image.  Without
+                // FragmentShader/VertexShader/ComputeShader here the Vulkan spec provides no
+                // execution guarantee between those reads and the layout transition — a
+                // write-after-read (WAR) hazard that can corrupt rendering on TBDR GPUs.
+                srcStageMask = VkPipelineStageFlags.ColorAttachmentOutput
+                               | VkPipelineStageFlags.FragmentShader
+                               | VkPipelineStageFlags.VertexShader
+                               | VkPipelineStageFlags.ComputeShader,
+                // Make previous color writes available before this render pass invalidates
+                // and re-reads them (loadOp=Load).  srcAccessMask=0 would silently rely on
+                // the implicit end-dependency of the preceding render pass to flush caches,
+                // which is fragile and insufficient when no prior render pass exists.
+                srcAccessMask = VkAccessFlags.ColorAttachmentWrite,
                 dstStageMask = VkPipelineStageFlags.ColorAttachmentOutput,
                 dstAccessMask = VkAccessFlags.ColorAttachmentRead | VkAccessFlags.ColorAttachmentWrite
             };
+
+            // Extend the external dependency to cover depth/stencil when the framebuffer has
+            // a depth attachment.  The external-to-subpass transition for a depth attachment
+            // occurs in EarlyFragmentTests/LateFragmentTests, not ColorAttachmentOutput.
+            // Omitting these stage/access masks produces a Vulkan validation warning:
+            // "vkCreateRenderPass: pDependency[0] srcStageMask does not include any stages that
+            //  use the layout set in pAttachments[…].initialLayout."
+            if (DepthTarget != null)
+            {
+                subpassDependency.srcStageMask |= VkPipelineStageFlags.EarlyFragmentTests
+                                                  | VkPipelineStageFlags.LateFragmentTests;
+                subpassDependency.srcAccessMask |= VkAccessFlags.DepthStencilAttachmentWrite;
+                subpassDependency.dstStageMask |= VkPipelineStageFlags.EarlyFragmentTests
+                                                  | VkPipelineStageFlags.LateFragmentTests;
+                subpassDependency.dstAccessMask |= VkAccessFlags.DepthStencilAttachmentRead
+                                                   | VkAccessFlags.DepthStencilAttachmentWrite;
+            }
 
             renderPassCi.attachmentCount = attachments.Count;
             renderPassCi.pAttachments = (VkAttachmentDescription*)attachments.Data;
@@ -245,7 +279,8 @@ namespace Veldrid.Vk
                     VkImageAspectFlags.Color,
                     description.ColorTargets[i].MipLevel,
                     1,
-                    description.ColorTargets[i].ArrayLayer);
+                    description.ColorTargets[i].ArrayLayer,
+                    1);
                 var dest = fbAttachments + i;
                 var result = gd.DeviceApi.vkCreateImageView(&imageViewCi, null, dest);
                 CheckResult(result);
@@ -268,7 +303,8 @@ namespace Veldrid.Vk
                     hasStencil ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil : VkImageAspectFlags.Depth,
                     description.DepthTarget.Value.MipLevel,
                     1,
-                    description.DepthTarget.Value.ArrayLayer);
+                    description.DepthTarget.Value.ArrayLayer,
+                    1);
                 var dest = fbAttachments + (fbAttachmentsCount - 1);
                 var result = gd.DeviceApi.vkCreateImageView(&depthViewCi, null, dest);
                 CheckResult(result);
@@ -341,6 +377,15 @@ namespace Veldrid.Vk
 
         public override void TransitionToFinalLayout(VkCommandBuffer cb)
         {
+            // Batch all sampled attachment transitions into a single vkCmdPipelineBarrier call.
+            // With ≤8 color + 1 depth attachments the upper bound is 9 barriers.
+            // Using ColorTargets.Count + 1 as the stackalloc size covers both the color
+            // targets and the single possible depth attachment without two passes.
+            var barriers = stackalloc VkImageMemoryBarrier[ColorTargets.Count + 1];
+            int n = 0;
+            VkPipelineStageFlags srcStage = VkPipelineStageFlags.None;
+            VkPipelineStageFlags dstStage = VkPipelineStageFlags.None;
+
             for (int i = 0; i < ColorTargets.Count; i++)
             {
                 var ca = ColorTargets[i];
@@ -348,27 +393,36 @@ namespace Veldrid.Vk
 
                 if ((vkTex.Usage & TextureUsage.Sampled) != 0)
                 {
-                    vkTex.TransitionImageLayout(
-                        cb,
-                        ca.MipLevel, 1,
-                        ca.ArrayLayer, 1,
-                        VkImageLayout.ShaderReadOnlyOptimal);
+                    if (vkTex.TryGetLayoutTransitionBarrier(ca.MipLevel, 1, ca.ArrayLayer, 1,
+                            VkImageLayout.ShaderReadOnlyOptimal, out var barrier, out var src, out var dst))
+                    {
+                        barriers[n++] = barrier;
+                        srcStage |= src;
+                        dstStage |= dst;
+                    }
                 }
             }
 
             if (DepthTarget != null)
             {
-                var vkTex = Util.AssertSubtype<Texture, VkTexture>(DepthTarget.Value.Target);
+                var ca = DepthTarget.Value;
+                var vkTex = Util.AssertSubtype<Texture, VkTexture>(ca.Target);
 
                 if ((vkTex.Usage & TextureUsage.Sampled) != 0)
                 {
-                    vkTex.TransitionImageLayout(
-                        cb,
-                        DepthTarget.Value.MipLevel, 1,
-                        DepthTarget.Value.ArrayLayer, 1,
-                        VkImageLayout.ShaderReadOnlyOptimal);
+                    if (vkTex.TryGetLayoutTransitionBarrier(ca.MipLevel, 1, ca.ArrayLayer, 1,
+                            VkImageLayout.ShaderReadOnlyOptimal, out var barrier, out var src, out var dst))
+                    {
+                        barriers[n++] = barrier;
+                        srcStage |= src;
+                        dstStage |= dst;
+                    }
                 }
             }
+
+            if (n > 0)
+                gd.DeviceApi.vkCmdPipelineBarrier(cb, srcStage, dstStage, VkDependencyFlags.None,
+                    0, null, 0, null, (uint)n, barriers);
         }
 
         protected override void DisposeCore()

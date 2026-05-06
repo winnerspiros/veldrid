@@ -63,6 +63,10 @@ namespace Veldrid.Vk
 
         // VK_KHR_dynamic_rendering
         public bool HasDynamicRendering { get; private set; }
+        // When true, VkCommandList must call vkCmdBeginRenderingKHR/vkCmdEndRenderingKHR
+        // instead of the core-1.3 vkCmdBeginRendering/vkCmdEndRendering.
+        // Set when the driver exposes only the KHR extension alias (pre-1.3 extension).
+        internal bool UseKhrDynamicRendering { get; private set; }
 
         // VK_EXT_memory_budget
         public bool HasMemoryBudget { get; private set; }
@@ -85,6 +89,9 @@ namespace Veldrid.Vk
 
         // VK_KHR_synchronization2 (core in Vulkan 1.3).
         public bool HasSynchronization2 { get; private set; }
+        // When true, submitCommandsCore must call vkQueueSubmit2KHR instead of vkQueueSubmit2.
+        // Set when the driver exposes vkQueueSubmit2KHR but not vkQueueSubmit2 (pre-1.3 extension).
+        private bool useQueueSubmit2Khr;
 
         // VK_KHR_timeline_semaphore (core in Vulkan 1.2).
         public bool HasTimelineSemaphore { get; private set; }
@@ -822,12 +829,16 @@ namespace Veldrid.Vk
 
                 lock (graphicsQueueLock)
                 {
-                    var result = DeviceApi.vkQueueSubmit2(graphicsQueue, 1, &si2, vkFence);
+                    var result = useQueueSubmit2Khr
+                        ? DeviceApi.vkQueueSubmit2KHR(graphicsQueue, 1, &si2, vkFence)
+                        : DeviceApi.vkQueueSubmit2(graphicsQueue, 1, &si2, vkFence);
                     CheckResult(result);
 
                     if (useExtraFence)
                     {
-                        result = DeviceApi.vkQueueSubmit2(graphicsQueue, 0, null, submissionFence);
+                        result = useQueueSubmit2Khr
+                            ? DeviceApi.vkQueueSubmit2KHR(graphicsQueue, 0, null, submissionFence)
+                            : DeviceApi.vkQueueSubmit2(graphicsQueue, 0, null, submissionFence);
                         CheckResult(result);
                     }
                 }
@@ -877,6 +888,11 @@ namespace Veldrid.Vk
                 if (DeviceApi.vkGetFenceStatus(submittedFences[0].Fence) != VkResult.Success)
                     return;
 
+                // Count how many leading fences have completed, call completeFenceSubmission for
+                // each, then remove them all in a single RemoveRange(0, count) call.  The previous
+                // RemoveAt(i)/i-- pattern shifted O(n) elements per removal; RemoveRange shifts once.
+                int completedCount = 0;
+
                 for (int i = 0; i < submittedFences.Count; i++)
                 {
                     var fsi = submittedFences[i];
@@ -884,12 +900,14 @@ namespace Veldrid.Vk
                     if (DeviceApi.vkGetFenceStatus(fsi.Fence) == VkResult.Success)
                     {
                         completeFenceSubmission(fsi);
-                        submittedFences.RemoveAt(i);
-                        i -= 1;
+                        completedCount++;
                     }
                     else
                         break; // Submissions are in order; later submissions cannot complete if this one hasn't.
                 }
+
+                if (completedCount > 0)
+                    submittedFences.RemoveRange(0, completedCount);
             }
         }
 
@@ -1498,53 +1516,119 @@ namespace Veldrid.Vk
                 deviceProps2.pNext = &pushDescProps;
                 InstanceApi.vkGetPhysicalDeviceProperties2(PhysicalDevice, &deviceProps2);
                 MaxPushDescriptors = pushDescProps.maxPushDescriptors;
-                // CmdPushDescriptorSetKHR is accessed via DeviceApi.vkCmdPushDescriptorSetKHR.
-                HasPushDescriptors = MaxPushDescriptors > 0;
+                HasPushDescriptors = MaxPushDescriptors > 0
+                                  && DeviceApi.vkCmdPushDescriptorSetKHR_ptr.Value != null;
             }
 
-            // VK_KHR_dynamic_rendering: always available via DeviceApi when extension/core feature loaded.
-            HasDynamicRendering = hasDynamicRendering;
+            // VK_KHR_dynamic_rendering: validate that the actual function pointers were
+            // loaded by vkGetDeviceProcAddr. On some drivers (observed on Adreno with
+            // pre-release Android system images) the extension may be listed in device
+            // properties but the function pointers silently return null.
+            // Try core names first; fall back to KHR extension aliases.
+            if (hasDynamicRendering)
+            {
+                bool beginOk = DeviceApi.vkCmdBeginRendering_ptr.Value != null;
+                bool endOk   = DeviceApi.vkCmdEndRendering_ptr.Value != null;
+
+                if (!beginOk && DeviceApi.vkCmdBeginRenderingKHR_ptr.Value != null)
+                {
+                    beginOk = true;
+                    UseKhrDynamicRendering = true;
+                }
+                if (!endOk && DeviceApi.vkCmdEndRenderingKHR_ptr.Value != null)
+                    endOk = true;
+
+                HasDynamicRendering = beginOk && endOk;
+                if (!HasDynamicRendering)
+                    Debug.WriteLine("[Veldrid] VK_KHR_dynamic_rendering: extension listed but begin/end function pointers are null — disabled.");
+            }
 
             HasMemoryBudget = hasMemoryBudget;
 
-            // VK_EXT_host_image_copy: load function pointers.
+            // VK_EXT_host_image_copy: validate all required function pointers before enabling.
+            // vkTransitionImageLayoutEXT is also needed by hostCopyToImage.
             if (hasHostImageCopy)
-            {                HasHostImageCopy = true;
+            {
+                HasHostImageCopy = DeviceApi.vkCopyMemoryToImageEXT_ptr.Value != null
+                                && DeviceApi.vkTransitionImageLayoutEXT_ptr.Value != null;
+                if (!HasHostImageCopy)
+                    Debug.WriteLine("[Veldrid] VK_EXT_host_image_copy: extension listed but required function pointers are null — disabled.");
             }
 
             // VK_EXT_descriptor_indexing: detection only (core in Vulkan 1.2).
             // No function pointers to load — just expose the flag for future bindless usage.
             HasDescriptorIndexing = hasDescriptorIndexing;
 
-            // VK_KHR_fragment_shading_rate: load function pointer for per-draw VRS.
+            // VK_KHR_fragment_shading_rate: validate the function pointer.
+            // Without an explicit check some Android drivers (Adreno 7xx) return a non-null
+            // but broken stub; with the pNext feature opt-in above the driver should now
+            // return a correct pointer, but guard against the null case as well.
             if (hasFragmentShadingRate)
-            {                HasFragmentShadingRate = true;
+            {
+                HasFragmentShadingRate = DeviceApi.vkCmdSetFragmentShadingRateKHR_ptr.Value != null;
+                if (!HasFragmentShadingRate)
+                    Debug.WriteLine("[Veldrid] VK_KHR_fragment_shading_rate: extension listed but vkCmdSetFragmentShadingRateKHR is null — disabled.");
             }
 
-            // VK_EXT_mesh_shader: load function pointer for mesh shader dispatch.
+            // VK_EXT_mesh_shader: validate function pointer before enabling.
             if (hasMeshShader)
-            {                HasMeshShader = true;
+            {
+                HasMeshShader = DeviceApi.vkCmdDrawMeshTasksEXT_ptr.Value != null;
+                if (!HasMeshShader)
+                    Debug.WriteLine("[Veldrid] VK_EXT_mesh_shader: extension listed but vkCmdDrawMeshTasksEXT is null — disabled.");
             }
 
             // VK_EXT_swapchain_maintenance1: no device function pointers required by
             // our usage (only struct chaining at create- and present-time).
             HasSwapchainMaintenance1 = hasSwapchainMaintenance1;
 
-            // VK_KHR_synchronization2: load vkQueueSubmit2. When the extension is the
-            // promoted-to-core Vulkan 1.3 variant no KHR suffix is needed; fall back to
-            // the KHR entry point for 1.2 drivers that expose only the extension form.
-            HasSynchronization2 = hasSynchronization2;
+            // VK_KHR_synchronization2: validate vkQueueSubmit2. The core-1.3 variant
+            // is tried first; fall back to the KHR extension alias for 1.2 drivers.
+            // Disable entirely if neither pointer is available (shouldn't happen on a
+            // conformant 1.3 device, but guard defensively).
             if (hasSynchronization2)
-            {            }
+            {
+                if (DeviceApi.vkQueueSubmit2_ptr.Value != null)
+                {
+                    HasSynchronization2 = true;
+                }
+                else if (DeviceApi.vkQueueSubmit2KHR_ptr.Value != null)
+                {
+                    HasSynchronization2 = true;
+                    useQueueSubmit2Khr = true;
+                }
+                else
+                {
+                    HasSynchronization2 = false;
+                    Debug.WriteLine("[Veldrid] VK_KHR_synchronization2: extension listed but neither vkQueueSubmit2 nor vkQueueSubmit2KHR is available — disabled.");
+                }
+            }
 
             HasTimelineSemaphore = hasTimelineSemaphore;
 
             HasPipelineCreationCacheControl = hasPipelineCreationCacheControl;
 
-            // VK_GOOGLE_display_timing: load function pointers used by VkSwapchain to
-            // query the display refresh cadence and schedule per-present vblank targets.
+            // VK_GOOGLE_display_timing: validate both function pointers before enabling.
+            // On some drivers (observed on Adreno + pre-release Android system images)
+            // the extension is listed but vkGetDeviceProcAddr returns null for its
+            // functions. Guard here so initDisplayTiming() doesn't crash through a null
+            // pointer (PC = 0x0, SIGSEGV) at swapchain creation time.
             if (hasDisplayTiming)
-            {                HasDisplayTiming = true;
+            {
+                HasDisplayTiming = DeviceApi.vkGetRefreshCycleDurationGOOGLE_ptr.Value != null
+                                && DeviceApi.vkGetPastPresentationTimingGOOGLE_ptr.Value != null;
+                if (!HasDisplayTiming)
+                    Debug.WriteLine("[Veldrid] VK_GOOGLE_display_timing: extension listed but function pointers are null — disabled.");
+            }
+
+            // VK_EXT_debug_marker: validate all three function pointers before allowing
+            // marker calls. Some drivers list the extension but fail to load its functions.
+            if (debugMarkerEnabled)
+            {
+                debugMarkerEnabled = DeviceApi.vkDebugMarkerSetObjectNameEXT_ptr.Value != null
+                                  && DeviceApi.vkCmdDebugMarkerBeginEXT_ptr.Value != null;
+                if (!debugMarkerEnabled)
+                    Debug.WriteLine("[Veldrid] VK_EXT_debug_marker: extension listed but function pointers are null — disabled.");
             }
         }
 
@@ -1899,6 +1983,72 @@ namespace Veldrid.Vk
                 };
                 DeviceApi.vkCmdCopyBuffer(cb, copySrcVkBuffer.DeviceBuffer, vkBuffer.DeviceBuffer, 1, &copyRegion);
 
+                // Emit a memory barrier so the TRANSFER_WRITE is visible to all subsequent
+                // GPU consumers of this buffer.  Without this barrier the data is technically
+                // not guaranteed to be visible to the next command-buffer submission even though
+                // both use the same queue (Vulkan spec 6.9 does NOT imply automatic memory
+                // visibility across queue submissions).
+                var dstAccess = VkAccessFlags.None;
+                var dstStage = VkPipelineStageFlags.None;
+                var destUsage = buffer.Usage;
+
+                if ((destUsage & BufferUsage.UniformBuffer) != 0)
+                {
+                    dstAccess |= VkAccessFlags.UniformRead;
+                    dstStage |= VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.ComputeShader;
+                }
+
+                if ((destUsage & BufferUsage.VertexBuffer) != 0)
+                {
+                    dstAccess |= VkAccessFlags.VertexAttributeRead;
+                    dstStage |= VkPipelineStageFlags.VertexInput;
+                }
+
+                if ((destUsage & BufferUsage.IndexBuffer) != 0)
+                {
+                    dstAccess |= VkAccessFlags.IndexRead;
+                    dstStage |= VkPipelineStageFlags.VertexInput;
+                }
+
+                if ((destUsage & BufferUsage.StructuredBufferReadOnly) != 0)
+                {
+                    dstAccess |= VkAccessFlags.ShaderRead;
+                    dstStage |= VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.ComputeShader;
+                }
+
+                if ((destUsage & BufferUsage.StructuredBufferReadWrite) != 0)
+                {
+                    // Storage RW buffers can be both read and written by shaders; include ShaderWrite
+                    // so the barrier covers subsequent shader writes that follow the transfer write.
+                    dstAccess |= VkAccessFlags.ShaderRead | VkAccessFlags.ShaderWrite;
+                    dstStage |= VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.ComputeShader;
+                }
+
+                if ((destUsage & BufferUsage.IndirectBuffer) != 0)
+                {
+                    dstAccess |= VkAccessFlags.IndirectCommandRead;
+                    dstStage |= VkPipelineStageFlags.DrawIndirect;
+                }
+
+                if (dstAccess == VkAccessFlags.None)
+                {
+                    dstAccess = VkAccessFlags.MemoryRead;
+                    dstStage = VkPipelineStageFlags.AllCommands;
+                }
+
+                var memBarrier = new VkMemoryBarrier();
+                memBarrier.sType = VkStructureType.MemoryBarrier;
+                memBarrier.srcAccessMask = VkAccessFlags.TransferWrite;
+                memBarrier.dstAccessMask = dstAccess;
+                DeviceApi.vkCmdPipelineBarrier(
+                    cb,
+                    VkPipelineStageFlags.Transfer,
+                    dstStage,
+                    VkDependencyFlags.None,
+                    1, &memBarrier,
+                    0, null,
+                    0, null);
+
                 pool.EndAndSubmit(cb);
                 lock (stagingResourcesLock) submittedStagingBuffers.Add(cb, copySrcVkBuffer);
             }
@@ -2012,14 +2162,33 @@ namespace Veldrid.Vk
             var cResult = DeviceApi.vkCopyMemoryToImageEXT( &copyInfo);
             VulkanUtil.CheckResult(cResult);
 
-            // Transition back to the layout the image was in before.
+            // Transition back to a stable layout.
+            // VkImageLayout.Undefined is only valid as an oldLayout (discard sentinel); it may NOT
+            // be used as newLayout.  When the texture has never been used before (tracked layout is
+            // Undefined) choose the most appropriate initial layout based on the texture's usage.
+            var finalLayout = oldLayout;
+            if (finalLayout == VkImageLayout.Undefined)
+            {
+                if ((vkTex.Usage & TextureUsage.Sampled) != 0)
+                    finalLayout = VkImageLayout.ShaderReadOnlyOptimal;
+                else if ((vkTex.Usage & TextureUsage.DepthStencil) != 0)
+                    finalLayout = VkImageLayout.DepthStencilAttachmentOptimal;
+                else if ((vkTex.Usage & TextureUsage.RenderTarget) != 0)
+                    finalLayout = VkImageLayout.ColorAttachmentOptimal;
+                else
+                    finalLayout = VkImageLayout.General;
+            }
+
             var transitionBack = new VkHostImageLayoutTransitionInfo();
             transitionBack.image = vkTex.OptimalDeviceImage;
             transitionBack.oldLayout = VkImageLayout.TransferDstOptimal;
-            transitionBack.newLayout = oldLayout;
+            transitionBack.newLayout = finalLayout;
             transitionBack.subresourceRange = new VkImageSubresourceRange(aspectMask, mipLevel, 1, arrayLayer, 1);
             tResult = DeviceApi.vkTransitionImageLayoutEXT( 1, &transitionBack);
             VulkanUtil.CheckResult(tResult);
+
+            // Keep the CPU-side layout tracking in sync with the actual image state.
+            vkTex.SetImageLayout(mipLevel, arrayLayer, finalLayout);
         }
 
         internal class SharedCommandPool

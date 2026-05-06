@@ -93,7 +93,9 @@ namespace Veldrid.Vk
             else
             {
                 // Round up to the nearest multiple of bufferImageGranularity.
-                size = (size / bufferImageGranularity + 1) * bufferImageGranularity;
+                // Use the overflow-safe form: ((size - 1) / g + 1) * g instead of
+                // (size + g - 1) / g * g, which overflows when size > ulong.MaxValue - g + 1.
+                size = ((size - 1) / bufferImageGranularity + 1) * bufferImageGranularity;
             }
 
             lock (@lock)
@@ -364,11 +366,13 @@ namespace Veldrid.Vk
 
             private void mergeContiguousBlocks()
             {
-                int contiguousLength = 1;
-
+                // contiguousLength is declared inside the loop so it is fresh (=1) on every
+                // iteration — no implicit carry-over from a previous merge or non-merge pass.
                 for (int i = 0; i < freeBlocks.Count - 1; i++)
                 {
+                    int contiguousLength = 1;
                     ulong blockStart = freeBlocks[i].Offset;
+
                     while (i + contiguousLength < freeBlocks.Count
                            && freeBlocks[i + contiguousLength - 1].End == freeBlocks[i + contiguousLength].Offset)
                         contiguousLength += 1;
@@ -377,15 +381,13 @@ namespace Veldrid.Vk
                     {
                         ulong blockEnd = freeBlocks[i + contiguousLength - 1].End;
                         freeBlocks.RemoveRange(i, contiguousLength);
-                        var mergedBlock = new VkMemoryBlock(
+                        freeBlocks.Insert(i, new VkMemoryBlock(
                             Memory,
                             blockStart,
                             blockEnd - blockStart,
                             memoryTypeIndex,
                             mappedPtr,
-                            false);
-                        freeBlocks.Insert(i, mergedBlock);
-                        contiguousLength = 0;
+                            false));
                     }
                 }
             }

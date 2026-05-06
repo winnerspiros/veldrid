@@ -198,7 +198,7 @@ namespace Veldrid.Vk
 
             // Shader Stage
 
-            VkSpecializationInfo specializationInfo;
+            VkSpecializationInfo specializationInfo = default;
             var specDescs = description.ShaderSet.Specializations;
 
             if (specDescs != null)
@@ -247,7 +247,11 @@ namespace Veldrid.Vk
                 stageCi.module = vkShader.ShaderModule;
                 stageCi.stage = VkFormats.VdToVkShaderStages(shader.Stage);
                 stageCi.pName = nameDst;
-                stageCi.pSpecializationInfo = &specializationInfo;
+                // Pass null when there are no specialization constants — a pointer to a
+                // zero-initialized VkSpecializationInfo is technically valid (mapEntryCount=0)
+                // but null is the correct representation of "no specialization" and avoids
+                // the driver having to dereference an unnecessary struct.
+                stageCi.pSpecializationInfo = specDescs != null ? &specializationInfo : null;
                 stages.Add(stageCi);
             }
 
@@ -312,20 +316,25 @@ namespace Veldrid.Vk
 
                 // TODO: A huge portion of this next part is duplicated in VkFramebuffer.cs.
 
-                var colorAttachmentDescs = new StackList<VkAttachmentDescription>();
+                // colorAttachmentRefs: VkAttachmentReference is 8 bytes; 256-byte StackList holds up to 32 — enough
+                // for the Vulkan maximum of 8 color attachments.  We build the attachment descriptions inline
+                // and add them directly to `attachments` to avoid a separate bounded buffer.
                 var colorAttachmentRefs = new StackList<VkAttachmentReference>();
 
                 for (uint i = 0; i < outputDesc.ColorAttachments.Length; i++)
                 {
-                    colorAttachmentDescs[i].format = VkFormats.VdToVkPixelFormat(outputDesc.ColorAttachments[i].Format);
-                    colorAttachmentDescs[i].samples = vkSampleCount;
-                    colorAttachmentDescs[i].loadOp = VkAttachmentLoadOp.DontCare;
-                    colorAttachmentDescs[i].storeOp = VkAttachmentStoreOp.Store;
-                    colorAttachmentDescs[i].stencilLoadOp = VkAttachmentLoadOp.DontCare;
-                    colorAttachmentDescs[i].stencilStoreOp = VkAttachmentStoreOp.DontCare;
-                    colorAttachmentDescs[i].initialLayout = VkImageLayout.Undefined;
-                    colorAttachmentDescs[i].finalLayout = VkImageLayout.ShaderReadOnlyOptimal;
-                    attachments.Add(colorAttachmentDescs[i]);
+                    var colorAttachmentDesc = new VkAttachmentDescription
+                    {
+                        format = VkFormats.VdToVkPixelFormat(outputDesc.ColorAttachments[i].Format),
+                        samples = vkSampleCount,
+                        loadOp = VkAttachmentLoadOp.DontCare,
+                        storeOp = VkAttachmentStoreOp.Store,
+                        stencilLoadOp = VkAttachmentLoadOp.DontCare,
+                        stencilStoreOp = VkAttachmentStoreOp.DontCare,
+                        initialLayout = VkImageLayout.Undefined,
+                        finalLayout = VkImageLayout.ShaderReadOnlyOptimal
+                    };
+                    attachments.Add(colorAttachmentDesc);
 
                     colorAttachmentRefs[i].attachment = i;
                     colorAttachmentRefs[i].layout = VkImageLayout.ColorAttachmentOptimal;
@@ -357,7 +366,6 @@ namespace Veldrid.Vk
                     colorAttachmentCount = (uint)outputDesc.ColorAttachments.Length,
                     pColorAttachments = (VkAttachmentReference*)colorAttachmentRefs.Data
                 };
-                for (int i = 0; i < colorAttachmentDescs.Count; i++) attachments.Add(colorAttachmentDescs[i]);
 
                 if (outputDesc.DepthAttachment != null)
                 {
@@ -369,9 +377,25 @@ namespace Veldrid.Vk
                 {
                     srcSubpass = VK_SUBPASS_EXTERNAL,
                     srcStageMask = VkPipelineStageFlags.ColorAttachmentOutput,
+                    srcAccessMask = VkAccessFlags.ColorAttachmentWrite,
                     dstStageMask = VkPipelineStageFlags.ColorAttachmentOutput,
                     dstAccessMask = VkAccessFlags.ColorAttachmentRead | VkAccessFlags.ColorAttachmentWrite
                 };
+
+                // Extend the external dependency to cover depth/stencil stages when present,
+                // matching the fix applied to VkFramebuffer. Without this, the validation layer
+                // reports that the srcStageMask does not include stages that use the attachment's
+                // initialLayout (Undefined → DepthStencilAttachmentOptimal transition).
+                if (outputDesc.DepthAttachment != null)
+                {
+                    subpassDependency.srcStageMask |= VkPipelineStageFlags.EarlyFragmentTests
+                                                      | VkPipelineStageFlags.LateFragmentTests;
+                    subpassDependency.srcAccessMask |= VkAccessFlags.DepthStencilAttachmentWrite;
+                    subpassDependency.dstStageMask |= VkPipelineStageFlags.EarlyFragmentTests
+                                                      | VkPipelineStageFlags.LateFragmentTests;
+                    subpassDependency.dstAccessMask |= VkAccessFlags.DepthStencilAttachmentRead
+                                                       | VkAccessFlags.DepthStencilAttachmentWrite;
+                }
 
                 renderPassCi.attachmentCount = attachments.Count;
                 renderPassCi.pAttachments = (VkAttachmentDescription*)attachments.Data;
@@ -419,7 +443,7 @@ namespace Veldrid.Vk
 
             // Shader Stage
 
-            VkSpecializationInfo specializationInfo;
+            VkSpecializationInfo specializationInfo = default;
             var specDescs = description.Specializations;
 
             if (specDescs != null)
@@ -454,8 +478,18 @@ namespace Veldrid.Vk
             var stageCi = new VkPipelineShaderStageCreateInfo();
             stageCi.module = vkShader.ShaderModule;
             stageCi.stage = VkFormats.VdToVkShaderStages(shader.Stage);
-            stageCi.pName = CommonStrings.Main; // Meh
-            stageCi.pSpecializationInfo = &specializationInfo;
+
+            // Encode the entry-point name as a null-terminated UTF-8 string on the stack,
+            // matching the graphics pipeline path. Previously this hardcoded CommonStrings.Main
+            // ("main"), which silently broke any compute shader with a custom entry point name.
+            const int maxComputeEntryPointBytes = 256;
+            byte* computeEntryPointBuf = stackalloc byte[maxComputeEntryPointBytes];
+            int computeNameWritten = Encoding.UTF8.GetBytes(
+                shader.EntryPoint,
+                new Span<byte>(computeEntryPointBuf, maxComputeEntryPointBytes - 1));
+            computeEntryPointBuf[computeNameWritten] = 0;
+            stageCi.pName = computeEntryPointBuf;
+            stageCi.pSpecializationInfo = specDescs != null ? &specializationInfo : null;
             pipelineCi.stage = stageCi;
 
             Vortice.Vulkan.VkPipeline localPipeline;

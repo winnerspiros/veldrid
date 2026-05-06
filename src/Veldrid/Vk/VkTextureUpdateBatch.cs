@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Vortice.Vulkan;
 using static Vortice.Vulkan.Vulkan;
 namespace Veldrid.Vk
@@ -24,10 +25,21 @@ namespace Veldrid.Vk
     {
         private readonly VkGraphicsDevice gd;
         private readonly List<PendingCopy> pendingCopies = new List<PendingCopy>();
-        private readonly Dictionary<SubresourceKey, VkImageLayout> touchedSubresources = new Dictionary<SubresourceKey, VkImageLayout>();
 
         private VkBuffer stagingBuffer;
         private uint stagingOffset;
+
+        // Reused across Submit() calls to track unique subresources touched per chunk.
+        // Stored as a field to avoid a heap allocation on every Submit() call (the batch
+        // object is pooled and reused across frames via ReturnTextureUpdateBatch/Reopen).
+        private readonly HashSet<SubresourceKey> chunkSubresources = new HashSet<SubresourceKey>();
+
+        // Barrier lists reused across Submit() chunks to batch all pre-copy and post-copy
+        // layout transitions into a single vkCmdPipelineBarrier call per phase rather than
+        // one call per subresource. For a MaxCopiesPerSubmit=64 chunk this reduces from
+        // up to 128 individual pipeline barrier calls to exactly 2 (pre + post).
+        private readonly List<VkImageMemoryBarrier> chunkPreBarriers = new List<VkImageMemoryBarrier>(MaxCopiesPerSubmit);
+        private readonly List<VkImageMemoryBarrier> chunkPostBarriers = new List<VkImageMemoryBarrier>(MaxCopiesPerSubmit);
 
         public VkTextureUpdateBatch(VkGraphicsDevice gd)
         {
@@ -39,7 +51,6 @@ namespace Veldrid.Vk
         {
             Debug.Assert(stagingBuffer == null);
             Debug.Assert(pendingCopies.Count == 0);
-            Debug.Assert(touchedSubresources.Count == 0);
             stagingOffset = 0;
             MarkOpen();
         }
@@ -83,8 +94,13 @@ namespace Veldrid.Vk
             uint bufferRowLength = Math.Max(width, blockSize);
             uint bufferImageHeight = Math.Max(height, blockSize);
 
+            // Use IsStencilFormat to decide whether to include the stencil aspect —
+            // using Depth|Stencil for a depth-only format (e.g. D16_UNorm, D32_Float)
+            // is a Vulkan spec violation and triggers validation errors.
             var aspect = (vkTex.Usage & TextureUsage.DepthStencil) != 0
-                ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+                ? FormatHelpers.IsStencilFormat(vkTex.Format)
+                    ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+                    : VkImageAspectFlags.Depth
                 : VkImageAspectFlags.Color;
 
             var region = new VkBufferImageCopy
@@ -112,12 +128,6 @@ namespace Veldrid.Vk
                 MipLevel = mipLevel,
                 ArrayLayer = arrayLayer
             });
-
-            // Track the original layout for each touched subresource exactly once so that on Submit we can
-            // transition back to whatever it was before (typically ShaderReadOnlyOptimal for sampled textures).
-            var key = new SubresourceKey(vkTex, mipLevel, arrayLayer);
-            if (!touchedSubresources.ContainsKey(key))
-                touchedSubresources.Add(key, vkTex.GetImageLayout(mipLevel, arrayLayer));
         }
 
         // Maximum number of texture copies to include in a single gd.DeviceApi.vkQueueSubmit. Submitting very large batches
@@ -133,9 +143,6 @@ namespace Veldrid.Vk
             if (pendingCopies.Count == 0) return;
 
             int total = pendingCopies.Count;
-
-            // Reuse a single set across chunks to collect unique subresources per chunk without re-allocating.
-            var chunkSubresources = new HashSet<SubresourceKey>();
 
             for (int start = 0; start < total; start += MaxCopiesPerSubmit)
             {
@@ -153,12 +160,32 @@ namespace Veldrid.Vk
                 var pool = gd.GetFreeCommandPool();
                 var cb = pool.BeginNewCommandBuffer();
 
-                // Transition each subresource in this chunk to TransferDstOptimal. VkTexture maintains
-                // per-subresource layout state internally; TransitionImageLayout reads that state, so
-                // subresources that appear in a later chunk will be transitioned from whatever layout the
-                // previous chunk left them in (ShaderReadOnlyOptimal for sampled, TransferDstOptimal otherwise).
+                // Transition each subresource in this chunk to TransferDstOptimal, batched into
+                // a single vkCmdPipelineBarrier call. Individual TransitionImageLayout calls would
+                // emit one pipeline barrier per subresource — for a 64-copy chunk that's 64 calls.
+                chunkPreBarriers.Clear();
+                VkPipelineStageFlags preSrcStage = VkPipelineStageFlags.None;
+                VkPipelineStageFlags preDstStage = VkPipelineStageFlags.None;
+
                 foreach (var key in chunkSubresources)
-                    key.Texture.TransitionImageLayout(cb, key.MipLevel, 1, key.ArrayLayer, 1, VkImageLayout.TransferDstOptimal);
+                {
+                    if (key.Texture.TryGetLayoutTransitionBarrier(key.MipLevel, 1, key.ArrayLayer, 1,
+                            VkImageLayout.TransferDstOptimal, out var barrier, out var src, out var dst))
+                    {
+                        chunkPreBarriers.Add(barrier);
+                        preSrcStage |= src;
+                        preDstStage |= dst;
+                    }
+                }
+
+                if (chunkPreBarriers.Count > 0)
+                {
+                    var preSpan = CollectionsMarshal.AsSpan(chunkPreBarriers);
+                    fixed (VkImageMemoryBarrier* preBarsPtr = preSpan)
+                        gd.DeviceApi.vkCmdPipelineBarrier(cb, preSrcStage, preDstStage,
+                            VkDependencyFlags.None, 0, null, 0, null,
+                            (uint)chunkPreBarriers.Count, preBarsPtr);
+                }
 
                 // Issue all buffer→image copies for this chunk.
                 for (int i = start; i < end; i++)
@@ -174,12 +201,35 @@ namespace Veldrid.Vk
                         &region);
                 }
 
-                // Transition sampled subresources back to ShaderReadOnlyOptimal, matching the single-call
-                // UpdateTextureCore semantics. Non-sampled subresources stay in TransferDstOptimal.
+                // Transition sampled subresources back to ShaderReadOnlyOptimal, batched into a
+                // single vkCmdPipelineBarrier call. Matches the single-call UpdateTextureCore semantics.
+                // Non-sampled subresources stay in TransferDstOptimal so beginCurrentRenderPass/
+                // beginCurrentDynamicRendering can detect them and emit the correct pre-render barrier.
+                chunkPostBarriers.Clear();
+                VkPipelineStageFlags postSrcStage = VkPipelineStageFlags.None;
+                VkPipelineStageFlags postDstStage = VkPipelineStageFlags.None;
+
                 foreach (var key in chunkSubresources)
                 {
                     if ((key.Texture.Usage & TextureUsage.Sampled) != 0)
-                        key.Texture.TransitionImageLayout(cb, key.MipLevel, 1, key.ArrayLayer, 1, VkImageLayout.ShaderReadOnlyOptimal);
+                    {
+                        if (key.Texture.TryGetLayoutTransitionBarrier(key.MipLevel, 1, key.ArrayLayer, 1,
+                                VkImageLayout.ShaderReadOnlyOptimal, out var barrier, out var src, out var dst))
+                        {
+                            chunkPostBarriers.Add(barrier);
+                            postSrcStage |= src;
+                            postDstStage |= dst;
+                        }
+                    }
+                }
+
+                if (chunkPostBarriers.Count > 0)
+                {
+                    var postSpan = CollectionsMarshal.AsSpan(chunkPostBarriers);
+                    fixed (VkImageMemoryBarrier* postBarsPtr = postSpan)
+                        gd.DeviceApi.vkCmdPipelineBarrier(cb, postSrcStage, postDstStage,
+                            VkDependencyFlags.None, 0, null, 0, null,
+                            (uint)chunkPostBarriers.Count, postBarsPtr);
                 }
 
                 pool.EndAndSubmit(cb);
@@ -195,7 +245,6 @@ namespace Veldrid.Vk
             stagingBuffer = null;
             stagingOffset = 0;
             pendingCopies.Clear();
-            touchedSubresources.Clear();
         }
 
         protected override void ReleaseToPool()
@@ -212,7 +261,6 @@ namespace Veldrid.Vk
 
             stagingOffset = 0;
             pendingCopies.Clear();
-            touchedSubresources.Clear();
             gd.ReturnTextureUpdateBatch(this);
         }
 

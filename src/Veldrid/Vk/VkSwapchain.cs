@@ -264,7 +264,6 @@ namespace Veldrid.Vk
                 semaphore,
                 fence,
                 out currentImageIndex);
-            framebuffer.SetImageIndex(currentImageIndex);
 
             if (result == VkResult.ErrorSurfaceLostKHR)
             {
@@ -295,6 +294,7 @@ namespace Veldrid.Vk
 
             if (result != VkResult.Success) throw new VeldridException("Could not acquire next image from the Vulkan swapchain.");
 
+            framebuffer.SetImageIndex(currentImageIndex);
             return true;
         }
 
@@ -517,7 +517,7 @@ namespace Veldrid.Vk
 
                 if (surfaceFormat.format == VkFormat.Undefined)
                 {
-                    if (colorSrgb && surfaceFormat.format != VkFormat.R8G8B8A8Srgb) throw new VeldridException("Unable to create an sRGB Swapchain for this surface.");
+                    if (colorSrgb) throw new VeldridException("Unable to create an sRGB Swapchain for this surface.");
 
                     surfaceFormat = formats[0];
                 }
