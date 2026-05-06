@@ -246,6 +246,16 @@ namespace Veldrid.Vk
                 srcStageFlags = VkPipelineStageFlags.BottomOfPipe;
                 dstStageFlags = VkPipelineStageFlags.Transfer;
             }
+            else if (oldLayout == VkImageLayout.PresentSrcKHR && newLayout == VkImageLayout.TransferDstOptimal)
+            {
+                // Presentation engine has finished reading; transition to a copy destination.
+                // The presentation engine's read synchronization is via semaphore (queue submit level),
+                // so srcAccessMask=MemoryRead / srcStage=BottomOfPipe is sufficient to order the barrier.
+                srcAccessMask = VkAccessFlags.MemoryRead;
+                dstAccessMask = VkAccessFlags.TransferWrite;
+                srcStageFlags = VkPipelineStageFlags.BottomOfPipe;
+                dstStageFlags = VkPipelineStageFlags.Transfer;
+            }
             else if (oldLayout == VkImageLayout.PresentSrcKHR && newLayout == VkImageLayout.ColorAttachmentOptimal)
             {
                 // Swapchain image released by the presentation engine, transitioning to a render target.

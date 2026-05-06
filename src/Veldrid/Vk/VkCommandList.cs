@@ -1398,11 +1398,41 @@ namespace Veldrid.Vk
                 {
                     var ca = currentFramebuffer.ColorTargets[i];
                     var vkTex = Util.AssertSubtype<Texture, VkTexture>(ca.Target);
-                    // renderPassNoClearLoad declares initialLayout=ColorAttachmentOptimal for ALL
-                    // color attachments — do not transition sampled attachments to ShaderReadOnly.
-                    var targetLayout = (!willUseNoClearLoad && (vkTex.Usage & TextureUsage.Sampled) != 0)
-                        ? VkImageLayout.ShaderReadOnlyOptimal
-                        : VkImageLayout.ColorAttachmentOptimal;
+                    // Choose the target layout that matches the initialLayout declared by the
+                    // render pass that will be used, so the image is in the expected layout when
+                    // vkCmdBeginRenderPass is called (Vulkan spec §12.8.2).
+                    //
+                    // renderPassNoClearLoad  → initialLayout=ColorAttachmentOptimal for ALL color attachments.
+                    // renderPassNoClearInit  → initialLayout per attachment type:
+                    //   • Sampled offscreen   : ShaderReadOnlyOptimal
+                    //   • Swapchain (presented): PresentSrcKHR  — render pass does the implicit PresentSrcKHR→ColorAttachmentOptimal
+                    //   • Other (non-sampled) : ColorAttachmentOptimal
+                    //
+                    // For swapchain textures we MUST NOT emit a PresentSrcKHR→ColorAttachmentOptimal
+                    // barrier here: doing so would leave the image in ColorAttachmentOptimal while
+                    // renderPassNoClearInit declares initialLayout=PresentSrcKHR, which is a Vulkan
+                    // spec violation and produces undefined behaviour (§12.8.2 requireds the image
+                    // to be in initialLayout at render pass start when initialLayout≠Undefined).
+                    VkImageLayout targetLayout;
+                    if (willUseNoClearLoad)
+                    {
+                        targetLayout = VkImageLayout.ColorAttachmentOptimal;
+                    }
+                    else if ((vkTex.Usage & TextureUsage.Sampled) != 0)
+                    {
+                        targetLayout = VkImageLayout.ShaderReadOnlyOptimal;
+                    }
+                    else if (vkTex.IsSwapchainTexture)
+                    {
+                        // renderPassNoClearInit has initialLayout=PresentSrcKHR for swapchain
+                        // images.  Keep the image in PresentSrcKHR so the render pass performs
+                        // the PresentSrcKHR→ColorAttachmentOptimal transition implicitly.
+                        targetLayout = VkImageLayout.PresentSrcKHR;
+                    }
+                    else
+                    {
+                        targetLayout = VkImageLayout.ColorAttachmentOptimal;
+                    }
                     if (vkTex.TryGetLayoutTransitionBarrier(ca.MipLevel, 1, ca.ArrayLayer, 1,
                             targetLayout, out var barrier, out var src, out var dst))
                     {
