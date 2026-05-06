@@ -348,54 +348,6 @@ namespace Veldrid.Vk
             }
         }
 
-        internal void TransitionImageLayoutNonmatching(
-            VkCommandBuffer cb,
-            uint baseMipLevel,
-            uint levelCount,
-            uint baseArrayLayer,
-            uint layerCount,
-            VkImageLayout newLayout)
-        {
-            if (stagingBuffer != Vortice.Vulkan.VkBuffer.Null) return;
-
-            for (uint level = baseMipLevel; level < baseMipLevel + levelCount; level++)
-            {
-                for (uint layer = baseArrayLayer; layer < baseArrayLayer + layerCount; layer++)
-                {
-                    uint subresource = CalculateSubresource(level, layer);
-                    var oldLayout = imageLayouts[subresource];
-
-                    if (oldLayout != newLayout)
-                    {
-                        VkImageAspectFlags aspectMask;
-
-                        if ((Usage & TextureUsage.DepthStencil) != 0)
-                        {
-                            aspectMask = FormatHelpers.IsStencilFormat(Format)
-                                ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
-                                : VkImageAspectFlags.Depth;
-                        }
-                        else
-                            aspectMask = VkImageAspectFlags.Color;
-
-                        VulkanUtil.TransitionImageLayout(
-                            cb,
-                            OptimalDeviceImage,
-                            level,
-                            1,
-                            layer,
-                            1,
-                            aspectMask,
-                            oldLayout,
-                            newLayout,
-                            gd.DeviceApi);
-
-                        imageLayouts[subresource] = newLayout;
-                    }
-                }
-            }
-        }
-
         // Fills a VkImageMemoryBarrier for transitioning from the current layout to newLayout and
         // updates imageLayouts so the texture tracks the new state immediately. Does NOT emit any
         // gd.DeviceApi.vkCmdPipelineBarrier — callers are expected to accumulate several barriers and flush them

@@ -119,24 +119,20 @@ namespace Veldrid.Vk
         {
             lock (commandBufferListLock)
             {
-                for (int i = 0; i < submittedCommandBuffers.Count; i++)
-                {
-                    var submittedCb = submittedCommandBuffers[i];
-
-                    if (submittedCb == completedCb)
-                    {
-                        availableCommandBuffers.Enqueue(completedCb);
-                        submittedCommandBuffers.RemoveAt(i);
-                        i -= 1;
-                    }
-                }
+                // Each CB appears at most once in the list; use Remove to avoid the
+                // unnecessary O(n) continuation and the stale i-- bookkeeping.
+                if (submittedCommandBuffers.Remove(completedCb))
+                    availableCommandBuffers.Enqueue(completedCb);
             }
 
             lock (stagingLock)
             {
                 if (submittedStagingInfos.TryGetValue(completedCb, out var info))
                 {
-                    recycleStagingInfo(info);
+                    // Call the lock-free core directly — we already hold stagingLock and
+                    // System.Threading.Lock is non-reentrant, so calling recycleStagingInfo()
+                    // (which also acquires stagingLock) would deadlock.
+                    recycleStagingInfoCore(info);
                     submittedStagingInfos.Remove(completedCb);
                 }
             }
@@ -566,7 +562,9 @@ namespace Veldrid.Vk
                 var dstBuffer = dstVkTexture.StagingBuffer;
 
                 var aspect = (srcVkTexture.Usage & TextureUsage.DepthStencil) != 0
-                    ? VkImageAspectFlags.Depth
+                    ? FormatHelpers.IsStencilFormat(srcVkTexture.Format)
+                        ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+                        : VkImageAspectFlags.Depth
                     : VkImageAspectFlags.Color;
 
                 Util.GetMipDimensions(dstVkTexture, dstMipLevel, out uint mipWidth, out uint mipHeight, out uint _);
@@ -1812,14 +1810,23 @@ namespace Veldrid.Vk
         {
             lock (stagingLock)
             {
-                foreach (var buffer in info.BuffersUsed) availableStagingBuffers.Add(buffer);
-
-                foreach (var rrc in info.Resources) rrc.Decrement();
-
-                info.Clear();
-
-                availableStagingInfos.Add(info);
+                recycleStagingInfoCore(info);
             }
+        }
+
+        // Lock-free inner body of recycleStagingInfo. Must be called while stagingLock is held.
+        // Exists as a separate method because CommandBufferCompleted already holds stagingLock
+        // and System.Threading.Lock is non-reentrant — calling recycleStagingInfo from within
+        // lock(stagingLock) would deadlock.
+        private void recycleStagingInfoCore(StagingResourceInfo info)
+        {
+            foreach (var buffer in info.BuffersUsed) availableStagingBuffers.Add(buffer);
+
+            foreach (var rrc in info.Resources) rrc.Decrement();
+
+            info.Clear();
+
+            availableStagingInfos.Add(info);
         }
 
         private protected override void ClearColorTargetCore(uint index, RgbaFloat clearColor)
@@ -2075,11 +2082,9 @@ namespace Veldrid.Vk
             // mismatch the baked initialLayout=ColorAttachmentOptimal in the legacy render pass,
             // causing a Vulkan validation error and potential GPU hang on tile-based hardware.
             //
-            // Optimization: accumulate all post-loop transitions (one per subresource that needs
-            // transitioning) into imageBarrierBatch and emit them in a single vkCmdPipelineBarrier
-            // call. TransitionImageLayoutNonmatching emits one barrier call per subresource, which
-            // for a 9-mip cubemap (9 × 6 = 54 subresources) would cost 54 individual pipeline
-            // barrier calls. Batching reduces this to a single call regardless of mip/layer count.
+            // Accumulate all post-loop transitions into imageBarrierBatch and emit them in a
+            // single vkCmdPipelineBarrier call. For a 9-mip cubemap (9 × 6 = 54 subresources)
+            // this costs a single pipeline barrier call regardless of mip/layer count.
             var finalLayout = (vkTex.Usage & TextureUsage.Sampled) != 0
                 ? VkImageLayout.ShaderReadOnlyOptimal
                 : (vkTex.Usage & TextureUsage.RenderTarget) != 0
