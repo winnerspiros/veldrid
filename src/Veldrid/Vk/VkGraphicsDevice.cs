@@ -67,6 +67,11 @@ namespace Veldrid.Vk
         // instead of the core-1.3 vkCmdBeginRendering/vkCmdEndRendering.
         // Set when the driver exposes only the KHR extension alias (pre-1.3 extension).
         internal bool UseKhrDynamicRendering { get; private set; }
+        // When true, endCurrentRenderPass must call vkCmdEndRenderingKHR instead of vkCmdEndRendering.
+        // Set when vkCmdEndRendering (core 1.3) is null but vkCmdEndRenderingKHR (extension alias) is
+        // available. Handles drivers that expose vkCmdBeginRendering (core) but omit vkCmdEndRendering
+        // while still providing the KHR alias — a driver bug seen on some Android 16 GPUs.
+        internal bool UseKhrEndRendering { get; private set; }
 
         // VK_EXT_memory_budget
         public bool HasMemoryBudget { get; private set; }
@@ -1536,7 +1541,13 @@ namespace Veldrid.Vk
                     UseKhrDynamicRendering = true;
                 }
                 if (!endOk && DeviceApi.vkCmdEndRenderingKHR_ptr.Value != null)
+                {
                     endOk = true;
+                    // Core vkCmdEndRendering is null but the KHR alias is available.
+                    // Mark UseKhrEndRendering so endCurrentRenderPass uses the alias
+                    // rather than calling through the null core pointer (→ SIGSEGV).
+                    UseKhrEndRendering = true;
+                }
 
                 HasDynamicRendering = beginOk && endOk;
                 if (!HasDynamicRendering)

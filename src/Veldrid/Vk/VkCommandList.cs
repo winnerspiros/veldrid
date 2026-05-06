@@ -1771,7 +1771,12 @@ namespace Veldrid.Vk
             if (activeRenderPass == dynamicRenderingSentinel)
             {
                 // Dynamic rendering path.
-                if (gd.UseKhrDynamicRendering)
+                // UseKhrDynamicRendering: the begin call used vkCmdBeginRenderingKHR, so the
+                // matching end must also use the KHR alias.
+                // UseKhrEndRendering: core vkCmdBeginRendering was used for begin (pointer was
+                // non-null) but core vkCmdEndRendering is null; use the KHR alias for end only.
+                // Both cases require vkCmdEndRenderingKHR; neither calls vkCmdEndRendering.
+                if (gd.UseKhrDynamicRendering || gd.UseKhrEndRendering)
                     gd.DeviceApi.vkCmdEndRenderingKHR(CommandBuffer);
                 else
                     gd.DeviceApi.vkCmdEndRendering(CommandBuffer);
