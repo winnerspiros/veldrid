@@ -888,6 +888,11 @@ namespace Veldrid.Vk
                 if (DeviceApi.vkGetFenceStatus(submittedFences[0].Fence) != VkResult.Success)
                     return;
 
+                // Count how many leading fences have completed, call completeFenceSubmission for
+                // each, then remove them all in a single RemoveRange(0, count) call.  The previous
+                // RemoveAt(i)/i-- pattern shifted O(n) elements per removal; RemoveRange shifts once.
+                int completedCount = 0;
+
                 for (int i = 0; i < submittedFences.Count; i++)
                 {
                     var fsi = submittedFences[i];
@@ -895,12 +900,14 @@ namespace Veldrid.Vk
                     if (DeviceApi.vkGetFenceStatus(fsi.Fence) == VkResult.Success)
                     {
                         completeFenceSubmission(fsi);
-                        submittedFences.RemoveAt(i);
-                        i -= 1;
+                        completedCount++;
                     }
                     else
                         break; // Submissions are in order; later submissions cannot complete if this one hasn't.
                 }
+
+                if (completedCount > 0)
+                    submittedFences.RemoveRange(0, completedCount);
             }
         }
 
