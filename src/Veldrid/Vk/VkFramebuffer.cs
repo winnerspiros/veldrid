@@ -141,7 +141,17 @@ namespace Veldrid.Vk
             var subpassDependency = new VkSubpassDependency
             {
                 srcSubpass = VK_SUBPASS_EXTERNAL,
-                srcStageMask = VkPipelineStageFlags.ColorAttachmentOutput,
+                // Include shader stages so that when renderPassNoClearInit is used with
+                // initialLayout=ShaderReadOnlyOptimal for sampled color attachments, the
+                // implicit layout transition (ShaderReadOnlyOptimal→ColorAttachmentOptimal)
+                // is sequenced after prior shader reads of the same image.  Without
+                // FragmentShader/VertexShader/ComputeShader here the Vulkan spec provides no
+                // execution guarantee between those reads and the layout transition — a
+                // write-after-read (WAR) hazard that can corrupt rendering on TBDR GPUs.
+                srcStageMask = VkPipelineStageFlags.ColorAttachmentOutput
+                               | VkPipelineStageFlags.FragmentShader
+                               | VkPipelineStageFlags.VertexShader
+                               | VkPipelineStageFlags.ComputeShader,
                 // Make previous color writes available before this render pass invalidates
                 // and re-reads them (loadOp=Load).  srcAccessMask=0 would silently rely on
                 // the implicit end-dependency of the preceding render pass to flush caches,
