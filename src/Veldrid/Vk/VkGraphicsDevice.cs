@@ -1529,23 +1529,41 @@ namespace Veldrid.Vk
             // loaded by vkGetDeviceProcAddr. On some drivers (observed on Adreno with
             // pre-release Android system images) the extension may be listed in device
             // properties but the function pointers silently return null.
-            // Try core names first; fall back to KHR extension aliases.
+            //
+            // Dispatch flags set here:
+            //   UseKhrDynamicRendering = true  → vkCmdBeginRenderingKHR is used for begin
+            //                                    (core vkCmdBeginRendering is null)
+            //   UseKhrEndRendering = true       → vkCmdEndRenderingKHR is used for end
+            //                                    (core vkCmdEndRendering is null)
+            //
+            // Both flags are independent; endCurrentRenderPass calls vkCmdEndRenderingKHR
+            // when either is true (see VkCommandList.endCurrentRenderPass).
             if (hasDynamicRendering)
             {
                 bool beginOk = DeviceApi.vkCmdBeginRendering_ptr.Value != null;
                 bool endOk   = DeviceApi.vkCmdEndRendering_ptr.Value != null;
 
+                bool khrEndAvailable = DeviceApi.vkCmdEndRenderingKHR_ptr.Value != null;
+
                 if (!beginOk && DeviceApi.vkCmdBeginRenderingKHR_ptr.Value != null)
                 {
-                    beginOk = true;
-                    UseKhrDynamicRendering = true;
+                    // Only commit to the KHR-begin path when the matching KHR-end alias is
+                    // also present; endCurrentRenderPass calls vkCmdEndRenderingKHR whenever
+                    // UseKhrDynamicRendering=true. A driver that provides the KHR-begin alias
+                    // but not the KHR-end alias is non-conformant, but guard defensively.
+                    if (khrEndAvailable)
+                    {
+                        beginOk = true;
+                        UseKhrDynamicRendering = true;
+                    }
                 }
-                if (!endOk && DeviceApi.vkCmdEndRenderingKHR_ptr.Value != null)
+
+                if (!endOk && khrEndAvailable)
                 {
                     endOk = true;
                     // Core vkCmdEndRendering is null but the KHR alias is available.
-                    // Mark UseKhrEndRendering so endCurrentRenderPass uses the alias
-                    // rather than calling through the null core pointer (→ SIGSEGV).
+                    // UseKhrEndRendering lets endCurrentRenderPass use the alias instead
+                    // of calling through the null core pointer (→ SIGSEGV at PC=0).
                     UseKhrEndRendering = true;
                 }
 
@@ -1632,12 +1650,14 @@ namespace Veldrid.Vk
                     Debug.WriteLine("[Veldrid] VK_GOOGLE_display_timing: extension listed but function pointers are null — disabled.");
             }
 
-            // VK_EXT_debug_marker: validate all three function pointers before allowing
+            // VK_EXT_debug_marker: validate all four function pointers before allowing
             // marker calls. Some drivers list the extension but fail to load its functions.
             if (debugMarkerEnabled)
             {
                 debugMarkerEnabled = DeviceApi.vkDebugMarkerSetObjectNameEXT_ptr.Value != null
-                                  && DeviceApi.vkCmdDebugMarkerBeginEXT_ptr.Value != null;
+                                  && DeviceApi.vkCmdDebugMarkerBeginEXT_ptr.Value   != null
+                                  && DeviceApi.vkCmdDebugMarkerEndEXT_ptr.Value     != null
+                                  && DeviceApi.vkCmdDebugMarkerInsertEXT_ptr.Value  != null;
                 if (!debugMarkerEnabled)
                     Debug.WriteLine("[Veldrid] VK_EXT_debug_marker: extension listed but function pointers are null — disabled.");
             }
