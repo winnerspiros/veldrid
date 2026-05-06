@@ -1545,10 +1545,9 @@ namespace Veldrid.Vk
             // when either is true (see VkCommandList.endCurrentRenderPass).
             if (hasDynamicRendering)
             {
-                bool khrBeginAvailable = DeviceApi.vkCmdBeginRenderingKHR_ptr.Value != null;
                 bool beginOk = DeviceApi.vkCmdBeginRendering_ptr.Value != null;
+                bool khrBeginAvailable = DeviceApi.vkCmdBeginRenderingKHR_ptr.Value != null;
                 bool endOk   = DeviceApi.vkCmdEndRendering_ptr.Value != null;
-
                 bool khrEndAvailable = DeviceApi.vkCmdEndRenderingKHR_ptr.Value != null;
 
                 if (!beginOk && khrBeginAvailable)
