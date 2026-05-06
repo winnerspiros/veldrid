@@ -1574,6 +1574,7 @@ namespace Veldrid.Vk
                     endOk = false;
                     UseKhrDynamicRendering = false;
                     UseKhrEndRendering = false;
+                    Debug.WriteLine("[Veldrid] Android Adreno: dynamic rendering disabled (KHR begin/end aliases not both available); using VkRenderPass fallback.");
                 }
 
                 if (!beginOk && khrBeginAvailable)
@@ -1664,6 +1665,7 @@ namespace Veldrid.Vk
                     // Some Android Adreno drivers can expose vkQueueSubmit2/vkQueueSubmit2KHR
                     // but still crash during submit; force legacy vkQueueSubmit on this vendor.
                     HasSynchronization2 = false;
+                    Debug.WriteLine("[Veldrid] Android Adreno: synchronization2 submit path disabled; using vkQueueSubmit fallback.");
                 }
                 else if (DeviceApi.vkQueueSubmit2_ptr.Value != null)
                 {
