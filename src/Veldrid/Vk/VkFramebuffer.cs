@@ -367,6 +367,15 @@ namespace Veldrid.Vk
 
         public override void TransitionToFinalLayout(VkCommandBuffer cb)
         {
+            // Batch all sampled attachment transitions into a single vkCmdPipelineBarrier call.
+            // With ≤8 color + 1 depth attachments the upper bound is 9 barriers.
+            // Using ColorTargets.Count + 1 as the stackalloc size covers both the color
+            // targets and the single possible depth attachment without two passes.
+            var barriers = stackalloc VkImageMemoryBarrier[ColorTargets.Count + 1];
+            int n = 0;
+            VkPipelineStageFlags srcStage = VkPipelineStageFlags.None;
+            VkPipelineStageFlags dstStage = VkPipelineStageFlags.None;
+
             for (int i = 0; i < ColorTargets.Count; i++)
             {
                 var ca = ColorTargets[i];
@@ -374,27 +383,36 @@ namespace Veldrid.Vk
 
                 if ((vkTex.Usage & TextureUsage.Sampled) != 0)
                 {
-                    vkTex.TransitionImageLayout(
-                        cb,
-                        ca.MipLevel, 1,
-                        ca.ArrayLayer, 1,
-                        VkImageLayout.ShaderReadOnlyOptimal);
+                    if (vkTex.TryGetLayoutTransitionBarrier(ca.MipLevel, 1, ca.ArrayLayer, 1,
+                            VkImageLayout.ShaderReadOnlyOptimal, out var barrier, out var src, out var dst))
+                    {
+                        barriers[n++] = barrier;
+                        srcStage |= src;
+                        dstStage |= dst;
+                    }
                 }
             }
 
             if (DepthTarget != null)
             {
-                var vkTex = Util.AssertSubtype<Texture, VkTexture>(DepthTarget.Value.Target);
+                var ca = DepthTarget.Value;
+                var vkTex = Util.AssertSubtype<Texture, VkTexture>(ca.Target);
 
                 if ((vkTex.Usage & TextureUsage.Sampled) != 0)
                 {
-                    vkTex.TransitionImageLayout(
-                        cb,
-                        DepthTarget.Value.MipLevel, 1,
-                        DepthTarget.Value.ArrayLayer, 1,
-                        VkImageLayout.ShaderReadOnlyOptimal);
+                    if (vkTex.TryGetLayoutTransitionBarrier(ca.MipLevel, 1, ca.ArrayLayer, 1,
+                            VkImageLayout.ShaderReadOnlyOptimal, out var barrier, out var src, out var dst))
+                    {
+                        barriers[n++] = barrier;
+                        srcStage |= src;
+                        dstStage |= dst;
+                    }
                 }
             }
+
+            if (n > 0)
+                gd.DeviceApi.vkCmdPipelineBarrier(cb, srcStage, dstStage, VkDependencyFlags.None,
+                    0, null, 0, null, (uint)n, barriers);
         }
 
         protected override void DisposeCore()

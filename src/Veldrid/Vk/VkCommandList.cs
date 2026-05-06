@@ -1695,7 +1695,12 @@ namespace Veldrid.Vk
             //   are execution-only stages that must have empty access masks (Vulkan spec §7.6.2).
             //   Pairing them with non-zero srcAccessMask/dstAccessMask is a spec violation that
             //   can cause incorrect cache visibility on strict Vulkan implementations.
-            var srcStage = VkPipelineStageFlags.ColorAttachmentOutput | VkPipelineStageFlags.LateFragmentTests;
+            //   EarlyFragmentTests is included in srcStage because early-z writes (depth-test
+            //   passes with depth-write enabled) originate there — omitting it would leave depth
+            //   writes from early-z passes unsynchronized with subsequent readers.
+            var srcStage = VkPipelineStageFlags.ColorAttachmentOutput
+                           | VkPipelineStageFlags.EarlyFragmentTests
+                           | VkPipelineStageFlags.LateFragmentTests;
             // Cover all pipeline stages that can consume render-pass outputs:
             //   ColorAttachmentOutput / EarlyFragmentTests  → next render pass reads attachments
             //   FragmentShader / VertexShader               → sampling the output as a texture

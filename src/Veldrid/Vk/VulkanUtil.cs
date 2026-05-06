@@ -99,14 +99,14 @@ namespace Veldrid.Vk
                 srcStageFlags = VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.ComputeShader;
                 dstStageFlags = VkPipelineStageFlags.Transfer;
             }
-            else if (oldLayout == VkImageLayout.Preinitialized && newLayout == VkImageLayout.TransferSrcOptimal)
+            else if ((oldLayout == VkImageLayout.Undefined || oldLayout == VkImageLayout.Preinitialized) && newLayout == VkImageLayout.TransferSrcOptimal)
             {
                 srcAccessMask = VkAccessFlags.None;
                 dstAccessMask = VkAccessFlags.TransferRead;
                 srcStageFlags = VkPipelineStageFlags.TopOfPipe;
                 dstStageFlags = VkPipelineStageFlags.Transfer;
             }
-            else if (oldLayout == VkImageLayout.Preinitialized && newLayout == VkImageLayout.General)
+            else if ((oldLayout == VkImageLayout.Undefined || oldLayout == VkImageLayout.Preinitialized) && newLayout == VkImageLayout.General)
             {
                 srcAccessMask = VkAccessFlags.None;
                 // Storage images can be both read AND written from any shader stage.
@@ -114,7 +114,7 @@ namespace Veldrid.Vk
                 srcStageFlags = VkPipelineStageFlags.TopOfPipe;
                 dstStageFlags = VkPipelineStageFlags.ComputeShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader;
             }
-            else if (oldLayout == VkImageLayout.Preinitialized && newLayout == VkImageLayout.ShaderReadOnlyOptimal)
+            else if ((oldLayout == VkImageLayout.Undefined || oldLayout == VkImageLayout.Preinitialized) && newLayout == VkImageLayout.ShaderReadOnlyOptimal)
             {
                 srcAccessMask = VkAccessFlags.None;
                 dstAccessMask = VkAccessFlags.ShaderRead;

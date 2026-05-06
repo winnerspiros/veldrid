@@ -94,9 +94,11 @@ namespace Veldrid.Vk
                 imageCi.extent.width = Width;
                 imageCi.extent.height = Height;
                 imageCi.extent.depth = Depth;
-                // Preinitialized layout is only valid for images backed by host-visible memory.
-                // Transient images use lazily-allocated (tile-only) memory and must start as Undefined.
-                imageCi.initialLayout = isTransient ? VkImageLayout.Undefined : VkImageLayout.Preinitialized;
+                // Vulkan spec §12.8: "If the image uses a non-VK_IMAGE_TILING_LINEAR tiling, then
+                // initialLayout must be VK_IMAGE_LAYOUT_UNDEFINED." All VkTexture optimal images use
+                // VK_IMAGE_TILING_OPTIMAL, so Preinitialized is a spec violation here. Using Undefined
+                // for every optimal image is correct; the contents are always written before first read.
+                imageCi.initialLayout = VkImageLayout.Undefined;
                 imageCi.usage = VkFormats.VdToVkTextureUsage(Usage);
                 imageCi.tiling = VkImageTiling.Optimal;
                 imageCi.format = VkFormat;
@@ -153,8 +155,8 @@ namespace Veldrid.Vk
                 CheckResult(result);
 
                 imageLayouts = new VkImageLayout[subresourceCount];
-                var initialLayout = isTransient ? VkImageLayout.Undefined : VkImageLayout.Preinitialized;
-                for (int i = 0; i < imageLayouts.Length; i++) imageLayouts[i] = initialLayout;
+                // CPU tracking starts at Undefined to mirror the spec-mandated initialLayout above.
+                for (int i = 0; i < imageLayouts.Length; i++) imageLayouts[i] = VkImageLayout.Undefined;
             }
             else // isStaging
             {
