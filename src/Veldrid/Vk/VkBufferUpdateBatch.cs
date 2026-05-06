@@ -135,9 +135,16 @@ namespace Veldrid.Vk
                         combinedDstAccess |= VkAccessFlags.IndexRead;
                         combinedDstStage |= VkPipelineStageFlags.VertexInput;
                     }
-                    if ((destUsage & (BufferUsage.StructuredBufferReadOnly | BufferUsage.StructuredBufferReadWrite)) != 0)
+                    if ((destUsage & BufferUsage.StructuredBufferReadOnly) != 0)
                     {
                         combinedDstAccess |= VkAccessFlags.ShaderRead;
+                        combinedDstStage |= VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.ComputeShader;
+                    }
+                    if ((destUsage & BufferUsage.StructuredBufferReadWrite) != 0)
+                    {
+                        // Storage RW buffers can be both read and written by shaders; include ShaderWrite
+                        // so the barrier covers subsequent shader writes that follow the transfer write.
+                        combinedDstAccess |= VkAccessFlags.ShaderRead | VkAccessFlags.ShaderWrite;
                         combinedDstStage |= VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.ComputeShader;
                     }
                     if ((destUsage & BufferUsage.IndirectBuffer) != 0)

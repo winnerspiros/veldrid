@@ -307,9 +307,17 @@ namespace Veldrid.Vk
                 dstStage |= VkPipelineStageFlags.VertexInput;
             }
 
-            if ((destUsage & (BufferUsage.StructuredBufferReadOnly | BufferUsage.StructuredBufferReadWrite)) != 0)
+            if ((destUsage & BufferUsage.StructuredBufferReadOnly) != 0)
             {
                 dstAccess |= VkAccessFlags.ShaderRead;
+                dstStage |= VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.ComputeShader;
+            }
+
+            if ((destUsage & BufferUsage.StructuredBufferReadWrite) != 0)
+            {
+                // Storage RW buffers can be both read and written by shaders; include ShaderWrite
+                // so the barrier covers subsequent shader writes that follow the transfer write.
+                dstAccess |= VkAccessFlags.ShaderRead | VkAccessFlags.ShaderWrite;
                 dstStage |= VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.ComputeShader;
             }
 
@@ -789,7 +797,15 @@ namespace Veldrid.Vk
                 1,
                 &region);
 
-            if ((vkDestination.Usage & TextureUsage.Sampled) != 0) vkDestination.TransitionImageLayout(CommandBuffer, 0, 1, 0, 1, VkImageLayout.ShaderReadOnlyOptimal);
+            if ((vkDestination.Usage & TextureUsage.Sampled) != 0)
+                vkDestination.TransitionImageLayout(CommandBuffer, 0, 1, 0, 1, VkImageLayout.ShaderReadOnlyOptimal);
+
+            // Transition sampled source back to ShaderReadOnlyOptimal, consistent with
+            // CopyTextureCore which also performs an immediate post-copy back-transition.
+            // Without this the source stays in TransferSrcOptimal until appendTransitions
+            // lazily picks it up on the next draw, adding an avoidable deferred transition.
+            if ((vkSource.Usage & TextureUsage.Sampled) != 0)
+                vkSource.TransitionImageLayout(CommandBuffer, 0, 1, 0, 1, VkImageLayout.ShaderReadOnlyOptimal);
         }
 
         protected override void SetFramebufferCore(Framebuffer fb)
@@ -1674,30 +1690,22 @@ namespace Veldrid.Vk
             // notably some mobile GPUs (Adreno / Mali) in dynamic rendering mode, which lacks
             // the implicit subpass end-dependency that legacy VkRenderPass provides.
             //
-            // On Vulkan 1.3+ use granular stage masks instead of the catch-all
-            // BottomOfPipe → TopOfPipe, which forces an unnecessary full tile flush on mobile.
-            VkPipelineStageFlags srcStage;
-            VkPipelineStageFlags dstStage;
-
-            if (gd.DeviceApiVersion.IsAtLeast(1, 3))
-            {
-                srcStage = VkPipelineStageFlags.ColorAttachmentOutput | VkPipelineStageFlags.LateFragmentTests;
-                // Cover all pipeline stages that can consume render-pass outputs:
-                //   ColorAttachmentOutput / EarlyFragmentTests  → next render pass reads attachments
-                //   FragmentShader / VertexShader               → sampling the output as a texture
-                //   ComputeShader                               → compute post-process reads the output
-                //   Transfer                                    → CopyTexture / GenerateMipmaps after render pass
-                // NOTE: VertexInput (vertex/index buffer fetch) was here previously but is wrong —
-                //   render-pass outputs are never consumed in the VertexInput stage.
-                dstStage = VkPipelineStageFlags.ColorAttachmentOutput | VkPipelineStageFlags.EarlyFragmentTests
+            // Use granular stage masks (available since Vulkan 1.0) on all versions:
+            //   VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT / VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT
+            //   are execution-only stages that must have empty access masks (Vulkan spec §7.6.2).
+            //   Pairing them with non-zero srcAccessMask/dstAccessMask is a spec violation that
+            //   can cause incorrect cache visibility on strict Vulkan implementations.
+            var srcStage = VkPipelineStageFlags.ColorAttachmentOutput | VkPipelineStageFlags.LateFragmentTests;
+            // Cover all pipeline stages that can consume render-pass outputs:
+            //   ColorAttachmentOutput / EarlyFragmentTests  → next render pass reads attachments
+            //   FragmentShader / VertexShader               → sampling the output as a texture
+            //   ComputeShader                               → compute post-process reads the output
+            //   Transfer                                    → CopyTexture / GenerateMipmaps after render pass
+            // NOTE: VertexInput (vertex/index buffer fetch) was here previously but is wrong —
+            //   render-pass outputs are never consumed in the VertexInput stage.
+            var dstStage = VkPipelineStageFlags.ColorAttachmentOutput | VkPipelineStageFlags.EarlyFragmentTests
                            | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader
                            | VkPipelineStageFlags.ComputeShader | VkPipelineStageFlags.Transfer;
-            }
-            else
-            {
-                srcStage = VkPipelineStageFlags.BottomOfPipe;
-                dstStage = VkPipelineStageFlags.TopOfPipe;
-            }
 
             var memBarrier = new VkMemoryBarrier();
             memBarrier.sType = VkStructureType.MemoryBarrier;

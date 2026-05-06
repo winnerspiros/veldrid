@@ -2010,9 +2010,17 @@ namespace Veldrid.Vk
                     dstStage |= VkPipelineStageFlags.VertexInput;
                 }
 
-                if ((destUsage & (BufferUsage.StructuredBufferReadOnly | BufferUsage.StructuredBufferReadWrite)) != 0)
+                if ((destUsage & BufferUsage.StructuredBufferReadOnly) != 0)
                 {
                     dstAccess |= VkAccessFlags.ShaderRead;
+                    dstStage |= VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.ComputeShader;
+                }
+
+                if ((destUsage & BufferUsage.StructuredBufferReadWrite) != 0)
+                {
+                    // Storage RW buffers can be both read and written by shaders; include ShaderWrite
+                    // so the barrier covers subsequent shader writes that follow the transfer write.
+                    dstAccess |= VkAccessFlags.ShaderRead | VkAccessFlags.ShaderWrite;
                     dstStage |= VkPipelineStageFlags.VertexShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.ComputeShader;
                 }
 
