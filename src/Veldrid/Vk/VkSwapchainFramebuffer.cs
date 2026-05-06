@@ -124,11 +124,16 @@ namespace Veldrid.Vk
             desiredWidth = width;
             desiredHeight = height;
 
-            // Get the images
+            // Get the images. Always allocate an exact-size array: vkGetSwapchainImagesKHR on
+            // recreation may return fewer images than the previous swapchain (spec-valid; e.g.
+            // 3 → 2 on some drivers after window resize). A grow-only array would leave stale
+            // VkImage handles from the destroyed swapchain in the tail slots, and the creation
+            // loop below (scImages.Length) would then wrap them in live VkTexture objects →
+            // use-after-free / undefined GPU behaviour.
             uint scImageCount = 0;
             var result = gd.DeviceApi.vkGetSwapchainImagesKHR(deviceSwapchain, &scImageCount, null);
             CheckResult(result);
-            if (scImages.Length < scImageCount) scImages = new VkImage[(int)scImageCount];
+            scImages = new VkImage[(int)scImageCount];
             fixed (VkImage* imgPtr = scImages)
                 result = gd.DeviceApi.vkGetSwapchainImagesKHR(deviceSwapchain, &scImageCount, imgPtr);
             CheckResult(result);

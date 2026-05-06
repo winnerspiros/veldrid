@@ -505,8 +505,6 @@ namespace Veldrid.Vk
             else if (sourceIsStaging && !destIsStaging)
             {
                 var srcBuffer = srcVkTexture.StagingBuffer;
-                var srcLayout = srcVkTexture.GetSubresourceLayout(
-                    srcVkTexture.CalculateSubresource(srcMipLevel, srcBaseArrayLayer));
                 var dstImage = dstVkTexture.OptimalDeviceImage;
 
                 // Pre-copy: transition destination layers to TransferDstOptimal.
@@ -533,17 +531,11 @@ namespace Veldrid.Vk
                             0, null, 0, null, (uint)n, preCopyBarriers);
                 }
 
-                var dstSubresource = new VkImageSubresourceLayers
-                {
-                    aspectMask = (dstVkTexture.Usage & TextureUsage.DepthStencil) != 0
-                        ? FormatHelpers.IsStencilFormat(dstVkTexture.Format)
-                            ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
-                            : VkImageAspectFlags.Depth
-                        : VkImageAspectFlags.Color,
-                    layerCount = layerCount,
-                    mipLevel = dstMipLevel,
-                    baseArrayLayer = dstBaseArrayLayer
-                };
+                var dstAspect = (dstVkTexture.Usage & TextureUsage.DepthStencil) != 0
+                    ? FormatHelpers.IsStencilFormat(dstVkTexture.Format)
+                        ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+                        : VkImageAspectFlags.Depth
+                    : VkImageAspectFlags.Color;
 
                 Util.GetMipDimensions(srcVkTexture, srcMipLevel, out uint mipWidth, out uint mipHeight, out uint _);
                 uint blockSize = FormatHelpers.IsCompressedFormat(srcVkTexture.Format) ? 4u : 1u;
@@ -560,20 +552,44 @@ namespace Veldrid.Vk
                 uint copyWidth = Math.Min(width, mipWidth);
                 uint copyheight = Math.Min(height, mipHeight);
 
-                var regions = new VkBufferImageCopy
-                {
-                    bufferOffset = srcLayout.offset
-                                   + srcZ * depthPitch
-                                   + compressedY * rowPitch
-                                   + compressedX * blockSizeInBytes,
-                    bufferRowLength = bufferRowLength,
-                    bufferImageHeight = bufferImageHeight,
-                    imageExtent = new VkExtent3D { width = copyWidth, height = copyheight, depth = depth },
-                    imageOffset = new VkOffset3D { x = (int)dstX, y = (int)dstY, z = (int)dstZ },
-                    imageSubresource = dstSubresource
-                };
+                // Emit one VkBufferImageCopy region per array layer. A single region with
+                // layerCount > 1 would only be correct when all layers are contiguous at stride
+                // (bufferRowLength × bufferImageHeight × blockSizeInBytes) — matching the layout
+                // that vkCmdCopyBufferToImage implicitly assumes. But the staging buffer
+                // interleaves ALL mip levels of each layer together
+                // (layout = ComputeArrayLayerOffset + ComputeMipOffset), so when MipLevels > 1
+                // the per-layer stride in the buffer is larger than the single-mip depthPitch.
+                // Using one region per layer with the correct per-layer bufferOffset (from
+                // GetSubresourceLayout) mirrors the GPU→staging path at the copy-image-to-buffer
+                // site and is always correct regardless of MipLevels.
+                var regions = stackalloc VkBufferImageCopy[(int)layerCount];
 
-                deviceApi.vkCmdCopyBufferToImage(cb, srcBuffer, dstImage, VkImageLayout.TransferDstOptimal, 1, &regions);
+                for (uint layer = 0; layer < layerCount; layer++)
+                {
+                    var srcLayout = srcVkTexture.GetSubresourceLayout(
+                        srcVkTexture.CalculateSubresource(srcMipLevel, srcBaseArrayLayer + layer));
+
+                    regions[layer] = new VkBufferImageCopy
+                    {
+                        bufferOffset = srcLayout.offset
+                                       + srcZ * depthPitch
+                                       + compressedY * rowPitch
+                                       + compressedX * blockSizeInBytes,
+                        bufferRowLength = bufferRowLength,
+                        bufferImageHeight = bufferImageHeight,
+                        imageExtent = new VkExtent3D { width = copyWidth, height = copyheight, depth = depth },
+                        imageOffset = new VkOffset3D { x = (int)dstX, y = (int)dstY, z = (int)dstZ },
+                        imageSubresource = new VkImageSubresourceLayers
+                        {
+                            aspectMask = dstAspect,
+                            layerCount = 1,
+                            mipLevel = dstMipLevel,
+                            baseArrayLayer = dstBaseArrayLayer + layer
+                        }
+                    };
+                }
+
+                deviceApi.vkCmdCopyBufferToImage(cb, srcBuffer, dstImage, VkImageLayout.TransferDstOptimal, layerCount, regions);
 
                 // Post-copy: transition sampled destination layers back to ShaderReadOnlyOptimal.
                 // Also per-layer for the same spec-correctness reason as the pre-copy barriers.
@@ -1771,7 +1787,12 @@ namespace Veldrid.Vk
             if (activeRenderPass == dynamicRenderingSentinel)
             {
                 // Dynamic rendering path.
-                if (gd.UseKhrDynamicRendering)
+                // UseKhrDynamicRendering: the begin call used vkCmdBeginRenderingKHR, so the
+                // matching end must also use the KHR alias.
+                // UseKhrEndRendering: core vkCmdBeginRendering was used for begin (pointer was
+                // non-null) but core vkCmdEndRendering is null; use the KHR alias for end only.
+                // Both cases require vkCmdEndRenderingKHR; neither calls vkCmdEndRendering.
+                if (gd.UseKhrDynamicRendering || gd.UseKhrEndRendering)
                     gd.DeviceApi.vkCmdEndRenderingKHR(CommandBuffer);
                 else
                     gd.DeviceApi.vkCmdEndRendering(CommandBuffer);
