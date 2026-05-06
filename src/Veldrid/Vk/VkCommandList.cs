@@ -28,9 +28,7 @@ namespace Veldrid.Vk
         }
 
         private readonly VkGraphicsDevice gd;
-        private readonly List<VkTexture> preDrawSampledImages = new List<VkTexture>(32);
-
-        // Accumulated image-memory barriers for the next batched gd.DeviceApi.vkCmdPipelineBarrier flush.
+        // Accumulated image-memory barriers for the next batchedgd.DeviceApi.vkCmdPipelineBarrier flush.
         // Reused every preDrawCommand / preDispatchCommand call — no per-frame allocation.
         private readonly List<VkImageMemoryBarrier> imageBarrierBatch = new List<VkImageMemoryBarrier>(32);
         private VkPipelineStageFlags barrierBatchSrcStage;
@@ -833,62 +831,38 @@ namespace Veldrid.Vk
 
         private void preDrawCommand()
         {
-            // Flush any textures promoted from compute-storage back to shader-read.
-            appendTransitions(preDrawSampledImages, VkImageLayout.ShaderReadOnlyOptimal);
-            preDrawSampledImages.Clear();
-
-            // Only re-scan resource sets when something actually changed.
-            // An FBO switch (newFramebuffer=true) can leave attachment textures in
-            // ColorAttachmentOptimal; a newly-bound resource set may contain textures whose
-            // layout we haven't ensured yet. When neither is true every sampled texture is
-            // already in ShaderReadOnlyOptimal from the previous draw, so the scan is free.
+            // Always scan ALL graphics resource sets for texture layout transitions.
+            //
+            // The former "needScan" optimisation (skip when resource sets are unchanged) was
+            // incorrect: it depended on a preDrawSampledImages list to transition dual-use
+            // Sampled|Storage textures back to ShaderReadOnlyOptimal before the next draw.
+            // When the same storage texture was bound across consecutive draws with unchanged
+            // resource sets (needScan=false), the list would fire unconditionally and leave the
+            // texture in ShaderReadOnlyOptimal — the wrong layout for a storage image binding.
+            //
+            // TryGetLayoutTransitionBarrier is a cheap O(1) no-op when the texture is already in
+            // the target layout, so scanning all resource sets every draw costs only a handful of
+            // array reads (< 200 for a typical 8-set/10-texture-per-set setup) — negligible
+            // compared to the GPU work recorded by the surrounding draw call.
             if (currentGraphicsPipeline != null)
             {
-                bool needScan = newFramebuffer;
+                uint setCount = currentGraphicsPipeline.ResourceSetCount;
 
-                if (!needScan)
+                for (int slot = 0; slot < setCount && slot < currentGraphicsResourceSets.Length; slot++)
                 {
-                    uint resourceSetCount = currentGraphicsPipeline.ResourceSetCount;
-
-                    for (int s = 0; s < resourceSetCount && s < graphicsResourceSetsChanged.Length; s++)
+                    if (currentGraphicsResourceSets[slot].Set != null)
                     {
-                        if (graphicsResourceSetsChanged[s])
-                        {
-                            needScan = true;
-                            break;
-                        }
-                    }
-                }
+                        var vkSet = Util.AssertSubtype<ResourceSet, VkResourceSet>(currentGraphicsResourceSets[slot].Set);
+                        appendTransitions(vkSet.SampledTextures, VkImageLayout.ShaderReadOnlyOptimal);
 
-                if (needScan)
-                {
-                    uint setCount = currentGraphicsPipeline.ResourceSetCount;
-
-                    for (int slot = 0; slot < setCount && slot < currentGraphicsResourceSets.Length; slot++)
-                    {
-                        if (currentGraphicsResourceSets[slot].Set != null)
-                        {
-                            var vkSet = Util.AssertSubtype<ResourceSet, VkResourceSet>(currentGraphicsResourceSets[slot].Set);
-                            appendTransitions(vkSet.SampledTextures, VkImageLayout.ShaderReadOnlyOptimal);
-
-                            // Graphics shaders can also bind storage images (TextureReadWrite).
-                            // Transition them to General, just as the compute dispatch path does.
-                            appendTransitions(vkSet.StorageTextures, VkImageLayout.General);
-
-                            // Dual-use storage textures (Sampled | Storage) must return to
-                            // ShaderReadOnlyOptimal before the next draw so they can be sampled.
-                            for (int texIdx = 0; texIdx < vkSet.StorageTextures.Count; texIdx++)
-                            {
-                                var storageTex = vkSet.StorageTextures[texIdx];
-                                if ((storageTex.Usage & TextureUsage.Sampled) != 0)
-                                    preDrawSampledImages.Add(storageTex);
-                            }
-                        }
+                        // Graphics shaders can also bind storage images (TextureReadWrite).
+                        // Transition them to General, just as the compute dispatch path does.
+                        appendTransitions(vkSet.StorageTextures, VkImageLayout.General);
                     }
                 }
             }
 
-            // Emit all accumulated transitions as a single gd.DeviceApi.vkCmdPipelineBarrier.
+            // Emit all accumulated transitions as a single vkCmdPipelineBarrier.
             flushTransitionBarriers();
 
             if (currentGraphicsPipeline == null)
@@ -1171,12 +1145,6 @@ namespace Veldrid.Vk
 
                 appendTransitions(vkSet.SampledTextures, VkImageLayout.ShaderReadOnlyOptimal);
                 appendTransitions(vkSet.StorageTextures, VkImageLayout.General);
-
-                for (int texIdx = 0; texIdx < vkSet.StorageTextures.Count; texIdx++)
-                {
-                    var storageTex = vkSet.StorageTextures[texIdx];
-                    if ((storageTex.Usage & TextureUsage.Sampled) != 0) preDrawSampledImages.Add(storageTex);
-                }
             }
 
             flushTransitionBarriers();
