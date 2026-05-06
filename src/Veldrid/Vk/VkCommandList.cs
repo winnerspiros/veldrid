@@ -879,8 +879,17 @@ namespace Veldrid.Vk
         }
 
         // Appends layout transitions for each texture in the list to imageBarrierBatch without
-        // emitting any Vulkan commands.  VkTexture.TryGetLayoutTransitionBarrier is a no-op when
-        // the texture is already in the requested layout, so clean textures cost only an array read.
+        // emitting any Vulkan commands.
+        //
+        // Iterates per-mip-level rather than using a single full-range barrier because a texture
+        // can have subresources in different layouts after a partial CopyTexture or ResolveTexture
+        // (e.g. srcMip=2 left in TransferSrcOptimal while all other mips remain in
+        // ShaderReadOnlyOptimal). Emitting a range barrier with the wrong oldLayout is a Vulkan
+        // spec violation that can silently corrupt tile-cache state on mobile GPUs.
+        //
+        // Per-mip calls are cheap: TryGetLayoutTransitionBarrier returns false immediately
+        // (1 array read) when the subresource is already in the target layout, so the common
+        // case (all mips already correct) costs only MipLevels array reads per texture.
         private void appendTransitions(List<VkTexture> textures, VkImageLayout layout)
         {
             if (textures.Count == 0) return;
@@ -889,12 +898,15 @@ namespace Veldrid.Vk
             {
                 var tex = textures[i];
 
-                if (tex.TryGetLayoutTransitionBarrier(0, tex.MipLevels, 0, tex.ActualArrayLayers, layout,
-                        out var barrier, out var src, out var dst))
+                for (uint mip = 0; mip < tex.MipLevels; mip++)
                 {
-                    imageBarrierBatch.Add(barrier);
-                    barrierBatchSrcStage |= src;
-                    barrierBatchDstStage |= dst;
+                    if (tex.TryGetLayoutTransitionBarrier(mip, 1, 0, tex.ActualArrayLayers, layout,
+                            out var barrier, out var src, out var dst))
+                    {
+                        imageBarrierBatch.Add(barrier);
+                        barrierBatchSrcStage |= src;
+                        barrierBatchDstStage |= dst;
+                    }
                 }
             }
         }

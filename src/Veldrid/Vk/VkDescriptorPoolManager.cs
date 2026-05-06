@@ -54,7 +54,10 @@ namespace Veldrid.Vk
 
         private VkDescriptorPool getPool(DescriptorResourceCounts counts)
         {
-            // Called only from Allocate(), which already holds @lock.
+            // getPool is only ever called from Allocate(), which already holds @lock.
+            // Do NOT add a nested lock(@lock) here — System.Threading.Lock on .NET 10 is
+            // non-reentrant and would deadlock immediately.  The caller's lock is sufficient
+            // to make this method thread-safe.
             foreach (var poolInfo in pools)
             {
                 if (poolInfo.Allocate(counts))
