@@ -1528,6 +1528,9 @@ namespace Veldrid.Vk
                                   && DeviceApi.vkCmdPushDescriptorSetKHR_ptr.Value != null;
             }
 
+            bool isAndroidAdreno = OperatingSystem.IsAndroid()
+                && physicalDeviceProperties.vendorID == 0x5143; // Qualcomm
+
             // VK_KHR_dynamic_rendering: validate that the actual function pointers were
             // loaded by vkGetDeviceProcAddr. On some drivers (observed on Adreno with
             // pre-release Android system images) the extension may be listed in device
@@ -1549,6 +1552,30 @@ namespace Veldrid.Vk
                 bool khrBeginAvailable = DeviceApi.vkCmdBeginRenderingKHR_ptr.Value != null;
                 bool endOk   = DeviceApi.vkCmdEndRendering_ptr.Value != null;
                 bool khrEndAvailable = DeviceApi.vkCmdEndRenderingKHR_ptr.Value != null;
+
+                // Some Android Adreno drivers expose non-null core dynamic-rendering entry points
+                // that crash at call-site (pc=0), while the KHR aliases are valid. Prefer KHR
+                // aliases when both are available to avoid dispatching through broken core stubs.
+                if (isAndroidAdreno && khrBeginAvailable && khrEndAvailable)
+                {
+                    beginOk = true;
+                    endOk = true;
+                    UseKhrDynamicRendering = true;
+                    UseKhrEndRendering = true;
+                }
+
+                // Additional safety fallback for Android Adreno: if the KHR aliases are not both
+                // available, disable dynamic rendering entirely and fall back to VkRenderPass.
+                // This avoids startup crashes from buggy dynamic-rendering entrypoints that may
+                // still report non-null pointers yet jump to PC=0 at runtime.
+                if (isAndroidAdreno && !(khrBeginAvailable && khrEndAvailable))
+                {
+                    beginOk = false;
+                    endOk = false;
+                    UseKhrDynamicRendering = false;
+                    UseKhrEndRendering = false;
+                    Debug.WriteLine("[Veldrid] Android Adreno: dynamic rendering disabled (KHR begin/end aliases not both available); using VkRenderPass fallback.");
+                }
 
                 if (!beginOk && khrBeginAvailable)
                 {
@@ -1633,7 +1660,14 @@ namespace Veldrid.Vk
             // conformant 1.3 device, but guard defensively).
             if (hasSynchronization2)
             {
-                if (DeviceApi.vkQueueSubmit2_ptr.Value != null)
+                if (isAndroidAdreno)
+                {
+                    // Some Android Adreno drivers can expose vkQueueSubmit2/vkQueueSubmit2KHR
+                    // but still crash during submit; force legacy vkQueueSubmit on this vendor.
+                    HasSynchronization2 = false;
+                    Debug.WriteLine("[Veldrid] Android Adreno: synchronization2 submit path disabled; using vkQueueSubmit fallback.");
+                }
+                else if (DeviceApi.vkQueueSubmit2_ptr.Value != null)
                 {
                     HasSynchronization2 = true;
                 }
