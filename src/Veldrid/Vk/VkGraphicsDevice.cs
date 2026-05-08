@@ -1247,6 +1247,7 @@ namespace Veldrid.Vk
             bool hasTimelineSemaphore = DeviceApiVersion.IsAtLeast(1, 2); // Core in Vulkan 1.2
             bool hasDisplayTiming = false; // VK_GOOGLE_display_timing (Android/Qualcomm)
             bool hasPipelineCreationCacheControl = DeviceApiVersion.IsAtLeast(1, 3); // Core in Vulkan 1.3
+            bool hasPortabilitySubset = false; // VK_KHR_portability_subset (MoltenVK/macOS)
             IntPtr[] activeExtensions = new IntPtr[props.Length];
             uint activeExtensionCount = 0;
 
@@ -1300,6 +1301,7 @@ namespace Veldrid.Vk
                     {
                         activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
                         requiredInstanceExtensions.Remove(extensionName);
+                        hasPortabilitySubset = true;
                     }
                     else if (extensionName == "VK_KHR_push_descriptor")
                     {
@@ -1404,6 +1406,20 @@ namespace Veldrid.Vk
 
             deviceCreateInfo.pEnabledFeatures = &deviceFeatures;
 
+            // Detect Android Adreno BEFORE building the device pNext chain so that we
+            // can avoid requesting extension features that are known to have broken
+            // implementations on this vendor.  physicalDeviceProperties is populated by
+            // createPhysicalDevice() which runs before createLogicalDevice().
+            //
+            // Several extensions (dynamic rendering, synchronization2, fragment shading
+            // rate) are force-disabled on Adreno after device creation.  Including their
+            // feature structs in the pNext chain would ask the driver to activate features
+            // that we immediately disable in software, which is semantically incorrect and
+            // potentially confusing to the driver.  Skipping the pNext entries here is the
+            // cleanest policy: the driver is never told to enable the broken features at all.
+            bool isAndroidAdreno = OperatingSystem.IsAndroid()
+                && physicalDeviceProperties.vendorID == VK_VENDOR_ID_QUALCOMM;
+
             // Chain feature structs via pNext for extensions that require opt-in.
             VkPhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeatures;
             VkPhysicalDeviceHostImageCopyFeatures hostImageCopyFeatures;
@@ -1412,8 +1428,31 @@ namespace Veldrid.Vk
             VkPhysicalDeviceTimelineSemaphoreFeatures timelineSemaphoreFeatures;
             VkPhysicalDeviceFragmentShadingRateFeaturesKHR fragmentShadingRateFeatures;
             VkPhysicalDevicePipelineCreationCacheControlFeatures pipelineCreationCacheControlFeatures;
+            VkPhysicalDeviceMeshShaderFeaturesEXT meshShaderFeatures;
+            VkPhysicalDevicePortabilitySubsetFeaturesKHR portabilitySubsetFeatures;
 
-            if (hasDynamicRendering)
+            // VK_KHR_portability_subset: the spec requires this feature struct to be
+            // included in the device pNext chain when the extension is enabled — otherwise
+            // the behaviour is implementation-defined and validation layers report an error.
+            //
+            // Query the actual capabilities first via vkGetPhysicalDeviceFeatures2 so that
+            // we only enable features the driver reports as supported.  Asking for a feature
+            // that the driver does not support causes vkCreateDevice to fail.
+            if (hasPortabilitySubset)
+            {
+                portabilitySubsetFeatures = new VkPhysicalDevicePortabilitySubsetFeaturesKHR();
+                var features2 = new VkPhysicalDeviceFeatures2();
+                features2.pNext = &portabilitySubsetFeatures;
+                InstanceApi.vkGetPhysicalDeviceFeatures2(PhysicalDevice, &features2);
+                // Chain the queried struct directly — it already has the correct Bool32 values.
+                portabilitySubsetFeatures.pNext = deviceCreateInfo.pNext;
+                deviceCreateInfo.pNext = &portabilitySubsetFeatures;
+            }
+
+            // Android Adreno: skip — dynamic rendering is unconditionally disabled on this
+            // vendor (broken non-null stubs for vkCmdBeginRendering/vkCmdEndRendering); there
+            // is no point asking the driver to activate the feature.
+            if (hasDynamicRendering && !isAndroidAdreno)
             {
                 dynamicRenderingFeatures = new VkPhysicalDeviceDynamicRenderingFeatures();
                 dynamicRenderingFeatures.dynamicRendering = true;
@@ -1421,7 +1460,10 @@ namespace Veldrid.Vk
                 deviceCreateInfo.pNext = &dynamicRenderingFeatures;
             }
 
-            if (hasHostImageCopy)
+            // Android Adreno: skip — host image copy is unconditionally disabled on this
+            // vendor (broken non-null stubs for vkCopyMemoryToImageEXT /
+            // vkTransitionImageLayoutEXT); no point activating the feature.
+            if (hasHostImageCopy && !isAndroidAdreno)
             {
                 hostImageCopyFeatures = new VkPhysicalDeviceHostImageCopyFeatures();
                 hostImageCopyFeatures.hostImageCopy = true;
@@ -1437,7 +1479,9 @@ namespace Veldrid.Vk
                 deviceCreateInfo.pNext = &swapchainMaintenance1Features;
             }
 
-            if (hasSynchronization2)
+            // Android Adreno: skip — synchronization2 submit path is unconditionally disabled
+            // on this vendor (broken vkQueueSubmit2 stub); no point activating the feature.
+            if (hasSynchronization2 && !isAndroidAdreno)
             {
                 synchronization2Features = new VkPhysicalDeviceSynchronization2Features();
                 synchronization2Features.synchronization2 = true;
@@ -1461,16 +1505,35 @@ namespace Veldrid.Vk
                 deviceCreateInfo.pNext = &pipelineCreationCacheControlFeatures;
             }
 
-            // VK_KHR_fragment_shading_rate: explicitly request pipelineFragmentShadingRate.
-            // Without this pNext chain entry some Android drivers (e.g. Adreno) return a
-            // non-null but broken vkCmdSetFragmentShadingRateKHR stub that crashes on call
-            // (pc = 0x0, SIGSEGV on the draw thread).
-            if (hasFragmentShadingRate)
+            // VK_KHR_fragment_shading_rate: explicitly request pipelineFragmentShadingRate
+            // on non-Adreno devices. Without this pNext chain entry some Android drivers
+            // return a non-null but broken vkCmdSetFragmentShadingRateKHR stub (pc=0x0).
+            //
+            // Android Adreno: skip entirely — the feature is unconditionally disabled on
+            // this vendor (the pNext opt-in does NOT prevent the broken stub there), and
+            // requesting a feature we immediately disable is semantically incorrect.
+            if (hasFragmentShadingRate && !isAndroidAdreno)
             {
                 fragmentShadingRateFeatures = new VkPhysicalDeviceFragmentShadingRateFeaturesKHR();
                 fragmentShadingRateFeatures.pipelineFragmentShadingRate = true;
                 fragmentShadingRateFeatures.pNext = deviceCreateInfo.pNext;
                 deviceCreateInfo.pNext = &fragmentShadingRateFeatures;
+            }
+
+            // VK_EXT_mesh_shader: the Vulkan spec requires the meshShader feature to be
+            // explicitly enabled via VkPhysicalDeviceMeshShaderFeaturesEXT in pNext before
+            // calling vkCmdDrawMeshTasksEXT.  Without this struct the feature is not
+            // activated and the draw call is a spec violation (validation layers flag it,
+            // and strict drivers may reject it outright).
+            //
+            // Android Adreno: skip — mesh shaders are unconditionally disabled on this
+            // vendor (broken non-null stub); no point activating the feature.
+            if (hasMeshShader && !isAndroidAdreno)
+            {
+                meshShaderFeatures = new VkPhysicalDeviceMeshShaderFeaturesEXT();
+                meshShaderFeatures.meshShader = true;
+                meshShaderFeatures.pNext = deviceCreateInfo.pNext;
+                deviceCreateInfo.pNext = &meshShaderFeatures;
             }
 
             var layerNames = new StackList<IntPtr>();
@@ -1536,8 +1599,26 @@ namespace Veldrid.Vk
                                   && DeviceApi.vkCmdPushDescriptorSetKHR_ptr.Value != null;
             }
 
-            bool isAndroidAdreno = OperatingSystem.IsAndroid()
-                && physicalDeviceProperties.vendorID == VK_VENDOR_ID_QUALCOMM;
+            // Android Adreno: unconditionally disable push descriptors.
+            //
+            // vkCmdPushDescriptorSetKHR follows the same broken-stub pattern observed
+            // for vkCmdBeginRendering/vkCmdEndRendering on Android Adreno drivers:
+            // vkGetDeviceProcAddr returns a non-null address that internally branches
+            // to PC=0 (SIGSEGV, SI_TKILL) on the first real invocation.  The null-
+            // pointer guard (HasPushDescriptors set above) cannot detect these stubs
+            // because the address is non-null.  vkCmdPushDescriptorSetKHR is called on
+            // EVERY draw call (flushNewResourceSets → pushDescriptorSet), so the crash
+            // happens within 2 s of Vulkan initialisation, consistent with the instant
+            // crash observed on Samsung Galaxy S23 Ultra / Snapdragon 8 Gen 2 (Adreno
+            // 740) running Android 16 BP2A.250605.031.A3.
+            //
+            // The safe fallback is regular vkCmdBindDescriptorSets, which uses only core
+            // Vulkan 1.0 entry points that are always reliable.
+            if (isAndroidAdreno && HasPushDescriptors)
+            {
+                HasPushDescriptors = false;
+                Debug.WriteLine("[Veldrid] Android Adreno: push descriptors unconditionally disabled; using vkCmdBindDescriptorSets fallback.");
+            }
 
             // VK_KHR_dynamic_rendering: validate that the actual function pointers were
             // loaded by vkGetDeviceProcAddr. On some drivers (observed on Adreno with
@@ -1636,12 +1717,31 @@ namespace Veldrid.Vk
 
             // VK_EXT_host_image_copy: validate all required function pointers before enabling.
             // vkTransitionImageLayoutEXT is also needed by hostCopyToImage.
+            //
+            // Android Adreno: unconditionally disable.  The VK_EXT_host_image_copy entry
+            // points follow the same broken-stub pattern as other extension functions on
+            // this vendor: vkGetDeviceProcAddr returns a non-null address that crashes at
+            // PC=0 (SIGSEGV, SI_TKILL) on the first real invocation.  The null-pointer
+            // guard cannot detect these stubs because the address is non-null.
+            // vkCopyMemoryToImageEXT / vkTransitionImageLayoutEXT are called on every
+            // texture upload (UpdateTextureCore → hostCopyToImage), so the crash happens
+            // as soon as the application uploads its first texture — consistent with the
+            // "instant crash" pattern observed on Samsung Galaxy S23 Ultra (Adreno 740,
+            // Android 16 BP2A.250605.031.A3).
             if (hasHostImageCopy)
             {
-                HasHostImageCopy = DeviceApi.vkCopyMemoryToImageEXT_ptr.Value != null
-                                && DeviceApi.vkTransitionImageLayoutEXT_ptr.Value != null;
-                if (!HasHostImageCopy)
-                    Debug.WriteLine("[Veldrid] VK_EXT_host_image_copy: extension listed but required function pointers are null — disabled.");
+                if (isAndroidAdreno)
+                {
+                    HasHostImageCopy = false;
+                    Debug.WriteLine("[Veldrid] Android Adreno: host image copy unconditionally disabled; vkCopyMemoryToImageEXT stub is unreliable.");
+                }
+                else
+                {
+                    HasHostImageCopy = DeviceApi.vkCopyMemoryToImageEXT_ptr.Value != null
+                                    && DeviceApi.vkTransitionImageLayoutEXT_ptr.Value != null;
+                    if (!HasHostImageCopy)
+                        Debug.WriteLine("[Veldrid] VK_EXT_host_image_copy: extension listed but required function pointers are null — disabled.");
+                }
             }
 
             // VK_EXT_descriptor_indexing: detection only (core in Vulkan 1.2).
@@ -1649,22 +1749,56 @@ namespace Veldrid.Vk
             HasDescriptorIndexing = hasDescriptorIndexing;
 
             // VK_KHR_fragment_shading_rate: validate the function pointer.
-            // Without an explicit check some Android drivers (Adreno 7xx) return a non-null
-            // but broken stub; with the pNext feature opt-in above the driver should now
-            // return a correct pointer, but guard against the null case as well.
+            //
+            // Android Adreno: unconditionally disable, even when the function pointer is
+            // non-null.  The pNext opt-in (pipelineFragmentShadingRate=true chained at
+            // device-create time) was introduced to coax Android Adreno drivers into
+            // returning a working pointer instead of a broken stub, but the assumption does
+            // not hold for all driver versions: on Samsung Galaxy S23 Ultra (Adreno 740,
+            // Android 16 BP2A.250605.031.A3) the pointer is still a broken stub that crashes
+            // at PC=0 (SIGSEGV, SI_TKILL) on the first call.  Because the stub is non-null,
+            // the guard below cannot distinguish it from a working implementation; the only
+            // safe policy is the same unconditional disable applied to dynamic rendering.
+            //
+            // Non-Adreno: validate the pointer and disable if null (defensive guard for any
+            // driver that lists the extension without providing a working entry point).
             if (hasFragmentShadingRate)
             {
-                HasFragmentShadingRate = DeviceApi.vkCmdSetFragmentShadingRateKHR_ptr.Value != null;
-                if (!HasFragmentShadingRate)
-                    Debug.WriteLine("[Veldrid] VK_KHR_fragment_shading_rate: extension listed but vkCmdSetFragmentShadingRateKHR is null — disabled.");
+                if (isAndroidAdreno)
+                {
+                    HasFragmentShadingRate = false;
+                    Debug.WriteLine("[Veldrid] Android Adreno: fragment shading rate unconditionally disabled; vkCmdSetFragmentShadingRateKHR stub is unreliable.");
+                }
+                else
+                {
+                    HasFragmentShadingRate = DeviceApi.vkCmdSetFragmentShadingRateKHR_ptr.Value != null;
+                    if (!HasFragmentShadingRate)
+                        Debug.WriteLine("[Veldrid] VK_KHR_fragment_shading_rate: extension listed but vkCmdSetFragmentShadingRateKHR is null — disabled.");
+                }
             }
 
             // VK_EXT_mesh_shader: validate function pointer before enabling.
+            //
+            // Android Adreno: unconditionally disable.  The VK_EXT_mesh_shader entry points
+            // follow the same broken-stub pattern as other extension functions on this vendor:
+            // vkGetDeviceProcAddr returns a non-null address that crashes at PC=0 on first
+            // invocation.  The null-pointer guard alone cannot detect these stubs.  Since
+            // mesh shaders are not used by the known workloads (osu! on Android), the safe
+            // and conservative policy is unconditional disable, matching what we do for
+            // dynamic rendering, sync2, fragment shading rate, and push descriptors.
             if (hasMeshShader)
             {
-                HasMeshShader = DeviceApi.vkCmdDrawMeshTasksEXT_ptr.Value != null;
-                if (!HasMeshShader)
-                    Debug.WriteLine("[Veldrid] VK_EXT_mesh_shader: extension listed but vkCmdDrawMeshTasksEXT is null — disabled.");
+                if (isAndroidAdreno)
+                {
+                    HasMeshShader = false;
+                    Debug.WriteLine("[Veldrid] Android Adreno: mesh shader unconditionally disabled; vkCmdDrawMeshTasksEXT stub is unreliable.");
+                }
+                else
+                {
+                    HasMeshShader = DeviceApi.vkCmdDrawMeshTasksEXT_ptr.Value != null;
+                    if (!HasMeshShader)
+                        Debug.WriteLine("[Veldrid] VK_EXT_mesh_shader: extension listed but vkCmdDrawMeshTasksEXT is null — disabled.");
+                }
             }
 
             // VK_EXT_swapchain_maintenance1: no device function pointers required by
@@ -1705,16 +1839,34 @@ namespace Veldrid.Vk
             HasPipelineCreationCacheControl = hasPipelineCreationCacheControl;
 
             // VK_GOOGLE_display_timing: validate both function pointers before enabling.
-            // On some drivers (observed on Adreno + pre-release Android system images)
-            // the extension is listed but vkGetDeviceProcAddr returns null for its
-            // functions. Guard here so initDisplayTiming() doesn't crash through a null
-            // pointer (PC = 0x0, SIGSEGV) at swapchain creation time.
+            //
+            // Android Adreno: unconditionally disable.  vkGetRefreshCycleDurationGOOGLE
+            // follows the same broken-stub pattern observed for other extension entry
+            // points on this vendor: vkGetDeviceProcAddr returns a non-null address that
+            // crashes at PC=0 (SIGSEGV, SI_TKILL) on the first real call.  Critically,
+            // initDisplayTiming() calls vkGetRefreshCycleDurationGOOGLE at swapchain-
+            // creation time — BEFORE any rendering — so the crash happens during the
+            // VkGraphicsDevice constructor: a true "instant crash" at Vulkan init.
+            // The null-pointer guard alone cannot detect these stubs; unconditional
+            // disable on Adreno is the only safe policy.
+            //
+            // Non-Adreno: some drivers list the extension but vkGetDeviceProcAddr
+            // returns null for its functions (observed on pre-release Android images).
+            // Guard here so initDisplayTiming() doesn't crash through a null pointer.
             if (hasDisplayTiming)
             {
-                HasDisplayTiming = DeviceApi.vkGetRefreshCycleDurationGOOGLE_ptr.Value != null
-                                && DeviceApi.vkGetPastPresentationTimingGOOGLE_ptr.Value != null;
-                if (!HasDisplayTiming)
-                    Debug.WriteLine("[Veldrid] VK_GOOGLE_display_timing: extension listed but function pointers are null — disabled.");
+                if (isAndroidAdreno)
+                {
+                    HasDisplayTiming = false;
+                    Debug.WriteLine("[Veldrid] Android Adreno: display timing unconditionally disabled; vkGetRefreshCycleDurationGOOGLE stub is unreliable.");
+                }
+                else
+                {
+                    HasDisplayTiming = DeviceApi.vkGetRefreshCycleDurationGOOGLE_ptr.Value != null
+                                    && DeviceApi.vkGetPastPresentationTimingGOOGLE_ptr.Value != null;
+                    if (!HasDisplayTiming)
+                        Debug.WriteLine("[Veldrid] VK_GOOGLE_display_timing: extension listed but function pointers are null — disabled.");
+                }
             }
 
             // VK_EXT_debug_marker: validate all four function pointers before allowing
