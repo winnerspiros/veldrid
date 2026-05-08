@@ -1539,6 +1539,27 @@ namespace Veldrid.Vk
             bool isAndroidAdreno = OperatingSystem.IsAndroid()
                 && physicalDeviceProperties.vendorID == VK_VENDOR_ID_QUALCOMM;
 
+            // Android Adreno: unconditionally disable push descriptors.
+            //
+            // vkCmdPushDescriptorSetKHR follows the same broken-stub pattern observed
+            // for vkCmdBeginRendering/vkCmdEndRendering on Android Adreno drivers:
+            // vkGetDeviceProcAddr returns a non-null address that internally branches
+            // to PC=0 (SIGSEGV, SI_TKILL) on the first real invocation.  The null-
+            // pointer guard (HasPushDescriptors set above) cannot detect these stubs
+            // because the address is non-null.  vkCmdPushDescriptorSetKHR is called on
+            // EVERY draw call (flushNewResourceSets → pushDescriptorSet), so the crash
+            // happens within 2 s of Vulkan initialisation, consistent with the instant
+            // crash observed on Samsung Galaxy S23 Ultra / Snapdragon 8 Gen 2 (Adreno
+            // 740) running Android 16 BP2A.250605.031.A3.
+            //
+            // The safe fallback is regular vkCmdBindDescriptorSets, which uses only core
+            // Vulkan 1.0 entry points that are always reliable.
+            if (isAndroidAdreno && HasPushDescriptors)
+            {
+                HasPushDescriptors = false;
+                Debug.WriteLine("[Veldrid] Android Adreno: push descriptors unconditionally disabled; using vkCmdBindDescriptorSets fallback.");
+            }
+
             // VK_KHR_dynamic_rendering: validate that the actual function pointers were
             // loaded by vkGetDeviceProcAddr. On some drivers (observed on Adreno with
             // pre-release Android system images) the extension may be listed in device
@@ -1649,14 +1670,32 @@ namespace Veldrid.Vk
             HasDescriptorIndexing = hasDescriptorIndexing;
 
             // VK_KHR_fragment_shading_rate: validate the function pointer.
-            // Without an explicit check some Android drivers (Adreno 7xx) return a non-null
-            // but broken stub; with the pNext feature opt-in above the driver should now
-            // return a correct pointer, but guard against the null case as well.
+            //
+            // Android Adreno: unconditionally disable, even when the function pointer is
+            // non-null.  The pNext opt-in (pipelineFragmentShadingRate=true chained at
+            // device-create time) was introduced to coax Android Adreno drivers into
+            // returning a working pointer instead of a broken stub, but the assumption does
+            // not hold for all driver versions: on Samsung Galaxy S23 Ultra (Adreno 740,
+            // Android 16 BP2A.250605.031.A3) the pointer is still a broken stub that crashes
+            // at PC=0 (SIGSEGV, SI_TKILL) on the first call.  Because the stub is non-null,
+            // the guard below cannot distinguish it from a working implementation; the only
+            // safe policy is the same unconditional disable applied to dynamic rendering.
+            //
+            // Non-Adreno: validate the pointer and disable if null (defensive guard for any
+            // driver that lists the extension without providing a working entry point).
             if (hasFragmentShadingRate)
             {
-                HasFragmentShadingRate = DeviceApi.vkCmdSetFragmentShadingRateKHR_ptr.Value != null;
-                if (!HasFragmentShadingRate)
-                    Debug.WriteLine("[Veldrid] VK_KHR_fragment_shading_rate: extension listed but vkCmdSetFragmentShadingRateKHR is null — disabled.");
+                if (isAndroidAdreno)
+                {
+                    HasFragmentShadingRate = false;
+                    Debug.WriteLine("[Veldrid] Android Adreno: fragment shading rate unconditionally disabled; vkCmdSetFragmentShadingRateKHR stub is unreliable.");
+                }
+                else
+                {
+                    HasFragmentShadingRate = DeviceApi.vkCmdSetFragmentShadingRateKHR_ptr.Value != null;
+                    if (!HasFragmentShadingRate)
+                        Debug.WriteLine("[Veldrid] VK_KHR_fragment_shading_rate: extension listed but vkCmdSetFragmentShadingRateKHR is null — disabled.");
+                }
             }
 
             // VK_EXT_mesh_shader: validate function pointer before enabling.
