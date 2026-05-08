@@ -1969,6 +1969,15 @@ namespace Veldrid.Vk
         // otherwise have to swallow every frame until the surface settled, and
         // critically converts SURFACE_LOST from a permanent black-screen condition
         // into a single recoverable frame stall.
+        //
+        // NOTE: uses RecreateSwapchainOnly (no acquire) rather than RecreateAfterPresent
+        // (which calls recreateAndReacquire and includes an AcquireNextImage call).
+        // The caller — SwapBuffersCore — always calls acquireAndWaitNextImage immediately
+        // after this function returns, so doing an acquire here would cause a
+        // double-acquire: one extra image permanently held by the application per present
+        // failure.  On low-image-count swapchains (e.g. minImageCount=2 IMMEDIATE mode on
+        // Android), exhausting the pool causes vkAcquireNextImageKHR to time out, which
+        // triggers forced recreates on every frame and a stall cascade.
         private static void handlePresentResult(VkSwapchain vkSc, VkResult result)
         {
             if (result == VkResult.Success)
@@ -1978,7 +1987,7 @@ namespace Veldrid.Vk
                 || result == VkResult.SuboptimalKHR
                 || result == VkResult.ErrorSurfaceLostKHR)
             {
-                vkSc.RecreateAfterPresent();
+                vkSc.RecreateSwapchainOnly();
                 return;
             }
 

@@ -238,6 +238,22 @@ namespace Veldrid.Vk
             recreateAndReacquire(framebuffer.Width, framebuffer.Height);
         }
 
+        /// <summary>
+        ///     Recreates the swapchain without acquiring the next image.
+        ///     Used by <see cref="VkGraphicsDevice.handlePresentResult" /> when
+        ///     <c>vkQueuePresentKHR</c> returns an error: the caller (<see cref="VkGraphicsDevice.SwapBuffersCore" />)
+        ///     always calls <c>acquireAndWaitNextImage</c> immediately after, so the
+        ///     acquire must NOT be done here — doing it here would cause a double-acquire
+        ///     (one leaked image per present failure) that eventually starves the driver
+        ///     of acquirable images and wedges the render thread in
+        ///     <c>vkAcquireNextImageKHR</c>.
+        /// </summary>
+        public void RecreateSwapchainOnly()
+        {
+            if (!attemptRecreate(framebuffer.Width, framebuffer.Height))
+                needsRecreation = true;
+        }
+
         public bool AcquireNextImage(VkDevice device, VkSemaphore semaphore, Vortice.Vulkan.VkFence fence)
         {
             if (newSyncToVBlank != null)
