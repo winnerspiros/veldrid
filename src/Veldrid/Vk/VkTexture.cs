@@ -465,14 +465,16 @@ namespace Veldrid.Vk
             // to.").  Pre-clearing an unacquired image violates the spec and triggers
             // validation errors on strict implementations (MoltenVK, Android validation layers).
             //
-            // The images start in VK_IMAGE_LAYOUT_UNDEFINED (spec-guaranteed for newly created
-            // swapchain images).  The first render pass correctly handles this:
+            // Per Vulkan spec §34.5, the first acquisition after swapchain creation returns the
+            // image in VK_IMAGE_LAYOUT_UNDEFINED. Subsequent acquisitions (after the first
+            // present) return it in the layout it was left in — typically PresentSrcKHR (after
+            // TransitionToFinalLayout in End()). The first render pass on the first frame handles
+            // the Undefined case correctly without any pre-clear:
             //   • Dynamic rendering: beginCurrentDynamicRendering transitions Undefined →
             //     ColorAttachmentOptimal (case handled in GetTransitionParameters).
             //   • Legacy render pass: beginCurrentRenderPass transitions Undefined →
-            //     PresentSrcKHR before vkCmdBeginRenderPass (new case added to
-            //     GetTransitionParameters) so renderPassNoClear's initialLayout=PresentSrcKHR
-            //     is satisfied.
+            //     PresentSrcKHR before vkCmdBeginRenderPass (case in GetTransitionParameters)
+            //     so renderPassNoClear's initialLayout=PresentSrcKHR is satisfied.
             // Applications are always expected to issue an explicit clear on first use of the
             // swapchain (e.g. via ClearColorTarget), so no initial clear is needed here.
             if (IsSwapchainTexture)

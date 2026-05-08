@@ -393,12 +393,19 @@ namespace Veldrid.Vk
             }
             else if ((oldLayout == VkImageLayout.Undefined || oldLayout == VkImageLayout.Preinitialized) && newLayout == VkImageLayout.PresentSrcKHR)
             {
-                // First use of a newly-created or newly-acquired swapchain image in the legacy
-                // render-pass path.  renderPassNoClear declares initialLayout=PresentSrcKHR, so
-                // the image must be in PresentSrcKHR when vkCmdBeginRenderPass is called (Vulkan
-                // spec §12.8.2).  Per spec §34.5 the very first acquisition returns the image in
-                // VK_IMAGE_LAYOUT_UNDEFINED; after the first present, subsequent acquires return
-                // it in PresentSrcKHR so this barrier is only reached on the very first frame.
+                // First use of a newly-created swapchain image in the legacy render-pass path.
+                // renderPassNoClear declares initialLayout=PresentSrcKHR, so the image must be
+                // in PresentSrcKHR when vkCmdBeginRenderPass is called (Vulkan spec §12.8.2).
+                // Per spec §34.5 the very first acquisition after swapchain creation returns the
+                // image in VK_IMAGE_LAYOUT_UNDEFINED; after the first present, subsequent
+                // acquisitions return it in PresentSrcKHR, so this barrier is only reached once
+                // per swapchain image (on the very first frame after creation or recreation).
+                //
+                // Preinitialized is included to match the pattern of all other Undefined/
+                // Preinitialized → X cases in this function. Swapchain images are always
+                // created with initialLayout=Undefined (spec-mandated for optimal-tiling images),
+                // so Preinitialized is never reached in practice; it is a defensive belt-and-
+                // suspenders inclusion.
                 //
                 // srcAccessMask=None / srcStage=TopOfPipe: no prior GPU writes to make visible
                 // (Undefined means contents don't matter).
