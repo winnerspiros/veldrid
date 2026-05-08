@@ -1553,28 +1553,33 @@ namespace Veldrid.Vk
                 bool endOk   = DeviceApi.vkCmdEndRendering_ptr.Value != null;
                 bool khrEndAvailable = DeviceApi.vkCmdEndRenderingKHR_ptr.Value != null;
 
-                // Some Android Adreno drivers expose non-null core dynamic-rendering entry points
-                // that crash at call-site (pc=0), while the KHR aliases are valid. Prefer KHR
-                // aliases when both are available to avoid dispatching through broken core stubs.
-                if (isAndroidAdreno && khrBeginAvailable && khrEndAvailable)
-                {
-                    beginOk = true;
-                    endOk = true;
-                    UseKhrDynamicRendering = true;
-                    UseKhrEndRendering = true;
-                }
-
-                // Additional safety fallback for Android Adreno: if the KHR aliases are not both
-                // available, disable dynamic rendering entirely and fall back to VkRenderPass.
-                // This avoids startup crashes from buggy dynamic-rendering entrypoints that may
-                // still report non-null pointers yet jump to PC=0 at runtime.
-                if (isAndroidAdreno && !(khrBeginAvailable && khrEndAvailable))
+                // Android Adreno: always disable dynamic rendering and fall back to VkRenderPass.
+                //
+                // Both the core (vkCmdBeginRendering / vkCmdEndRendering) and KHR-alias
+                // (vkCmdBeginRenderingKHR / vkCmdEndRenderingKHR) entry points are unreliable
+                // across Android Adreno driver generations:
+                //
+                //   • Early Adreno 7xx drivers exposed only the core pointers, but those were
+                //     broken stubs (non-null addresses that jump internally to PC=0).
+                //   • Later Android 16 Adreno 7xx drivers expose the KHR aliases as well, but
+                //     those aliases are also broken stubs — they return non-null from
+                //     vkGetDeviceProcAddr yet crash at PC=0 (SIGSEGV, SEGV_MAPERR) on the first
+                //     real call (confirmed on Samsung Galaxy S23 Ultra / Snapdragon 8 Gen 2,
+                //     BP2A.250605.031.A3).
+                //
+                // Because the stubs are non-null, null-pointer checks alone cannot distinguish
+                // them from working implementations.  The only safe policy is to unconditionally
+                // disable dynamic rendering on Android Adreno and let every render pass go
+                // through the always-reliable vkCmdBeginRenderPass / vkCmdEndRenderPass path.
+                if (isAndroidAdreno)
                 {
                     beginOk = false;
                     endOk = false;
+                    khrBeginAvailable = false;
+                    khrEndAvailable = false;
                     UseKhrDynamicRendering = false;
                     UseKhrEndRendering = false;
-                    Debug.WriteLine("[Veldrid] Android Adreno: dynamic rendering disabled (KHR begin/end aliases not both available); using VkRenderPass fallback.");
+                    Debug.WriteLine("[Veldrid] Android Adreno: dynamic rendering unconditionally disabled; using VkRenderPass fallback.");
                 }
 
                 if (!beginOk && khrBeginAvailable)
@@ -1601,8 +1606,8 @@ namespace Veldrid.Vk
 
                 // When the driver has the null-vkCmdEndRendering bug (UseKhrEndRendering=true)
                 // AND vkCmdBeginRenderingKHR is available, also prefer the KHR begin path.
-                // Android 16 Adreno 7xx drivers that omit vkCmdEndRendering can simultaneously
-                // expose vkCmdBeginRendering as a non-null but broken stub — calling it crashes
+                // Some drivers that omit vkCmdEndRendering can simultaneously expose
+                // vkCmdBeginRendering as a non-null but broken stub — calling it crashes
                 // at PC=0 (SIGSEGV, SI_TKILL). Using vkCmdBeginRenderingKHR avoids the broken
                 // core stub entirely.  UseKhrDynamicRendering=true implies the KHR end path in
                 // endCurrentRenderPass as well, so UseKhrEndRendering becomes redundant here
