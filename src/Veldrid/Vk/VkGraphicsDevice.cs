@@ -1404,6 +1404,20 @@ namespace Veldrid.Vk
 
             deviceCreateInfo.pEnabledFeatures = &deviceFeatures;
 
+            // Detect Android Adreno BEFORE building the device pNext chain so that we
+            // can avoid requesting extension features that are known to have broken
+            // implementations on this vendor.  physicalDeviceProperties is populated by
+            // createPhysicalDevice() which runs before createLogicalDevice().
+            //
+            // Several extensions (dynamic rendering, synchronization2, fragment shading
+            // rate) are force-disabled on Adreno after device creation.  Including their
+            // feature structs in the pNext chain would ask the driver to activate features
+            // that we immediately disable in software, which is semantically incorrect and
+            // potentially confusing to the driver.  Skipping the pNext entries here is the
+            // cleanest policy: the driver is never told to enable the broken features at all.
+            bool isAndroidAdreno = OperatingSystem.IsAndroid()
+                && physicalDeviceProperties.vendorID == VK_VENDOR_ID_QUALCOMM;
+
             // Chain feature structs via pNext for extensions that require opt-in.
             VkPhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeatures;
             VkPhysicalDeviceHostImageCopyFeatures hostImageCopyFeatures;
@@ -1413,7 +1427,10 @@ namespace Veldrid.Vk
             VkPhysicalDeviceFragmentShadingRateFeaturesKHR fragmentShadingRateFeatures;
             VkPhysicalDevicePipelineCreationCacheControlFeatures pipelineCreationCacheControlFeatures;
 
-            if (hasDynamicRendering)
+            // Android Adreno: skip — dynamic rendering is unconditionally disabled on this
+            // vendor (broken non-null stubs for vkCmdBeginRendering/vkCmdEndRendering); there
+            // is no point asking the driver to activate the feature.
+            if (hasDynamicRendering && !isAndroidAdreno)
             {
                 dynamicRenderingFeatures = new VkPhysicalDeviceDynamicRenderingFeatures();
                 dynamicRenderingFeatures.dynamicRendering = true;
@@ -1437,7 +1454,9 @@ namespace Veldrid.Vk
                 deviceCreateInfo.pNext = &swapchainMaintenance1Features;
             }
 
-            if (hasSynchronization2)
+            // Android Adreno: skip — synchronization2 submit path is unconditionally disabled
+            // on this vendor (broken vkQueueSubmit2 stub); no point activating the feature.
+            if (hasSynchronization2 && !isAndroidAdreno)
             {
                 synchronization2Features = new VkPhysicalDeviceSynchronization2Features();
                 synchronization2Features.synchronization2 = true;
@@ -1461,11 +1480,14 @@ namespace Veldrid.Vk
                 deviceCreateInfo.pNext = &pipelineCreationCacheControlFeatures;
             }
 
-            // VK_KHR_fragment_shading_rate: explicitly request pipelineFragmentShadingRate.
-            // Without this pNext chain entry some Android drivers (e.g. Adreno) return a
-            // non-null but broken vkCmdSetFragmentShadingRateKHR stub that crashes on call
-            // (pc = 0x0, SIGSEGV on the draw thread).
-            if (hasFragmentShadingRate)
+            // VK_KHR_fragment_shading_rate: explicitly request pipelineFragmentShadingRate
+            // on non-Adreno devices. Without this pNext chain entry some Android drivers
+            // return a non-null but broken vkCmdSetFragmentShadingRateKHR stub (pc=0x0).
+            //
+            // Android Adreno: skip entirely — the feature is unconditionally disabled on
+            // this vendor (the pNext opt-in does NOT prevent the broken stub there), and
+            // requesting a feature we immediately disable is semantically incorrect.
+            if (hasFragmentShadingRate && !isAndroidAdreno)
             {
                 fragmentShadingRateFeatures = new VkPhysicalDeviceFragmentShadingRateFeaturesKHR();
                 fragmentShadingRateFeatures.pipelineFragmentShadingRate = true;
@@ -1535,9 +1557,6 @@ namespace Veldrid.Vk
                 HasPushDescriptors = MaxPushDescriptors > 0
                                   && DeviceApi.vkCmdPushDescriptorSetKHR_ptr.Value != null;
             }
-
-            bool isAndroidAdreno = OperatingSystem.IsAndroid()
-                && physicalDeviceProperties.vendorID == VK_VENDOR_ID_QUALCOMM;
 
             // Android Adreno: unconditionally disable push descriptors.
             //
@@ -1699,11 +1718,27 @@ namespace Veldrid.Vk
             }
 
             // VK_EXT_mesh_shader: validate function pointer before enabling.
+            //
+            // Android Adreno: unconditionally disable.  The VK_EXT_mesh_shader entry points
+            // follow the same broken-stub pattern as other extension functions on this vendor:
+            // vkGetDeviceProcAddr returns a non-null address that crashes at PC=0 on first
+            // invocation.  The null-pointer guard alone cannot detect these stubs.  Since
+            // mesh shaders are not used by the known workloads (osu! on Android), the safe
+            // and conservative policy is unconditional disable, matching what we do for
+            // dynamic rendering, sync2, fragment shading rate, and push descriptors.
             if (hasMeshShader)
             {
-                HasMeshShader = DeviceApi.vkCmdDrawMeshTasksEXT_ptr.Value != null;
-                if (!HasMeshShader)
-                    Debug.WriteLine("[Veldrid] VK_EXT_mesh_shader: extension listed but vkCmdDrawMeshTasksEXT is null — disabled.");
+                if (isAndroidAdreno)
+                {
+                    HasMeshShader = false;
+                    Debug.WriteLine("[Veldrid] Android Adreno: mesh shader unconditionally disabled; vkCmdDrawMeshTasksEXT stub is unreliable.");
+                }
+                else
+                {
+                    HasMeshShader = DeviceApi.vkCmdDrawMeshTasksEXT_ptr.Value != null;
+                    if (!HasMeshShader)
+                        Debug.WriteLine("[Veldrid] VK_EXT_mesh_shader: extension listed but vkCmdDrawMeshTasksEXT is null — disabled.");
+                }
             }
 
             // VK_EXT_swapchain_maintenance1: no device function pointers required by
