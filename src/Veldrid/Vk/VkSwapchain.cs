@@ -238,6 +238,22 @@ namespace Veldrid.Vk
             recreateAndReacquire(framebuffer.Width, framebuffer.Height);
         }
 
+        /// <summary>
+        ///     Recreates the swapchain without acquiring the next image.
+        ///     Used by <see cref="VkGraphicsDevice.handlePresentResult" /> when
+        ///     <c>vkQueuePresentKHR</c> returns an error: the caller (<see cref="VkGraphicsDevice.SwapBuffersCore" />)
+        ///     always calls <c>acquireAndWaitNextImage</c> immediately after, so the
+        ///     acquire must NOT be done here — doing it here would cause a double-acquire
+        ///     (one leaked image per present failure) that eventually starves the driver
+        ///     of acquirable images and wedges the render thread in
+        ///     <c>vkAcquireNextImageKHR</c>.
+        /// </summary>
+        public void RecreateSwapchainOnly()
+        {
+            if (!attemptRecreate(framebuffer.Width, framebuffer.Height))
+                needsRecreation = true;
+        }
+
         public bool AcquireNextImage(VkDevice device, VkSemaphore semaphore, Vortice.Vulkan.VkFence fence)
         {
             if (newSyncToVBlank != null)
@@ -322,11 +338,15 @@ namespace Veldrid.Vk
         // fence handle is destroyed, and the spec only forbids destruction while in
         // use by a *queue submission*; vkAcquireNextImageKHR does not enqueue a queue
         // op for the fence in the strict sense — it's signaled by the WSI layer.
-        // Even so, we vkDeviceWaitIdle first to drain any pending GPU work that
-        // could be holding a reference.
+        // Even so, we drain pending GPU work first to be conservative.
+        // NOTE: uses WaitForIdleLockFree (vkDeviceWaitIdle, no graphicsQueueLock)
+        // because this method is called from within lock(graphicsQueueLock) in the
+        // SwapBuffersCore → acquireAndWaitNextImage → AcquireNextImage →
+        // rebuildFenceAfterFailedAcquire → recreateImageAvailableFence path.
+        // WaitForIdle would attempt to re-enter the non-reentrant Lock and deadlock.
         private void recreateImageAvailableFence()
         {
-            gd.WaitForIdle();
+            gd.WaitForIdleLockFree();
             gd.DeviceApi.vkDestroyFence(imageAvailableFence, null);
             var fenceCi = new VkFenceCreateInfo();
             fenceCi.flags = VkFenceCreateFlags.None;
@@ -394,7 +414,11 @@ namespace Veldrid.Vk
         {
             try
             {
-                gd.WaitForIdle();
+                // NOTE: uses WaitForIdleLockFree (vkDeviceWaitIdle, no graphicsQueueLock)
+                // because recreateSurface is reachable from within lock(graphicsQueueLock)
+                // (SwapBuffersCore → acquireAndWaitNextImage → AcquireNextImage →
+                // recreateSurfaceAndSwapchain → recreateSurface). WaitForIdle would deadlock.
+                gd.WaitForIdleLockFree();
 
                 var oldSurface = surface;
                 var newSurface = VkSurfaceUtil.CreateSurface(gd, gd.Instance, swapchainSource);
@@ -475,7 +499,11 @@ namespace Veldrid.Vk
                 }
             }
 
-            if (deviceSwapchain != VkSwapchainKHR.Null) gd.WaitForIdle();
+            // NOTE: uses WaitForIdleLockFree (vkDeviceWaitIdle, no graphicsQueueLock) because
+            // createSwapchain is reachable from within lock(graphicsQueueLock) via
+            // SwapBuffersCore → handlePresentResult → RecreateAfterPresent → recreateAndReacquire
+            // → attemptRecreate → createSwapchain. WaitForIdle would deadlock.
+            if (deviceSwapchain != VkSwapchainKHR.Null) gd.WaitForIdleLockFree();
 
             currentImageIndex = 0;
             uint surfaceFormatCount = 0;

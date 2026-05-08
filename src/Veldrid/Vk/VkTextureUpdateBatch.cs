@@ -232,14 +232,17 @@ namespace Veldrid.Vk
                             (uint)chunkPostBarriers.Count, postBarsPtr);
                 }
 
-                pool.EndAndSubmit(cb);
-
-                // Register the staging buffer only with the last command buffer. All chunks share the same
-                // staging buffer (copies reference offsets within it), so it must not be recycled until every
-                // chunk has completed. Vulkan queue ordering guarantees that later submissions on the same
+                // Register the staging buffer BEFORE EndAndSubmit to prevent the ordering race fixed
+                // for submittedSharedCommandPools: if the GPU completes the fence between submit and
+                // registration, completeFenceSubmission would miss the entry and permanently leak the
+                // buffer.
+                // Register only with the last command buffer — all chunks share the same staging buffer
+                // (copies reference offsets within it), so it must not be recycled until every chunk
+                // has completed. Vulkan queue ordering guarantees that later submissions on the same
                 // queue complete after earlier ones, so the last fence signals only after all chunks finish.
                 if (isLastChunk)
                     gd.RegisterSubmittedStagingBuffer(cb, stagingBuffer);
+                pool.EndAndSubmit(cb);
             }
 
             stagingBuffer = null;

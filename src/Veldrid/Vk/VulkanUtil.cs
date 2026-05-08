@@ -200,6 +200,17 @@ namespace Veldrid.Vk
                 srcStageFlags = VkPipelineStageFlags.ColorAttachmentOutput;
                 dstStageFlags = VkPipelineStageFlags.BottomOfPipe;
             }
+            else if (oldLayout == VkImageLayout.TransferSrcOptimal && newLayout == VkImageLayout.PresentSrcKHR)
+            {
+                // Swapchain image used as CopyTexture source (e.g. screenshot readback) and then
+                // presented. Without a Sampled flag the post-copy back-transition is skipped, so
+                // the image stays in TransferSrcOptimal.  TransitionToFinalLayout must bring it
+                // back to PresentSrcKHR before vkQueuePresentKHR.
+                srcAccessMask = VkAccessFlags.TransferRead;
+                dstAccessMask = VkAccessFlags.MemoryRead;
+                srcStageFlags = VkPipelineStageFlags.Transfer;
+                dstStageFlags = VkPipelineStageFlags.BottomOfPipe;
+            }
             else if (oldLayout == VkImageLayout.TransferDstOptimal && newLayout == VkImageLayout.PresentSrcKHR)
             {
                 srcAccessMask = VkAccessFlags.TransferWrite;
@@ -390,6 +401,33 @@ namespace Veldrid.Vk
                 dstAccessMask = VkAccessFlags.ShaderRead | VkAccessFlags.ShaderWrite;
                 srcStageFlags = VkPipelineStageFlags.Transfer;
                 dstStageFlags = VkPipelineStageFlags.ComputeShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader;
+            }
+            else if ((oldLayout == VkImageLayout.Undefined || oldLayout == VkImageLayout.Preinitialized) && newLayout == VkImageLayout.PresentSrcKHR)
+            {
+                // First use of a newly-created swapchain image in the legacy render-pass path.
+                // renderPassNoClearInit (VkFramebuffer's render pass with initialLayout=PresentSrcKHR
+                // and loadOp=Load/DontCare) declares initialLayout=PresentSrcKHR, so the image must
+                // be in PresentSrcKHR when vkCmdBeginRenderPass is called (Vulkan spec §12.8.2).
+                // Per spec §34.5 the very first acquisition after swapchain creation returns the
+                // image in VK_IMAGE_LAYOUT_UNDEFINED; after the first present, subsequent
+                // acquisitions return it in PresentSrcKHR, so this barrier is only reached once
+                // per swapchain image (on the very first frame after creation or recreation).
+                //
+                // Preinitialized is included to match the pattern of all other Undefined/
+                // Preinitialized → X cases in this function. Swapchain images are always
+                // created with initialLayout=Undefined (spec-mandated for optimal-tiling images),
+                // so Preinitialized is never reached in practice; it is a defensive belt-and-
+                // suspenders inclusion.
+                //
+                // srcAccessMask=None / srcStage=TopOfPipe: no prior GPU writes to make visible
+                // (Undefined means contents don't matter).
+                // dstAccessMask=MemoryRead / dstStage=BottomOfPipe: the render pass subpass
+                // dependency (srcStageMask=BottomOfPipe) picks up ordering from here and drives
+                // the implicit PresentSrcKHR→ColorAttachmentOptimal transition in the subpass.
+                srcAccessMask = VkAccessFlags.None;
+                dstAccessMask = VkAccessFlags.MemoryRead;
+                srcStageFlags = VkPipelineStageFlags.TopOfPipe;
+                dstStageFlags = VkPipelineStageFlags.BottomOfPipe;
             }
             else
                 Debug.Fail("Invalid image layout transition.");

@@ -181,8 +181,10 @@ namespace Veldrid.Vk
                 0, null,
                 0, null);
 
-            pool.EndAndSubmit(cb);
+            // Register BEFORE EndAndSubmit: if the GPU completes the fence between submit and
+            // registration, completeFenceSubmission would miss the entry and permanently leak the buffer.
             gd.RegisterSubmittedStagingBuffer(cb, stagingBuffer);
+            pool.EndAndSubmit(cb);
 
             stagingBuffer = null;
             stagingOffset = 0;

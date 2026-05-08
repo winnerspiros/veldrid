@@ -136,6 +136,10 @@ namespace Veldrid.Vk
 
         private const int shared_command_pool_count = 4;
 
+        // Qualcomm/Adreno Vulkan vendor ID (PCI-SIG assigned).
+        // Used to apply Adreno-specific workarounds throughout the Vulkan backend.
+        private const uint VK_VENDOR_ID_QUALCOMM = 0x5143;
+
         // Staging Resources
         // Defaults are intentionally generous: the historical 64 B / 512 B values
         // from upstream Veldrid were vestigial and effectively bypassed the pool
@@ -890,32 +894,36 @@ namespace Veldrid.Vk
                 if (submittedFences.Count == 0)
                     return;
 
-                // Quick-check the oldest fence first; if it's not ready, none after it will be.
-                // vkGetFenceStatus is a non-blocking status query and is cheaper than vkWaitForFences(timeout=0)
-                // on drivers that treat the wait path differently.
-                if (DeviceApi.vkGetFenceStatus(submittedFences[0].Fence) != VkResult.Success)
-                    return;
-
-                // Count how many leading fences have completed, call completeFenceSubmission for
-                // each, then remove them all in a single RemoveRange(0, count) call.  The previous
-                // RemoveAt(i)/i-- pattern shifted O(n) elements per removal; RemoveRange shifts once.
-                int completedCount = 0;
-
+                // Scan ALL submitted fences — do not assume they are in completion order.
+                //
+                // When multiple threads submit command buffers concurrently (e.g. the render
+                // thread + background texture-streaming threads), the order in which fences are
+                // appended to submittedFences can differ from the order in which the GPU finishes
+                // them. In particular:
+                //   1. Thread A submits CB_A inside graphicsQueueLock, then releases the lock.
+                //   2. Thread B submits CB_B, grabs submittedFencesLock first, inserts fence_B
+                //      at index 0.
+                //   3. Thread A then inserts fence_A at index 1, even though CB_A was submitted
+                //      earlier (and will complete earlier on a FIFO GPU queue).
+                //
+                // If we had an early-out "first fence not ready → return", we would miss
+                // fence_A and permanently leak the staging texture / command pool it owns.
+                //
+                // The in-place compaction below is O(N) in the number of outstanding fences
+                // (typically 1-3 per frame) and avoids any additional allocation.
+                int writeIdx = 0;
                 for (int i = 0; i < submittedFences.Count; i++)
                 {
                     var fsi = submittedFences[i];
 
                     if (DeviceApi.vkGetFenceStatus(fsi.Fence) == VkResult.Success)
-                    {
-                        completeFenceSubmission(fsi);
-                        completedCount++;
-                    }
+                        completeFenceSubmission(fsi); // Completed: drop from list (don't copy to writeIdx).
                     else
-                        break; // Submissions are in order; later submissions cannot complete if this one hasn't.
+                        submittedFences[writeIdx++] = fsi; // Still pending: keep in list.
                 }
 
-                if (completedCount > 0)
-                    submittedFences.RemoveRange(0, completedCount);
+                if (writeIdx < submittedFences.Count)
+                    submittedFences.RemoveRange(writeIdx, submittedFences.Count - writeIdx);
             }
         }
 
@@ -1529,7 +1537,7 @@ namespace Veldrid.Vk
             }
 
             bool isAndroidAdreno = OperatingSystem.IsAndroid()
-                && physicalDeviceProperties.vendorID == 0x5143; // Qualcomm
+                && physicalDeviceProperties.vendorID == VK_VENDOR_ID_QUALCOMM;
 
             // VK_KHR_dynamic_rendering: validate that the actual function pointers were
             // loaded by vkGetDeviceProcAddr. On some drivers (observed on Adreno with
@@ -1553,28 +1561,37 @@ namespace Veldrid.Vk
                 bool endOk   = DeviceApi.vkCmdEndRendering_ptr.Value != null;
                 bool khrEndAvailable = DeviceApi.vkCmdEndRenderingKHR_ptr.Value != null;
 
-                // Some Android Adreno drivers expose non-null core dynamic-rendering entry points
-                // that crash at call-site (pc=0), while the KHR aliases are valid. Prefer KHR
-                // aliases when both are available to avoid dispatching through broken core stubs.
-                if (isAndroidAdreno && khrBeginAvailable && khrEndAvailable)
-                {
-                    beginOk = true;
-                    endOk = true;
-                    UseKhrDynamicRendering = true;
-                    UseKhrEndRendering = true;
-                }
-
-                // Additional safety fallback for Android Adreno: if the KHR aliases are not both
-                // available, disable dynamic rendering entirely and fall back to VkRenderPass.
-                // This avoids startup crashes from buggy dynamic-rendering entrypoints that may
-                // still report non-null pointers yet jump to PC=0 at runtime.
-                if (isAndroidAdreno && !(khrBeginAvailable && khrEndAvailable))
+                // Android Adreno: always disable dynamic rendering and fall back to VkRenderPass.
+                //
+                // Both the core (vkCmdBeginRendering / vkCmdEndRendering) and KHR-alias
+                // (vkCmdBeginRenderingKHR / vkCmdEndRenderingKHR) entry points are unreliable
+                // across Android Adreno driver generations:
+                //
+                //   • Early Adreno 7xx drivers exposed only the core pointers, but those were
+                //     broken stubs (non-null addresses that jump internally to PC=0).
+                //   • Later Android 16 Adreno 7xx drivers expose the KHR aliases as well, but
+                //     those aliases are also broken stubs — they return non-null from
+                //     vkGetDeviceProcAddr yet crash at PC=0 (SIGSEGV, SEGV_MAPERR) on the first
+                //     real call (confirmed on Samsung Galaxy S23 Ultra / Snapdragon 8 Gen 2,
+                //     BP2A.250605.031.A3).
+                //
+                // Because the stubs are non-null, null-pointer checks alone cannot distinguish
+                // them from working implementations.  The only safe policy is to unconditionally
+                // disable dynamic rendering on Android Adreno and let every render pass go
+                // through the always-reliable vkCmdBeginRenderPass / vkCmdEndRenderPass path.
+                if (isAndroidAdreno)
                 {
                     beginOk = false;
                     endOk = false;
+                    // khrBeginAvailable and khrEndAvailable must also be cleared so the
+                    // general-purpose fallback blocks below (which check !beginOk &&
+                    // khrBeginAvailable, and !endOk && khrEndAvailable) cannot re-enable
+                    // dynamic rendering through the broken KHR aliases.
+                    khrBeginAvailable = false;
+                    khrEndAvailable = false;
                     UseKhrDynamicRendering = false;
                     UseKhrEndRendering = false;
-                    Debug.WriteLine("[Veldrid] Android Adreno: dynamic rendering disabled (KHR begin/end aliases not both available); using VkRenderPass fallback.");
+                    Debug.WriteLine("[Veldrid] Android Adreno: dynamic rendering unconditionally disabled; using VkRenderPass fallback.");
                 }
 
                 if (!beginOk && khrBeginAvailable)
@@ -1601,8 +1618,8 @@ namespace Veldrid.Vk
 
                 // When the driver has the null-vkCmdEndRendering bug (UseKhrEndRendering=true)
                 // AND vkCmdBeginRenderingKHR is available, also prefer the KHR begin path.
-                // Android 16 Adreno 7xx drivers that omit vkCmdEndRendering can simultaneously
-                // expose vkCmdBeginRendering as a non-null but broken stub — calling it crashes
+                // Some drivers that omit vkCmdEndRendering can simultaneously expose
+                // vkCmdBeginRendering as a non-null but broken stub — calling it crashes
                 // at PC=0 (SIGSEGV, SI_TKILL). Using vkCmdBeginRenderingKHR avoids the broken
                 // core stub entirely.  UseKhrDynamicRendering=true implies the KHR end path in
                 // endCurrentRenderPass as well, so UseKhrEndRendering becomes redundant here
@@ -1956,6 +1973,15 @@ namespace Veldrid.Vk
         // otherwise have to swallow every frame until the surface settled, and
         // critically converts SURFACE_LOST from a permanent black-screen condition
         // into a single recoverable frame stall.
+        //
+        // NOTE: uses RecreateSwapchainOnly (no acquire) rather than RecreateAfterPresent
+        // (which calls recreateAndReacquire and includes an AcquireNextImage call).
+        // The caller — SwapBuffersCore — always calls acquireAndWaitNextImage immediately
+        // after this function returns, so doing an acquire here would cause a
+        // double-acquire: one extra image permanently held by the application per present
+        // failure.  On low-image-count swapchains (e.g. minImageCount=2 IMMEDIATE mode on
+        // Android), exhausting the pool causes vkAcquireNextImageKHR to time out, which
+        // triggers forced recreates on every frame and a stall cascade.
         private static void handlePresentResult(VkSwapchain vkSc, VkResult result)
         {
             if (result == VkResult.Success)
@@ -1965,7 +1991,7 @@ namespace Veldrid.Vk
                 || result == VkResult.SuboptimalKHR
                 || result == VkResult.ErrorSurfaceLostKHR)
             {
-                vkSc.RecreateAfterPresent();
+                vkSc.RecreateSwapchainOnly();
                 return;
             }
 
@@ -1984,6 +2010,22 @@ namespace Veldrid.Vk
         {
             lock (graphicsQueueLock) DeviceApi.vkQueueWaitIdle(graphicsQueue);
 
+            checkSubmittedFences();
+        }
+
+        /// <summary>
+        /// Waits for all device queues to become idle without acquiring <c>graphicsQueueLock</c>.
+        /// Use this instead of <see cref="GraphicsDevice.WaitForIdle"/> when the calling thread already holds
+        /// <c>graphicsQueueLock</c> to avoid a deadlock: <c>WaitForIdle</c> calls
+        /// <c>vkQueueWaitIdle</c> inside <c>lock (graphicsQueueLock)</c>, but
+        /// <see cref="System.Threading.Lock"/> is non-reentrant and will deadlock if the same
+        /// thread tries to acquire it a second time.
+        /// Uses <c>vkDeviceWaitIdle</c> (drains ALL queues) instead of <c>vkQueueWaitIdle</c>
+        /// on the graphics queue, which is slightly broader but safe from any call context.
+        /// </summary>
+        internal void WaitForIdleLockFree()
+        {
+            DeviceApi.vkDeviceWaitIdle();
             checkSubmittedFences();
         }
 
@@ -2130,8 +2172,11 @@ namespace Veldrid.Vk
                     0, null,
                     0, null);
 
-                pool.EndAndSubmit(cb);
+                // Register BEFORE EndAndSubmit to prevent the same ordering race fixed for
+                // submittedSharedCommandPools: if the GPU completes the fence between submit and
+                // registration, completeFenceSubmission will never find the buffer entry and it leaks.
                 lock (stagingResourcesLock) submittedStagingBuffers.Add(cb, copySrcVkBuffer);
+                pool.EndAndSubmit(cb);
             }
         }
 
@@ -2314,8 +2359,12 @@ namespace Veldrid.Vk
             {
                 var result = gd.DeviceApi.vkEndCommandBuffer(cb);
                 CheckResult(result);
-                gd.submitCommandBuffer(null, cb, 0, null, 0, null, null);
+                // Register the pool BEFORE submitCommandBuffer adds the fence to submittedFences.
+                // If the pool were registered after, completeFenceSubmission (triggered by another
+                // thread's checkSubmittedFences between the two lines) could see the fence as
+                // complete but find no matching pool entry, leaking the SharedCommandPool.
                 lock (gd.stagingResourcesLock) gd.submittedSharedCommandPools.Add(cb, this);
+                gd.submitCommandBuffer(null, cb, 0, null, 0, null, null);
             }
 
             internal void Destroy()
