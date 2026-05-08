@@ -2000,6 +2000,22 @@ namespace Veldrid.Vk
             checkSubmittedFences();
         }
 
+        /// <summary>
+        /// Waits for all device queues to become idle without acquiring <c>graphicsQueueLock</c>.
+        /// Use this instead of <see cref="GraphicsDevice.WaitForIdle"/> when the calling thread already holds
+        /// <c>graphicsQueueLock</c> to avoid a deadlock: <c>WaitForIdle</c> calls
+        /// <c>vkQueueWaitIdle</c> inside <c>lock (graphicsQueueLock)</c>, but
+        /// <see cref="System.Threading.Lock"/> is non-reentrant and will deadlock if the same
+        /// thread tries to acquire it a second time.
+        /// Uses <c>vkDeviceWaitIdle</c> (drains ALL queues) instead of <c>vkQueueWaitIdle</c>
+        /// on the graphics queue, which is slightly broader but safe from any call context.
+        /// </summary>
+        internal void WaitForIdleLockFree()
+        {
+            DeviceApi.vkDeviceWaitIdle();
+            checkSubmittedFences();
+        }
+
         private protected override void WaitForNextFrameReadyCore()
         {
         }
