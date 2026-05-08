@@ -2172,8 +2172,11 @@ namespace Veldrid.Vk
                     0, null,
                     0, null);
 
-                pool.EndAndSubmit(cb);
+                // Register BEFORE EndAndSubmit to prevent the same ordering race fixed for
+                // submittedSharedCommandPools: if the GPU completes the fence between submit and
+                // registration, completeFenceSubmission will never find the buffer entry and it leaks.
                 lock (stagingResourcesLock) submittedStagingBuffers.Add(cb, copySrcVkBuffer);
+                pool.EndAndSubmit(cb);
             }
         }
 
