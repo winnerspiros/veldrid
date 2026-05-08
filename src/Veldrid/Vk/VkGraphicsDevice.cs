@@ -1460,7 +1460,10 @@ namespace Veldrid.Vk
                 deviceCreateInfo.pNext = &dynamicRenderingFeatures;
             }
 
-            if (hasHostImageCopy)
+            // Android Adreno: skip — host image copy is unconditionally disabled on this
+            // vendor (broken non-null stubs for vkCopyMemoryToImageEXT /
+            // vkTransitionImageLayoutEXT); no point activating the feature.
+            if (hasHostImageCopy && !isAndroidAdreno)
             {
                 hostImageCopyFeatures = new VkPhysicalDeviceHostImageCopyFeatures();
                 hostImageCopyFeatures.hostImageCopy = true;
@@ -1714,12 +1717,31 @@ namespace Veldrid.Vk
 
             // VK_EXT_host_image_copy: validate all required function pointers before enabling.
             // vkTransitionImageLayoutEXT is also needed by hostCopyToImage.
+            //
+            // Android Adreno: unconditionally disable.  The VK_EXT_host_image_copy entry
+            // points follow the same broken-stub pattern as other extension functions on
+            // this vendor: vkGetDeviceProcAddr returns a non-null address that crashes at
+            // PC=0 (SIGSEGV, SI_TKILL) on the first real invocation.  The null-pointer
+            // guard cannot detect these stubs because the address is non-null.
+            // vkCopyMemoryToImageEXT / vkTransitionImageLayoutEXT are called on every
+            // texture upload (UpdateTextureCore → hostCopyToImage), so the crash happens
+            // as soon as the application uploads its first texture — consistent with the
+            // "instant crash" pattern observed on Samsung Galaxy S23 Ultra (Adreno 740,
+            // Android 16 BP2A.250605.031.A3).
             if (hasHostImageCopy)
             {
-                HasHostImageCopy = DeviceApi.vkCopyMemoryToImageEXT_ptr.Value != null
-                                && DeviceApi.vkTransitionImageLayoutEXT_ptr.Value != null;
-                if (!HasHostImageCopy)
-                    Debug.WriteLine("[Veldrid] VK_EXT_host_image_copy: extension listed but required function pointers are null — disabled.");
+                if (isAndroidAdreno)
+                {
+                    HasHostImageCopy = false;
+                    Debug.WriteLine("[Veldrid] Android Adreno: host image copy unconditionally disabled; vkCopyMemoryToImageEXT stub is unreliable.");
+                }
+                else
+                {
+                    HasHostImageCopy = DeviceApi.vkCopyMemoryToImageEXT_ptr.Value != null
+                                    && DeviceApi.vkTransitionImageLayoutEXT_ptr.Value != null;
+                    if (!HasHostImageCopy)
+                        Debug.WriteLine("[Veldrid] VK_EXT_host_image_copy: extension listed but required function pointers are null — disabled.");
+                }
             }
 
             // VK_EXT_descriptor_indexing: detection only (core in Vulkan 1.2).
@@ -1817,16 +1839,34 @@ namespace Veldrid.Vk
             HasPipelineCreationCacheControl = hasPipelineCreationCacheControl;
 
             // VK_GOOGLE_display_timing: validate both function pointers before enabling.
-            // On some drivers (observed on Adreno + pre-release Android system images)
-            // the extension is listed but vkGetDeviceProcAddr returns null for its
-            // functions. Guard here so initDisplayTiming() doesn't crash through a null
-            // pointer (PC = 0x0, SIGSEGV) at swapchain creation time.
+            //
+            // Android Adreno: unconditionally disable.  vkGetRefreshCycleDurationGOOGLE
+            // follows the same broken-stub pattern observed for other extension entry
+            // points on this vendor: vkGetDeviceProcAddr returns a non-null address that
+            // crashes at PC=0 (SIGSEGV, SI_TKILL) on the first real call.  Critically,
+            // initDisplayTiming() calls vkGetRefreshCycleDurationGOOGLE at swapchain-
+            // creation time — BEFORE any rendering — so the crash happens during the
+            // VkGraphicsDevice constructor: a true "instant crash" at Vulkan init.
+            // The null-pointer guard alone cannot detect these stubs; unconditional
+            // disable on Adreno is the only safe policy.
+            //
+            // Non-Adreno: some drivers list the extension but vkGetDeviceProcAddr
+            // returns null for its functions (observed on pre-release Android images).
+            // Guard here so initDisplayTiming() doesn't crash through a null pointer.
             if (hasDisplayTiming)
             {
-                HasDisplayTiming = DeviceApi.vkGetRefreshCycleDurationGOOGLE_ptr.Value != null
-                                && DeviceApi.vkGetPastPresentationTimingGOOGLE_ptr.Value != null;
-                if (!HasDisplayTiming)
-                    Debug.WriteLine("[Veldrid] VK_GOOGLE_display_timing: extension listed but function pointers are null — disabled.");
+                if (isAndroidAdreno)
+                {
+                    HasDisplayTiming = false;
+                    Debug.WriteLine("[Veldrid] Android Adreno: display timing unconditionally disabled; vkGetRefreshCycleDurationGOOGLE stub is unreliable.");
+                }
+                else
+                {
+                    HasDisplayTiming = DeviceApi.vkGetRefreshCycleDurationGOOGLE_ptr.Value != null
+                                    && DeviceApi.vkGetPastPresentationTimingGOOGLE_ptr.Value != null;
+                    if (!HasDisplayTiming)
+                        Debug.WriteLine("[Veldrid] VK_GOOGLE_display_timing: extension listed but function pointers are null — disabled.");
+                }
             }
 
             // VK_EXT_debug_marker: validate all four function pointers before allowing
