@@ -472,9 +472,9 @@ namespace Veldrid.Vk
             // the Undefined case correctly without any pre-clear:
             //   • Dynamic rendering: beginCurrentDynamicRendering transitions Undefined →
             //     ColorAttachmentOptimal (case handled in GetTransitionParameters).
-            //   • Legacy render pass: beginCurrentRenderPass transitions Undefined →
+            //   • Legacy render pass: VkCommandList.beginCurrentRenderPass() transitions Undefined →
             //     PresentSrcKHR before vkCmdBeginRenderPass (case in GetTransitionParameters)
-            //     so renderPassNoClear's initialLayout=PresentSrcKHR is satisfied.
+            //     so renderPassNoClearInit's initialLayout=PresentSrcKHR is satisfied.
             // Applications are always expected to issue an explicit clear on first use of the
             // swapchain (e.g. via ClearColorTarget), so no initial clear is needed here.
             if (IsSwapchainTexture)
