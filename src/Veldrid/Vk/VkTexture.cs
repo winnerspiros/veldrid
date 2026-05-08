@@ -459,6 +459,25 @@ namespace Veldrid.Vk
             if ((Usage & TextureUsage.Transient) != 0)
                 return;
 
+            // Swapchain images must NOT be used in any command buffer before the application
+            // has acquired them via vkAcquireNextImageKHR (Vulkan spec §34.5: "An application
+            // must acquire a presentable image before its contents can be read from or written
+            // to.").  Pre-clearing an unacquired image violates the spec and triggers
+            // validation errors on strict implementations (MoltenVK, Android validation layers).
+            //
+            // The images start in VK_IMAGE_LAYOUT_UNDEFINED (spec-guaranteed for newly created
+            // swapchain images).  The first render pass correctly handles this:
+            //   • Dynamic rendering: beginCurrentDynamicRendering transitions Undefined →
+            //     ColorAttachmentOptimal (case handled in GetTransitionParameters).
+            //   • Legacy render pass: beginCurrentRenderPass transitions Undefined →
+            //     PresentSrcKHR before vkCmdBeginRenderPass (new case added to
+            //     GetTransitionParameters) so renderPassNoClear's initialLayout=PresentSrcKHR
+            //     is satisfied.
+            // Applications are always expected to issue an explicit clear on first use of the
+            // swapchain (e.g. via ClearColorTarget), so no initial clear is needed here.
+            if (IsSwapchainTexture)
+                return;
+
             // If the image is going to be used as a render target, we need to clear the data before its first use.
             if ((Usage & TextureUsage.RenderTarget) != 0)
                 gd.ClearColorTexture(this, new VkClearColorValue(0, 0, 0, 0));

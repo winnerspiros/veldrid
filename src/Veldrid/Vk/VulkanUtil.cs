@@ -391,6 +391,25 @@ namespace Veldrid.Vk
                 srcStageFlags = VkPipelineStageFlags.Transfer;
                 dstStageFlags = VkPipelineStageFlags.ComputeShader | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader;
             }
+            else if ((oldLayout == VkImageLayout.Undefined || oldLayout == VkImageLayout.Preinitialized) && newLayout == VkImageLayout.PresentSrcKHR)
+            {
+                // First use of a newly-created or newly-acquired swapchain image in the legacy
+                // render-pass path.  renderPassNoClear declares initialLayout=PresentSrcKHR, so
+                // the image must be in PresentSrcKHR when vkCmdBeginRenderPass is called (Vulkan
+                // spec §12.8.2).  Per spec §34.5 the very first acquisition returns the image in
+                // VK_IMAGE_LAYOUT_UNDEFINED; after the first present, subsequent acquires return
+                // it in PresentSrcKHR so this barrier is only reached on the very first frame.
+                //
+                // srcAccessMask=None / srcStage=TopOfPipe: no prior GPU writes to make visible
+                // (Undefined means contents don't matter).
+                // dstAccessMask=MemoryRead / dstStage=BottomOfPipe: the render pass subpass
+                // dependency (srcStageMask=BottomOfPipe) picks up ordering from here and drives
+                // the implicit PresentSrcKHR→ColorAttachmentOptimal transition in the subpass.
+                srcAccessMask = VkAccessFlags.None;
+                dstAccessMask = VkAccessFlags.MemoryRead;
+                srcStageFlags = VkPipelineStageFlags.TopOfPipe;
+                dstStageFlags = VkPipelineStageFlags.BottomOfPipe;
+            }
             else
                 Debug.Fail("Invalid image layout transition.");
         }
