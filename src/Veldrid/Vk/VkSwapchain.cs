@@ -341,8 +341,9 @@ namespace Veldrid.Vk
         // Even so, we drain pending GPU work first to be conservative.
         // NOTE: uses WaitForIdleLockFree (vkDeviceWaitIdle, no graphicsQueueLock)
         // because this method is called from within lock(graphicsQueueLock) in the
-        // SwapBuffersCore → acquireAndWaitNextImage path. WaitForIdle would attempt
-        // to re-enter the non-reentrant Lock and deadlock the render thread.
+        // SwapBuffersCore → acquireAndWaitNextImage → AcquireNextImage →
+        // rebuildFenceAfterFailedAcquire → recreateImageAvailableFence path.
+        // WaitForIdle would attempt to re-enter the non-reentrant Lock and deadlock.
         private void recreateImageAvailableFence()
         {
             gd.WaitForIdleLockFree();
@@ -416,7 +417,7 @@ namespace Veldrid.Vk
                 // NOTE: uses WaitForIdleLockFree (vkDeviceWaitIdle, no graphicsQueueLock)
                 // because recreateSurface is reachable from within lock(graphicsQueueLock)
                 // (SwapBuffersCore → acquireAndWaitNextImage → AcquireNextImage →
-                // recreateSurfaceAndSwapchain). WaitForIdle would deadlock.
+                // recreateSurfaceAndSwapchain → recreateSurface). WaitForIdle would deadlock.
                 gd.WaitForIdleLockFree();
 
                 var oldSurface = surface;
