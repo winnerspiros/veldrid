@@ -1247,6 +1247,7 @@ namespace Veldrid.Vk
             bool hasTimelineSemaphore = DeviceApiVersion.IsAtLeast(1, 2); // Core in Vulkan 1.2
             bool hasDisplayTiming = false; // VK_GOOGLE_display_timing (Android/Qualcomm)
             bool hasPipelineCreationCacheControl = DeviceApiVersion.IsAtLeast(1, 3); // Core in Vulkan 1.3
+            bool hasPortabilitySubset = false; // VK_KHR_portability_subset (MoltenVK/macOS)
             IntPtr[] activeExtensions = new IntPtr[props.Length];
             uint activeExtensionCount = 0;
 
@@ -1300,6 +1301,7 @@ namespace Veldrid.Vk
                     {
                         activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
                         requiredInstanceExtensions.Remove(extensionName);
+                        hasPortabilitySubset = true;
                     }
                     else if (extensionName == "VK_KHR_push_descriptor")
                     {
@@ -1426,6 +1428,26 @@ namespace Veldrid.Vk
             VkPhysicalDeviceTimelineSemaphoreFeatures timelineSemaphoreFeatures;
             VkPhysicalDeviceFragmentShadingRateFeaturesKHR fragmentShadingRateFeatures;
             VkPhysicalDevicePipelineCreationCacheControlFeatures pipelineCreationCacheControlFeatures;
+            VkPhysicalDeviceMeshShaderFeaturesEXT meshShaderFeatures;
+            VkPhysicalDevicePortabilitySubsetFeaturesKHR portabilitySubsetFeatures;
+
+            // VK_KHR_portability_subset: the spec requires this feature struct to be
+            // included in the device pNext chain when the extension is enabled — otherwise
+            // the behaviour is implementation-defined and validation layers report an error.
+            //
+            // Query the actual capabilities first via vkGetPhysicalDeviceFeatures2 so that
+            // we only enable features the driver reports as supported.  Asking for a feature
+            // that the driver does not support causes vkCreateDevice to fail.
+            if (hasPortabilitySubset)
+            {
+                portabilitySubsetFeatures = new VkPhysicalDevicePortabilitySubsetFeaturesKHR();
+                var features2 = new VkPhysicalDeviceFeatures2();
+                features2.pNext = &portabilitySubsetFeatures;
+                InstanceApi.vkGetPhysicalDeviceFeatures2(PhysicalDevice, &features2);
+                // Chain the queried struct directly — it already has the correct Bool32 values.
+                portabilitySubsetFeatures.pNext = deviceCreateInfo.pNext;
+                deviceCreateInfo.pNext = &portabilitySubsetFeatures;
+            }
 
             // Android Adreno: skip — dynamic rendering is unconditionally disabled on this
             // vendor (broken non-null stubs for vkCmdBeginRendering/vkCmdEndRendering); there
@@ -1493,6 +1515,22 @@ namespace Veldrid.Vk
                 fragmentShadingRateFeatures.pipelineFragmentShadingRate = true;
                 fragmentShadingRateFeatures.pNext = deviceCreateInfo.pNext;
                 deviceCreateInfo.pNext = &fragmentShadingRateFeatures;
+            }
+
+            // VK_EXT_mesh_shader: the Vulkan spec requires the meshShader feature to be
+            // explicitly enabled via VkPhysicalDeviceMeshShaderFeaturesEXT in pNext before
+            // calling vkCmdDrawMeshTasksEXT.  Without this struct the feature is not
+            // activated and the draw call is a spec violation (validation layers flag it,
+            // and strict drivers may reject it outright).
+            //
+            // Android Adreno: skip — mesh shaders are unconditionally disabled on this
+            // vendor (broken non-null stub); no point activating the feature.
+            if (hasMeshShader && !isAndroidAdreno)
+            {
+                meshShaderFeatures = new VkPhysicalDeviceMeshShaderFeaturesEXT();
+                meshShaderFeatures.meshShader = true;
+                meshShaderFeatures.pNext = deviceCreateInfo.pNext;
+                deviceCreateInfo.pNext = &meshShaderFeatures;
             }
 
             var layerNames = new StackList<IntPtr>();
