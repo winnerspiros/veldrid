@@ -136,6 +136,10 @@ namespace Veldrid.Vk
 
         private const int shared_command_pool_count = 4;
 
+        // Qualcomm/Adreno Vulkan vendor ID (PCI-SIG assigned).
+        // Used to apply Adreno-specific workarounds throughout the Vulkan backend.
+        private const uint VK_VENDOR_ID_QUALCOMM = 0x5143;
+
         // Staging Resources
         // Defaults are intentionally generous: the historical 64 B / 512 B values
         // from upstream Veldrid were vestigial and effectively bypassed the pool
@@ -1529,7 +1533,7 @@ namespace Veldrid.Vk
             }
 
             bool isAndroidAdreno = OperatingSystem.IsAndroid()
-                && physicalDeviceProperties.vendorID == 0x5143; // Qualcomm
+                && physicalDeviceProperties.vendorID == VK_VENDOR_ID_QUALCOMM;
 
             // VK_KHR_dynamic_rendering: validate that the actual function pointers were
             // loaded by vkGetDeviceProcAddr. On some drivers (observed on Adreno with
@@ -1575,6 +1579,10 @@ namespace Veldrid.Vk
                 {
                     beginOk = false;
                     endOk = false;
+                    // khrBeginAvailable and khrEndAvailable must also be cleared so the
+                    // general-purpose fallback blocks below (which check !beginOk &&
+                    // khrBeginAvailable, and !endOk && khrEndAvailable) cannot re-enable
+                    // dynamic rendering through the broken KHR aliases.
                     khrBeginAvailable = false;
                     khrEndAvailable = false;
                     UseKhrDynamicRendering = false;
