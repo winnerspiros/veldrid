@@ -894,32 +894,36 @@ namespace Veldrid.Vk
                 if (submittedFences.Count == 0)
                     return;
 
-                // Quick-check the oldest fence first; if it's not ready, none after it will be.
-                // vkGetFenceStatus is a non-blocking status query and is cheaper than vkWaitForFences(timeout=0)
-                // on drivers that treat the wait path differently.
-                if (DeviceApi.vkGetFenceStatus(submittedFences[0].Fence) != VkResult.Success)
-                    return;
-
-                // Count how many leading fences have completed, call completeFenceSubmission for
-                // each, then remove them all in a single RemoveRange(0, count) call.  The previous
-                // RemoveAt(i)/i-- pattern shifted O(n) elements per removal; RemoveRange shifts once.
-                int completedCount = 0;
-
+                // Scan ALL submitted fences — do not assume they are in completion order.
+                //
+                // When multiple threads submit command buffers concurrently (e.g. the render
+                // thread + background texture-streaming threads), the order in which fences are
+                // appended to submittedFences can differ from the order in which the GPU finishes
+                // them. In particular:
+                //   1. Thread A submits CB_A inside graphicsQueueLock, then releases the lock.
+                //   2. Thread B submits CB_B, grabs submittedFencesLock first, inserts fence_B
+                //      at index 0.
+                //   3. Thread A then inserts fence_A at index 1, even though CB_A was submitted
+                //      earlier (and will complete earlier on a FIFO GPU queue).
+                //
+                // If we had an early-out "first fence not ready → return", we would miss
+                // fence_A and permanently leak the staging texture / command pool it owns.
+                //
+                // The in-place compaction below is O(N) in the number of outstanding fences
+                // (typically 1-3 per frame) and avoids any additional allocation.
+                int writeIdx = 0;
                 for (int i = 0; i < submittedFences.Count; i++)
                 {
                     var fsi = submittedFences[i];
 
                     if (DeviceApi.vkGetFenceStatus(fsi.Fence) == VkResult.Success)
-                    {
-                        completeFenceSubmission(fsi);
-                        completedCount++;
-                    }
+                        completeFenceSubmission(fsi); // Completed: drop from list (don't copy to writeIdx).
                     else
-                        break; // Submissions are in order; later submissions cannot complete if this one hasn't.
+                        submittedFences[writeIdx++] = fsi; // Still pending: keep in list.
                 }
 
-                if (completedCount > 0)
-                    submittedFences.RemoveRange(0, completedCount);
+                if (writeIdx < submittedFences.Count)
+                    submittedFences.RemoveRange(writeIdx, submittedFences.Count - writeIdx);
             }
         }
 
@@ -2352,8 +2356,12 @@ namespace Veldrid.Vk
             {
                 var result = gd.DeviceApi.vkEndCommandBuffer(cb);
                 CheckResult(result);
-                gd.submitCommandBuffer(null, cb, 0, null, 0, null, null);
+                // Register the pool BEFORE submitCommandBuffer adds the fence to submittedFences.
+                // If the pool were registered after, completeFenceSubmission (triggered by another
+                // thread's checkSubmittedFences between the two lines) could see the fence as
+                // complete but find no matching pool entry, leaking the SharedCommandPool.
                 lock (gd.stagingResourcesLock) gd.submittedSharedCommandPools.Add(cb, this);
+                gd.submitCommandBuffer(null, cb, 0, null, 0, null, null);
             }
 
             internal void Destroy()

@@ -200,6 +200,17 @@ namespace Veldrid.Vk
                 srcStageFlags = VkPipelineStageFlags.ColorAttachmentOutput;
                 dstStageFlags = VkPipelineStageFlags.BottomOfPipe;
             }
+            else if (oldLayout == VkImageLayout.TransferSrcOptimal && newLayout == VkImageLayout.PresentSrcKHR)
+            {
+                // Swapchain image used as CopyTexture source (e.g. screenshot readback) and then
+                // presented. Without a Sampled flag the post-copy back-transition is skipped, so
+                // the image stays in TransferSrcOptimal.  TransitionToFinalLayout must bring it
+                // back to PresentSrcKHR before vkQueuePresentKHR.
+                srcAccessMask = VkAccessFlags.TransferRead;
+                dstAccessMask = VkAccessFlags.MemoryRead;
+                srcStageFlags = VkPipelineStageFlags.Transfer;
+                dstStageFlags = VkPipelineStageFlags.BottomOfPipe;
+            }
             else if (oldLayout == VkImageLayout.TransferDstOptimal && newLayout == VkImageLayout.PresentSrcKHR)
             {
                 srcAccessMask = VkAccessFlags.TransferWrite;

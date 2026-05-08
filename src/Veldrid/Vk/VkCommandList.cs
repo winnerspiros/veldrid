@@ -200,6 +200,19 @@ namespace Veldrid.Vk
                 endCurrentRenderPass();
                 currentFramebuffer!.TransitionToFinalLayout(CommandBuffer);
             }
+            else if (currentFramebufferEverActive && currentFramebuffer != null)
+            {
+                // The render pass was already ended mid-frame (e.g. by ensureNoRenderPass()
+                // called from CopyTexture or Dispatch) and no SetFramebufferCore was called
+                // after (which would have reset currentFramebufferEverActive=false). In that
+                // case endCurrentRenderPass() set activeRenderPass=Null without calling
+                // TransitionToFinalLayout, leaving the framebuffer attachments in their
+                // intermediate layout (ColorAttachmentOptimal for colour, or whatever layout
+                // a copy left them in). We must emit the final-layout transition now so that
+                // the swapchain image is in PresentSrcKHR before vkQueuePresentKHR, and
+                // sampled attachments are in ShaderReadOnlyOptimal before the next sample.
+                currentFramebuffer.TransitionToFinalLayout(CommandBuffer);
+            }
 
             gd.DeviceApi.vkEndCommandBuffer(CommandBuffer);
             submittedCommandBuffers.Add(CommandBuffer);
