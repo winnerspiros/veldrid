@@ -1,7 +1,7 @@
 // Veldrid.SmokeTest — headless backend sanity check for CI.
 //
 // Usage:
-//   Veldrid.SmokeTest --backend <name>
+//   Veldrid.SmokeTest --backend <name> [--validation]
 //
 // Supported backend names:
 //   vulkan         Vulkan (use VK_ICD_FILENAMES=.../lvp_icd.json for lavapipe on Linux)
@@ -11,11 +11,21 @@
 //   d3d12-warp     D3D12 on the WARP software adapter  (Windows only)
 //   metal          Metal (macOS / iOS only)
 //
+// Options:
+//   --validation   Enable the Vulkan validation layer (VK_LAYER_KHRONOS_validation).
+//                  Requires the vulkan-validationlayers package to be installed.
+//                  Ignored for non-Vulkan backends.
+//
 // The test:
 //   1. Creates a headless GraphicsDevice (no window / no swapchain).
 //   2. Allocates a staging DeviceBuffer, uploads a known pattern, reads it back, verifies.
 //   3. Allocates a 64x64 RGBA8_UNorm render-target Texture (no draw, just allocation).
-//   4. Prints a PASS line and exits 0, or prints the exception and exits 1.
+//   4. Clears the render-target to a known color via a CommandList, copies it to a staging
+//      texture, reads back the pixel data and verifies the expected RGBA values.
+//      This exercises: Framebuffer creation, CommandList recording, SetFramebuffer,
+//      ClearColorTarget, CopyTexture, and staging-texture readback — the full render path
+//      without needing any shaders.
+//   5. Prints a PASS line and exits 0, or prints the exception and exits 1.
 
 using System;
 using System.Runtime.InteropServices;
@@ -27,27 +37,29 @@ return Run(args);
 static int Run(string[] args)
 {
     string? backendArg = null;
-    for (int i = 0; i < args.Length - 1; i++)
+    bool validation = false;
+
+    for (int i = 0; i < args.Length; i++)
     {
-        if (args[i] == "--backend")
-        {
-            backendArg = args[i + 1].ToLowerInvariant();
-            break;
-        }
+        if (args[i] == "--backend" && i + 1 < args.Length)
+            backendArg = args[++i].ToLowerInvariant();
+        else if (args[i] == "--validation")
+            validation = true;
     }
 
     if (backendArg == null)
     {
-        Console.Error.WriteLine("Usage: Veldrid.SmokeTest --backend <vulkan|d3d11|d3d11-warp|d3d12|d3d12-warp|metal>");
+        Console.Error.WriteLine("Usage: Veldrid.SmokeTest --backend <vulkan|d3d11|d3d11-warp|d3d12|d3d12-warp|metal> [--validation]");
         return 1;
     }
 
     try
     {
-        using GraphicsDevice gd = CreateDevice(backendArg);
+        using GraphicsDevice gd = CreateDevice(backendArg, validation);
         Console.WriteLine($"[smoke] backend={gd.BackendType} device=\"{gd.DeviceName}\" vendor=\"{gd.VendorName}\"");
         RunBufferRoundTrip(gd);
         RunTextureAllocation(gd);
+        RunClearAndReadback(gd);
         Console.WriteLine($"[smoke] PASS — {gd.BackendType} ({gd.DeviceName})");
         return 0;
     }
@@ -58,11 +70,13 @@ static int Run(string[] args)
     }
 }
 
-static GraphicsDevice CreateDevice(string backend)
+static GraphicsDevice CreateDevice(string backend, bool validation)
 {
     var options = new GraphicsDeviceOptions
     {
-        Debug = false,
+        // Enable the Vulkan validation layer (VK_LAYER_KHRONOS_validation) when requested.
+        // For other backends Debug=true enables backend-specific debug features.
+        Debug = validation,
         HasMainSwapchain = false,
     };
 
@@ -179,3 +193,92 @@ static void RunTextureAllocation(GraphicsDevice gd)
     using Texture tex = gd.ResourceFactory.CreateTexture(texDesc);
     Console.WriteLine($"[smoke] texture allocation OK (64x64 RenderTarget, format={tex.Format})");
 }
+
+// Clear a 16x16 render-target to a known color (orange: R=255, G=128, B=0, A=255),
+// copy it to a staging texture, read back the first pixel, and verify.
+//
+// This exercises (without needing any shaders):
+//   - Framebuffer creation
+//   - CommandList recording: Begin, SetFramebuffer, ClearColorTarget, End
+//   - A second CommandList: CopyTexture (image-to-buffer via vkCmdCopyImageToBuffer)
+//   - GPU submission (SubmitCommands + WaitForIdle) for each pass
+//   - Staging texture mapping and pixel readback
+//
+// Note: ClearColorTarget queues a clear value that is applied at render-pass BEGIN
+// (as VkAttachmentDescription.loadOp = Clear). In Veldrid's Vulkan backend the render
+// pass starts lazily — it is opened by End() when no draw commands were recorded.
+// The copy must therefore happen in a SEPARATE command list submitted after the clear
+// has completed on the GPU, otherwise CopyTexture would capture the pre-clear content.
+static unsafe void RunClearAndReadback(GraphicsDevice gd)
+{
+    const uint size = 16;
+    const PixelFormat fmt = PixelFormat.R8G8B8A8UNorm;
+    var clearColor = new RgbaFloat(1.0f, 0.5f, 0.0f, 1.0f); // orange
+
+    // Render-target texture
+    using Texture rtTex = gd.ResourceFactory.CreateTexture(
+        TextureDescription.Texture2D(size, size, 1, 1, fmt, TextureUsage.RenderTarget | TextureUsage.Sampled));
+
+    // Framebuffer wrapping the render-target
+    using Framebuffer fb = gd.ResourceFactory.CreateFramebuffer(new FramebufferDescription(null, rtTex));
+
+    // Staging texture for CPU readback
+    using Texture stagingTex = gd.ResourceFactory.CreateTexture(
+        TextureDescription.Texture2D(size, size, 1, 1, fmt, TextureUsage.Staging));
+
+    // Pass 1: clear the render-target.
+    // ClearColorTarget queues the color as a render-pass loadOp=Clear value; the render
+    // pass itself is opened (and immediately closed) by End() when no draw commands were
+    // recorded.  The GPU must finish this pass before we can safely copy the result.
+    using (CommandList cl = gd.ResourceFactory.CreateCommandList())
+    {
+        cl.Begin();
+        cl.SetFramebuffer(fb);
+        cl.ClearColorTarget(0, clearColor);
+        cl.End();
+        gd.SubmitCommands(cl);
+    }
+
+    gd.WaitForIdle();
+
+    // Pass 2: copy the cleared render-target into the staging texture.
+    using (CommandList cl = gd.ResourceFactory.CreateCommandList())
+    {
+        cl.Begin();
+        cl.CopyTexture(rtTex, stagingTex);
+        cl.End();
+        gd.SubmitCommands(cl);
+    }
+
+    gd.WaitForIdle();
+
+    // Read back and verify the first pixel.
+    var mapped = gd.Map(stagingTex, MapMode.Read, 0);
+    try
+    {
+        var pixels = new ReadOnlySpan<byte>((void*)mapped.Data, (int)(size * size * 4));
+        byte r = pixels[0];
+        byte g = pixels[1];
+        byte b = pixels[2];
+        byte a = pixels[3];
+
+        // Allow ±2 to account for rounding in UNorm conversion (255 * 0.5f = 127.5 → 127 or 128).
+        static void assertChannel(string name, byte actual, int expected)
+        {
+            if (Math.Abs(actual - expected) > 2)
+                throw new Exception($"Clear+readback pixel mismatch on channel {name}: expected ~{expected}, got {actual}");
+        }
+
+        assertChannel("R", r, 255);
+        assertChannel("G", g, 128);
+        assertChannel("B", b, 0);
+        assertChannel("A", a, 255);
+    }
+    finally
+    {
+        gd.Unmap(stagingTex, 0);
+    }
+
+    Console.WriteLine($"[smoke] clear+readback OK (pixel R={clearColor.R * 255:F0} G={clearColor.G * 255:F0} B={clearColor.B * 255:F0} A={clearColor.A * 255:F0})");
+}
+

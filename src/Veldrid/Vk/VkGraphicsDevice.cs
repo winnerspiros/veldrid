@@ -556,6 +556,7 @@ namespace Veldrid.Vk
             DeviceApi.vkCmdClearColorImage(cb, texture.OptimalDeviceImage, VkImageLayout.TransferDstOptimal, &color, 1, &range);
             var colorLayout = texture.IsSwapchainTexture ? VkImageLayout.PresentSrcKHR : VkImageLayout.ColorAttachmentOptimal;
             texture.TransitionImageLayout(cb, 0, texture.MipLevels, 0, effectiveLayers, colorLayout);
+            pool.TrackResource(texture.RefCount);
             pool.EndAndSubmit(cb);
         }
 
@@ -583,6 +584,7 @@ namespace Veldrid.Vk
                 1,
                 &range);
             texture.TransitionImageLayout(cb, 0, texture.MipLevels, 0, effectiveLayers, VkImageLayout.DepthStencilAttachmentOptimal);
+            pool.TrackResource(texture.RefCount);
             pool.EndAndSubmit(cb);
         }
 
@@ -601,6 +603,7 @@ namespace Veldrid.Vk
             var pool = getFreeCommandPool();
             var cb = pool.BeginNewCommandBuffer();
             texture.TransitionImageLayout(cb, 0, texture.MipLevels, 0, texture.ActualArrayLayers, layout);
+            pool.TrackResource(texture.RefCount);
             pool.EndAndSubmit(cb);
         }
 
@@ -954,6 +957,13 @@ namespace Veldrid.Vk
 
                 if (submittedSharedCommandPools.Remove(completedCb, out var sharedPool))
                 {
+                    // Reset the command buffer before returning the pool to the cache so the
+                    // Vulkan validation layer no longer considers the CB as referencing any resources.
+                    // Without this reset, destroying a resource (image/buffer) that this CB recorded
+                    // against — even after vkDeviceWaitIdle — triggers VUID-vkDestroyImage-image-01000
+                    // / VUID-vkDestroyBuffer-buffer-00922. The GPU fence has already signaled so the
+                    // reset is safe.
+                    sharedPool.Reset();
                     lock (graphicsCommandPoolLock)
                     {
                         if (sharedPool.IsCached)
@@ -1165,11 +1175,17 @@ namespace Veldrid.Vk
             if (Debugger.IsAttached) Debugger.Break();
 #endif
 
-            string fullMessage = $"[{flags}] ({objectType}) {message}";
+            string fullMessage = $"A Vulkan validation error was encountered: [{flags}] ({objectType}) {message}";
 
-            if (flags == VkDebugReportFlagsEXT.Error) throw new VeldridException($"A Vulkan validation error was encountered: {fullMessage}");
+            if (flags == VkDebugReportFlagsEXT.Error)
+            {
+                // Cannot throw a managed exception from an UnmanagedCallersOnly function — doing so is
+                // undefined behaviour and crashes the runtime. Use FailFast which terminates the process
+                // cleanly without unwinding managed frames through the native Vulkan callback boundary.
+                Environment.FailFast(fullMessage);
+            }
 
-            Console.WriteLine(fullMessage);
+            Console.WriteLine($"[{flags}] ({objectType}) {message}");
             return 0;
         }
 
@@ -2541,6 +2557,9 @@ namespace Veldrid.Vk
             private readonly VkGraphicsDevice gd;
             private readonly VkCommandPool pool;
             private readonly VkCommandBuffer cb;
+            // Optional resource whose RefCount is held for the lifetime of this submission.
+            // Set via TrackResource() before EndAndSubmit() and released in Reset().
+            private ResourceRefCount _trackedResource;
 
             public SharedCommandPool(VkGraphicsDevice gd, bool isCached)
             {
@@ -2561,6 +2580,23 @@ namespace Veldrid.Vk
                 result = gd.DeviceApi.vkAllocateCommandBuffers(&allocateInfo, &localCb);
                 cb = localCb;
                 CheckResult(result);
+            }
+
+            /// <summary>
+            /// Increments <paramref name="rrc"/> so the resource is kept alive until this pool's
+            /// command buffer finishes executing on the GPU and <see cref="Reset"/> is called.
+            /// Call this before <see cref="EndAndSubmit"/> for every resource the recorded commands
+            /// reference, so the resource cannot be destroyed while the GPU is still using it.
+            /// </summary>
+            internal void TrackResource(ResourceRefCount rrc)
+            {
+                // Only one resource per pool is needed for the internal clear/transition paths.
+                // If this is ever called twice the second call replaces the first — that is safe
+                // because the only callers (ClearColorTexture, ClearDepthTexture,
+                // TransitionImageLayout) each touch exactly one VkTexture.
+                _trackedResource?.Decrement();
+                _trackedResource = rrc;
+                rrc.Increment();
             }
 
             public VkCommandBuffer BeginNewCommandBuffer()
@@ -2585,8 +2621,21 @@ namespace Veldrid.Vk
                 gd.submitCommandBuffer(null, cb, 0, null, 0, null, null);
             }
 
+            internal void Reset()
+            {
+                // Reset all command buffers in the pool at once. This releases any internal references
+                // those CBs hold to Vulkan resources so they can be safely destroyed.
+                var result = gd.DeviceApi.vkResetCommandPool(pool, VkCommandPoolResetFlags.None);
+                CheckResult(result);
+                // Release the tracked resource now that the GPU is done and the CB is reset.
+                _trackedResource?.Decrement();
+                _trackedResource = null;
+            }
+
             internal void Destroy()
             {
+                _trackedResource?.Decrement();
+                _trackedResource = null;
                 gd.DeviceApi.vkDestroyCommandPool(pool, null);
             }
         }

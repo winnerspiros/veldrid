@@ -218,9 +218,11 @@ namespace Veldrid.Vk
                 CheckResult(result);
             }
 
+            // RefCount must be initialized before clearIfRenderTarget() / transitionIfSampled()
+            // because those methods submit GPU commands that call TrackResource(this.RefCount).
+            RefCount = new ResourceRefCount(refCountedDispose);
             clearIfRenderTarget();
             transitionIfSampled();
-            RefCount = new ResourceRefCount(refCountedDispose);
         }
 
         // Used to construct Swapchain textures.
@@ -252,8 +254,9 @@ namespace Veldrid.Vk
             imageLayouts = new[] { VkImageLayout.Undefined };
             IsSwapchainTexture = true;
 
-            clearIfRenderTarget();
+            // RefCount must be initialized before clearIfRenderTarget() — see primary constructor.
             RefCount = new ResourceRefCount(DisposeCore);
+            clearIfRenderTarget();
         }
 
         internal VkSubresourceLayout GetSubresourceLayout(uint subresource)

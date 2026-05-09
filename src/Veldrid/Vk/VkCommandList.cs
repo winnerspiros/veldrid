@@ -122,7 +122,18 @@ namespace Veldrid.Vk
                 // Each CB appears at most once in the list; use Remove to avoid the
                 // unnecessary O(n) continuation and the stale i-- bookkeeping.
                 if (submittedCommandBuffers.Remove(completedCb))
+                {
+                    // Reset the command buffer immediately after the GPU fence signals so the
+                    // Vulkan validation layer no longer considers it as referencing any resources
+                    // (images, buffers, etc.). Without an immediate reset, destroying resources
+                    // that the CB recorded against triggers VUID-vkDestroyImage-image-01000 /
+                    // VUID-vkDestroyBuffer-buffer-00922 even though the GPU work is complete.
+                    // vkResetCommandBuffer is safe to call here: the associated fence has already
+                    // signaled, meaning all GPU access to those resources has finished.
+                    var resetResult = gd.DeviceApi.vkResetCommandBuffer(completedCb, VkCommandBufferResetFlags.None);
+                    CheckResult(resetResult);
                     availableCommandBuffers.Enqueue(completedCb);
+                }
             }
 
             lock (stagingLock)
