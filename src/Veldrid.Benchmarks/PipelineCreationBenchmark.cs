@@ -140,8 +140,8 @@ void main(uint3 id : SV_DispatchThreadID) { }
                 new ResourceLayoutDescription());
             using var pipeline = gd.ResourceFactory.CreateComputePipeline(
                 new ComputePipelineDescription(
-                    new ShaderSetDescription([], [shader]),
-                    [layout],
+                    shader,
+                    layout,
                     1, 1, 1));
             // Dispose here — measures create+destroy cost, matching VK-GL-CTS which
             // destroys the pipeline object at the end of each test variant iteration.
@@ -167,8 +167,8 @@ void main(uint3 id : SV_DispatchThreadID) { }
                     new ResourceLayoutDescription());
                 warmPipeline = gd.ResourceFactory.CreateComputePipeline(
                     new ComputePipelineDescription(
-                        new ShaderSetDescription([], [warmShader]),
-                        [warmLayout],
+                        warmShader,
+                        warmLayout,
                         1, 1, 1));
                 warmShader.Dispose();
                 warmLayout.Dispose();
@@ -180,8 +180,8 @@ void main(uint3 id : SV_DispatchThreadID) { }
                 new ResourceLayoutDescription());
             using var pipeline = gd.ResourceFactory.CreateComputePipeline(
                 new ComputePipelineDescription(
-                    new ShaderSetDescription([], [shader]),
-                    [layout],
+                    shader,
+                    layout,
                     1, 1, 1));
         }
 
@@ -203,11 +203,14 @@ void main(uint3 id : SV_DispatchThreadID) { }
                     // test binary; here we embed the 140-byte hand-assembled module instead.
                     return s_computeSpirv;
 
+#pragma warning disable CA1416 // CompileHlsl is [SupportedOSPlatform("windows")]; these cases are
+                               // only reached when gd.BackendType is D3D11/D3D12 (Windows-only).
                 case GraphicsBackend.Direct3D11:
                     return CompileHlsl("cs_5_0");
 
                 case GraphicsBackend.Direct3D12:
                     return CompileHlsl("cs_5_1");
+#pragma warning restore CA1416
 
                 default:
                     // Metal and OpenGL shader compilation requires platform SDKs not available
@@ -242,7 +245,7 @@ void main(uint3 id : SV_DispatchThreadID) { }
                     return null;
                 }
 
-                return blob!.AsBytes().ToArray();
+                return blob!.AsBytes();
             }
             catch (Exception ex)
             {

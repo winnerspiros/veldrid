@@ -24,8 +24,15 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Veldrid.MetalBindings\Veldrid.MetalBindings.csproj" />
-    <ProjectReference Include="..\Veldrid.OpenGLBindings\Veldrid.OpenGLBindings.csproj" />
+    <!-- GlobalPropertiesToRemove prevents a command-line TFM override (e.g. -p:TargetFramework=net10.0-android)
+         from cascading into these sub-libraries, which only declare net10.0. Without this, NuGet restore would
+         write net10.0-android into their project.assets.json, causing NETSDK1005 at build time. -->
+    <ProjectReference Include="..\Veldrid.MetalBindings\Veldrid.MetalBindings.csproj">
+      <GlobalPropertiesToRemove>TargetFramework</GlobalPropertiesToRemove>
+    </ProjectReference>
+    <ProjectReference Include="..\Veldrid.OpenGLBindings\Veldrid.OpenGLBindings.csproj">
+      <GlobalPropertiesToRemove>TargetFramework</GlobalPropertiesToRemove>
+    </ProjectReference>
   </ItemGroup>
 
   <ItemGroup>

@@ -92,6 +92,8 @@ namespace Veldrid.Benchmarks
                 case "vulkan":
                     return GraphicsDevice.CreateVulkan(options);
 
+#pragma warning disable CA1416 // The methods below are [SupportedOSPlatform]; the switch cases
+                               // are only reached after TryResolve() validated the current platform.
                 case "d3d11":
                     return CreateD3D11(options, warp: false);
 
@@ -106,6 +108,7 @@ namespace Veldrid.Benchmarks
 
                 case "metal":
                     return CreateMetal(options);
+#pragma warning restore CA1416
 
                 default:
                     throw new ArgumentException(

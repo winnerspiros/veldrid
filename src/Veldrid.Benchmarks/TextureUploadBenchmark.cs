@@ -40,7 +40,7 @@ namespace Veldrid.Benchmarks
                 TextureDescription.Texture2D(
                     (uint)maxSize, (uint)maxSize,
                     mipLevels: 1, arrayLayers: 1,
-                    PixelFormat.R8_G8_B8_A8_UNorm,
+                    PixelFormat.R8G8B8A8UNorm,
                     TextureUsage.Sampled));
 
             // RGBA8 = 4 bytes per pixel.

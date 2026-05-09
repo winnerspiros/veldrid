@@ -42,7 +42,7 @@ namespace Veldrid.Benchmarks
                 TextureDescription.Texture2D(
                     64, 64,
                     mipLevels: 1, arrayLayers: 1,
-                    PixelFormat.R8_G8_B8_A8_UNorm,
+                    PixelFormat.R8G8B8A8UNorm,
                     TextureUsage.RenderTarget));
 
             framebuffer = gd.ResourceFactory.CreateFramebuffer(
@@ -76,10 +76,10 @@ namespace Veldrid.Benchmarks
                 // Rotate colour across 4 values to defeat driver dedup.
                 var color = (i & 3) switch
                 {
-                    0 => RgbaFloat.Red,
-                    1 => RgbaFloat.Green,
-                    2 => RgbaFloat.Blue,
-                    _ => RgbaFloat.White,
+                    0 => RgbaFloat.RED,
+                    1 => RgbaFloat.GREEN,
+                    2 => RgbaFloat.BLUE,
+                    _ => RgbaFloat.WHITE,
                 };
                 cl.ClearColorTarget(0, color);
             }

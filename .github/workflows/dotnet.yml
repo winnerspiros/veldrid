@@ -153,10 +153,9 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-android-nuget-
     - name: Restore dependencies (Android)
-      # Restore only src/Veldrid with the mobile TFM. MSBuild resolves project references
-      # (Veldrid.OpenGLBindings, Veldrid.MetalBindings) using their own net10.0 TFM
-      # automatically — restoring them separately with a mobile override clobbers their
-      # net10.0 restore state and causes NETSDK1005 on the build step.
+      # The ProjectReference items for MetalBindings/OpenGLBindings in Veldrid.csproj carry
+      # GlobalPropertiesToRemove=TargetFramework, which prevents the net10.0-android override
+      # from cascading into those net10.0-only sub-libraries (avoids NETSDK1005).
       run: dotnet restore src/Veldrid -p:TargetFramework=net10.0-android
     - name: Build (Android)
       run: dotnet build --no-restore src/Veldrid -c Release -p:TargetFramework=net10.0-android -p:TreatWarningsAsErrors=true
@@ -184,10 +183,9 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-ios-nuget-
     - name: Restore dependencies (iOS)
-      # Restore only src/Veldrid with the mobile TFM. MSBuild resolves project references
-      # (Veldrid.OpenGLBindings, Veldrid.MetalBindings) using their own net10.0 TFM
-      # automatically — restoring them separately with a mobile override clobbers their
-      # net10.0 restore state and causes NETSDK1005 on the build step.
+      # The ProjectReference items for MetalBindings/OpenGLBindings in Veldrid.csproj carry
+      # GlobalPropertiesToRemove=TargetFramework, which prevents the net10.0-ios override
+      # from cascading into those net10.0-only sub-libraries (avoids NETSDK1005).
       run: dotnet restore src/Veldrid -p:TargetFramework=net10.0-ios
     - name: Build (iOS)
       run: dotnet build --no-restore src/Veldrid -c Release -p:TargetFramework=net10.0-ios -p:TreatWarningsAsErrors=true
