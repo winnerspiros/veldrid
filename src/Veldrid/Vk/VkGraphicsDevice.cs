@@ -1108,7 +1108,7 @@ namespace Veldrid.Vk
             bool hasDeviceProperties2 = availableInstanceExtensions.Contains(CommonStrings.VkKhrGetPhysicalDeviceProperties2);
             if (hasDeviceProperties2) instanceExtensions.Add(CommonStrings.VkKhrGetPhysicalDeviceProperties2);
 
-            string[] requestedInstanceExtensions= options.InstanceExtensions ?? Array.Empty<string>();
+            string[] requestedInstanceExtensions = options.InstanceExtensions ?? Array.Empty<string>();
             var tempStrings = new List<FixedUtf8String>();
 
             foreach (string requiredExt in requestedInstanceExtensions)
@@ -1175,14 +1175,12 @@ namespace Veldrid.Vk
             if (Debugger.IsAttached) Debugger.Break();
 #endif
 
-            string fullMessage = $"A Vulkan validation error was encountered: [{flags}] ({objectType}) {message}";
-
             if (flags == VkDebugReportFlagsEXT.Error)
             {
                 // Cannot throw a managed exception from an UnmanagedCallersOnly function — doing so is
                 // undefined behaviour and crashes the runtime. Use FailFast which terminates the process
                 // cleanly without unwinding managed frames through the native Vulkan callback boundary.
-                Environment.FailFast(fullMessage);
+                Environment.FailFast($"A Vulkan validation error was encountered: [{flags}] ({objectType}) {message}");
             }
 
             Console.WriteLine($"[{flags}] ({objectType}) {message}");
