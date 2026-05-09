@@ -1001,6 +1001,14 @@ namespace Veldrid.Vk
 
         private void createInstance(bool debug, VulkanDeviceOptions options)
         {
+            // Ensure the Vulkan library is loaded and global function pointers are initialised.
+            // IsVulkanLoaded() / tryLoadVulkan() calls vkInitialize() as its first step, so
+            // invoking it here is safe and idempotent.  We do this explicitly because
+            // GraphicsDevice.CreateVulkan() instantiates VkGraphicsDevice directly, bypassing the
+            // IsSupported() guard, so vkInitialize() might not have been called yet.
+            if (!IsVulkanLoaded())
+                throw new VeldridException("Failed to load the Vulkan library. Ensure libvulkan.so.1 (or equivalent) is installed.");
+
             var availableInstanceLayers = new HashSet<string>(EnumerateInstanceLayers());
             var availableInstanceExtensions = new HashSet<string>(GetInstanceExtensions());
 

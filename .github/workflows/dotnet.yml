@@ -183,3 +183,98 @@ jobs:
       run: dotnet restore src -p:TargetFramework=net10.0-ios
     - name: Build (iOS)
       run: dotnet build --no-restore src -c Release -p:TargetFramework=net10.0-ios -p:TreatWarningsAsErrors=true
+
+  # ──────────────────────────────────────────────────────────────────────────────
+  # Smoke tests — actually instantiate a GraphicsDevice and run buffer + texture
+  # round-trip tests against software / virtual adapters so bugs in the runtime
+  # code paths are caught early, not just compilation errors.
+  # ──────────────────────────────────────────────────────────────────────────────
+
+  # Vulkan smoke test via lavapipe (Mesa CPU Vulkan driver — no GPU required).
+  smoke_vulkan:
+    runs-on: ubuntu-latest
+    needs: build_linux   # ensure it compiles before we try to run it
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 10.0.x
+    - name: Cache NuGet packages
+      uses: actions/cache@v5
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props', '**/packages.lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+    - name: Install Mesa lavapipe (CPU Vulkan ICD)
+      run: sudo apt-get install -y mesa-vulkan-drivers
+    - name: Restore & build smoke test
+      run: |
+        dotnet restore src/Veldrid.SmokeTest
+        dotnet build --no-restore src/Veldrid.SmokeTest -c Release
+    - name: Run Vulkan smoke test (lavapipe)
+      # Force lavapipe as the only ICD so we don't accidentally pick up a GPU
+      # driver that may not be available on the GitHub-hosted runner.
+      run: |
+        VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
+          dotnet bin/Release/Veldrid.SmokeTest/net10.0/Veldrid.SmokeTest.dll --backend vulkan
+
+  # D3D11 / D3D12 smoke tests via the WARP software adapter (no GPU required).
+  smoke_d3d:
+    runs-on: windows-latest
+    needs: build_windows   # ensure it compiles before we try to run it
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 10.0.x
+    - name: Cache NuGet packages
+      uses: actions/cache@v5
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props', '**/packages.lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+    - name: Restore & build smoke test
+      run: |
+        dotnet restore src/Veldrid.SmokeTest
+        dotnet build --no-restore src/Veldrid.SmokeTest -c Release
+    - name: Run D3D11 WARP smoke test
+      run: dotnet bin\Release\Veldrid.SmokeTest\net10.0\Veldrid.SmokeTest.dll --backend d3d11-warp
+    - name: Run D3D12 WARP smoke test
+      run: dotnet bin\Release\Veldrid.SmokeTest\net10.0\Veldrid.SmokeTest.dll --backend d3d12-warp
+
+  # Metal smoke test — runs on macOS where the Metal runtime is available.
+  smoke_metal:
+    runs-on: macos-latest
+    needs: build_macos   # ensure it compiles before we try to run it
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 10.0.x
+    - name: Cache NuGet packages
+      uses: actions/cache@v5
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props', '**/packages.lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+    - name: Restore & build smoke test
+      run: |
+        dotnet restore src/Veldrid.SmokeTest
+        dotnet build --no-restore src/Veldrid.SmokeTest -c Release
+    - name: Run Metal smoke test
+      run: dotnet bin/Release/Veldrid.SmokeTest/net10.0/Veldrid.SmokeTest.dll --backend metal

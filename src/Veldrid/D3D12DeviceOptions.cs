@@ -22,5 +22,11 @@ namespace Veldrid
         ///     This is more thorough but significantly slower.
         /// </summary>
         public bool EnableGpuValidation;
+
+        /// <summary>
+        ///     When true, the device is created on the WARP software adapter instead of any hardware GPU.
+        ///     Useful for headless CI environments where no physical GPU is available.
+        /// </summary>
+        public bool UseWarpAdapter;
     }
 }

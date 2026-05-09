@@ -94,42 +94,59 @@ namespace Veldrid.D3D11
             // If debug flag set but SDK layers aren't available we can't enable debug.
             if (0 != (flags & DeviceCreationFlags.Debug) && !VorticeD3D11.SdkLayersAvailable()) flags &= ~DeviceCreationFlags.Debug;
 
-            try
+            if (options.UseWarpAdapter)
             {
-                if (options.AdapterPtr != IntPtr.Zero)
+                // WARP software adapter — works headlessly in CI with no physical GPU.
+                VorticeD3D11.D3D11CreateDevice(IntPtr.Zero,
+                    DriverType.Warp,
+                    flags,
+                    new[]
+                    {
+                        FeatureLevel.Level_11_1,
+                        FeatureLevel.Level_11_0,
+                        FeatureLevel.Level_10_0
+                    },
+                    out device).CheckError();
+            }
+            else
+            {
+                try
                 {
-                    VorticeD3D11.D3D11CreateDevice(options.AdapterPtr,
-                        DriverType.Hardware,
-                        flags,
-                        new[]
-                        {
-                            FeatureLevel.Level_11_1,
-                            FeatureLevel.Level_11_0,
-                            FeatureLevel.Level_10_0
-                        },
-                        out device).CheckError();
+                    if (options.AdapterPtr != IntPtr.Zero)
+                    {
+                        VorticeD3D11.D3D11CreateDevice(options.AdapterPtr,
+                            DriverType.Hardware,
+                            flags,
+                            new[]
+                            {
+                                FeatureLevel.Level_11_1,
+                                FeatureLevel.Level_11_0,
+                                FeatureLevel.Level_10_0
+                            },
+                            out device).CheckError();
+                    }
+                    else
+                    {
+                        VorticeD3D11.D3D11CreateDevice(IntPtr.Zero,
+                            DriverType.Hardware,
+                            flags,
+                            new[]
+                            {
+                                FeatureLevel.Level_11_1,
+                                FeatureLevel.Level_11_0,
+                                FeatureLevel.Level_10_0
+                            },
+                            out device).CheckError();
+                    }
                 }
-                else
+                catch
                 {
                     VorticeD3D11.D3D11CreateDevice(IntPtr.Zero,
                         DriverType.Hardware,
                         flags,
-                        new[]
-                        {
-                            FeatureLevel.Level_11_1,
-                            FeatureLevel.Level_11_0,
-                            FeatureLevel.Level_10_0
-                        },
+                        Array.Empty<FeatureLevel>(),
                         out device).CheckError();
                 }
-            }
-            catch
-            {
-                VorticeD3D11.D3D11CreateDevice(IntPtr.Zero,
-                    DriverType.Hardware,
-                    flags,
-                    Array.Empty<FeatureLevel>(),
-                    out device).CheckError();
             }
 
             using (var dxgiDevice = device!.QueryInterface<IDXGIDevice>())

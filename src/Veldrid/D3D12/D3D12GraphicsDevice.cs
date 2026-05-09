@@ -120,7 +120,12 @@ namespace Veldrid.D3D12
             dxgiFactory = VorticeDXGI.CreateDXGIFactory2<IDXGIFactory4>(isDebugEnabled);
 
             // 3. Select adapter.
-            if (d3d12Options.AdapterPtr != IntPtr.Zero)
+            if (d3d12Options.UseWarpAdapter)
+            {
+                // WARP software adapter — works headlessly in CI with no physical GPU.
+                dxgiAdapter = dxgiFactory.EnumWarpAdapter<IDXGIAdapter>();
+            }
+            else if (d3d12Options.AdapterPtr != IntPtr.Zero)
             {
                 dxgiAdapter = new IDXGIAdapter(d3d12Options.AdapterPtr);
             }
