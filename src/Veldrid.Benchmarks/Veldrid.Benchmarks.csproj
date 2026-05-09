@@ -19,11 +19,11 @@
     <!-- BenchmarkDotNet provides the measurement harness (JIT warmup, outlier removal, GC
          pressure analysis). The methodology mirrors ANGLE angle_perftests: multiple warmup
          iterations, truncated-mean statistics, separate per-backend runs. -->
-    <PackageReference Include="BenchmarkDotNet" Version="0.14.0" />
+    <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
 
     <!-- Vortice.D3DCompiler: used at benchmark GlobalSetup to compile minimal HLSL to DXBC
          for the D3D11 / D3D12 PipelineCreationBenchmark. Only loaded on Windows. -->
-    <PackageReference Include="Vortice.D3DCompiler" Version="3.8.3" />
+    <PackageReference Include="Vortice.D3DCompiler" Version="$(VorticeWindowsVersion)" />
   </ItemGroup>
 
 </Project>

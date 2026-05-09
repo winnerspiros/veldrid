@@ -271,7 +271,7 @@ namespace Veldrid.D3D11
         // Returns 0 if the adapter does not support timestamps or reports a disjoint result.
         private ulong queryTimestampFrequencyOnce()
         {
-            using var query = device.CreateQuery(new QueryDescription { Query = QueryType.TimestampDisjoint });
+            using var query = device.CreateQuery(new QueryDescription(QueryType.TimestampDisjoint));
             immediateContext.Begin(query);
             immediateContext.End(query);
             immediateContext.Flush();
