@@ -72,6 +72,17 @@ namespace Veldrid
         ///     Indicates whether the GPU supports DXR Raytracing (D3D12 Options5, Tier 1.0+).
         /// </summary>
         public bool SupportsRaytracing => gd.SupportsRaytracing;
+
+        /// <summary>
+        ///     GPU timestamp frequency in ticks per second, as reported by
+        ///     <c>ID3D12CommandQueue::GetTimestampFrequency</c>.
+        ///     Divide a raw timestamp-query result by this value to obtain elapsed seconds,
+        ///     or multiply the reciprocal by 1 000 000 000 to get nanoseconds per tick (the D3D12
+        ///     equivalent of <c>VkPhysicalDeviceLimits.timestampPeriod</c>).
+        ///     A value of 0 indicates that the queue does not support timestamp queries on this
+        ///     adapter (uncommon on hardware; possible on some software adapters).
+        /// </summary>
+        public ulong TimestampFrequencyHz => gd.TimestampFrequencyHz;
     }
 }
 #endif

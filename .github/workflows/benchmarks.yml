@@ -1,0 +1,237 @@
+name: Veldrid Benchmarks
+
+# Weekly benchmark runs — tracks performance regressions over time.
+#
+# Methodology derived from ANGLE angle_perftests and VK-GL-CTS timing infrastructure:
+#   • Buffer update, texture upload, command list recording, and PSO creation are measured
+#     per backend using BenchmarkDotNet (JIT warmup, outlier removal, GC pressure tagging).
+#   • Software renderers (lavapipe on Linux, WARP on Windows) are used so results run on
+#     standard GitHub-hosted runners without dedicated GPU hardware. The absolute numbers are
+#     therefore representative of CPU-side API overhead, not GPU throughput — this is
+#     intentional: the goal is catching regressions in Veldrid's dispatch / tracking layers.
+#   • Results are exported as JSON and uploaded as workflow artifacts. Point them at a
+#     time-series dashboard (e.g. GitHub Pages + Chart.js, or Grafana + JSON datasource)
+#     to visualise per-commit trends, following ANGLE's "perf dashboard" model.
+#
+# Per-backend CI matrix:
+#   Vulkan (lavapipe)   — Linux, runs on push via scheduled trigger
+#   D3D11-WARP          — Windows, scheduled
+#   D3D12-WARP          — Windows, scheduled
+#   Metal               — macOS, scheduled (Metal has no software renderer; uses CPU driver)
+#
+# Triggering manually (workflow_dispatch) allows a one-off run when profiling a PR
+# before it merges — equivalent to requesting a ANGLE perf bot run.
+
+on:
+  # Weekly schedule — Sunday at 02:00 UTC (low runner contention).
+  schedule:
+    - cron: '0 2 * * 0'
+  # Manual trigger for on-demand profiling of a branch or PR.
+  workflow_dispatch:
+    inputs:
+      backend:
+        description: 'Backend to benchmark (leave empty for all)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────────
+  # Vulkan benchmarks — lavapipe CPU Vulkan ICD (no GPU required).
+  # Measures Vulkan-backend CPU overhead: staging-buffer map, command recording,
+  # and compute PSO creation via vkCreateComputePipelines with inline SPIR-V.
+  # ──────────────────────────────────────────────────────────────────────────────
+  bench_vulkan:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.backend == '' || github.event.inputs.backend == 'vulkan' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Install Mesa lavapipe (CPU Vulkan ICD)
+        # lavapipe runs Vulkan entirely on the CPU — no GPU needed.
+        # This is the same ICD used in the smoke_vulkan CI job.
+        run: sudo apt-get install -y mesa-vulkan-drivers
+
+      - name: Restore & build benchmarks
+        run: |
+          dotnet restore src/Veldrid.Benchmarks
+          dotnet build --no-restore src/Veldrid.Benchmarks -c Release
+
+      - name: Run Vulkan benchmarks (lavapipe)
+        # BenchmarkDotNet flags:
+        #   --exporters JSON  — machine-readable output for trend dashboards
+        #   --filter *        — run all benchmark cases
+        # VK_ICD_FILENAMES pins lavapipe so no hardware Vulkan driver is accidentally picked up.
+        run: |
+          VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
+            dotnet bin/Release/Veldrid.Benchmarks/net10.0/Veldrid.Benchmarks.dll \
+              --backend vulkan \
+              --exporters JSON \
+              --filter '*' \
+              --artifacts BenchmarkResults/vulkan
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: benchmark-results-vulkan-${{ github.run_number }}
+          path: BenchmarkResults/vulkan/
+          retention-days: 90    # 90 days = ~13 weekly runs retained for trend analysis
+
+  # ──────────────────────────────────────────────────────────────────────────────
+  # D3D11 benchmarks — WARP software adapter (no GPU required on Windows).
+  # Measures D3D11-backend CPU overhead: staging (Map/Unmap), texture upload,
+  # and PSO creation via D3DCompile + ID3D11Device::CreateComputeShader.
+  # ──────────────────────────────────────────────────────────────────────────────
+  bench_d3d11:
+    runs-on: windows-latest
+    if: ${{ github.event.inputs.backend == '' || github.event.inputs.backend == 'd3d11-warp' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Restore & build benchmarks
+        run: |
+          dotnet restore src/Veldrid.Benchmarks
+          dotnet build --no-restore src/Veldrid.Benchmarks -c Release
+
+      - name: Run D3D11-WARP benchmarks
+        # WARP (Windows Advanced Rasterization Platform) is a software D3D adapter
+        # included in all Windows installations — no discrete GPU required.
+        run: |
+          dotnet bin\Release\Veldrid.Benchmarks\net10.0\Veldrid.Benchmarks.dll `
+            --backend d3d11-warp `
+            --exporters JSON `
+            --filter '*' `
+            --artifacts BenchmarkResults\d3d11-warp
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: benchmark-results-d3d11-warp-${{ github.run_number }}
+          path: BenchmarkResults\d3d11-warp\
+          retention-days: 90
+
+  # ──────────────────────────────────────────────────────────────────────────────
+  # D3D12 benchmarks — WARP software adapter.
+  # Measures D3D12-backend CPU overhead: command allocator recycling, descriptor heap
+  # management, and compute PSO creation via D3DCompile + ID3D12Device::CreateComputePipelineState.
+  # ──────────────────────────────────────────────────────────────────────────────
+  bench_d3d12:
+    runs-on: windows-latest
+    if: ${{ github.event.inputs.backend == '' || github.event.inputs.backend == 'd3d12-warp' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Restore & build benchmarks
+        run: |
+          dotnet restore src/Veldrid.Benchmarks
+          dotnet build --no-restore src/Veldrid.Benchmarks -c Release
+
+      - name: Run D3D12-WARP benchmarks
+        run: |
+          dotnet bin\Release\Veldrid.Benchmarks\net10.0\Veldrid.Benchmarks.dll `
+            --backend d3d12-warp `
+            --exporters JSON `
+            --filter '*' `
+            --artifacts BenchmarkResults\d3d12-warp
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: benchmark-results-d3d12-warp-${{ github.run_number }}
+          path: BenchmarkResults\d3d12-warp\
+          retention-days: 90
+
+  # ──────────────────────────────────────────────────────────────────────────────
+  # Metal benchmarks — macOS (Metal has no software renderer; uses the system GPU
+  # or Apple's CPU fallback on runners without discrete GPU).
+  # ──────────────────────────────────────────────────────────────────────────────
+  bench_metal:
+    runs-on: macos-latest
+    if: ${{ github.event.inputs.backend == '' || github.event.inputs.backend == 'metal' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Restore & build benchmarks
+        run: |
+          dotnet restore src/Veldrid.Benchmarks
+          dotnet build --no-restore src/Veldrid.Benchmarks -c Release
+
+      - name: Run Metal benchmarks
+        # Note: PipelineCreationBenchmark will print a skip message and return null shader
+        # bytes for Metal (MSL compilation not implemented yet) — the other three benchmarks
+        # (buffer update, texture upload, command recording) run normally.
+        run: |
+          dotnet bin/Release/Veldrid.Benchmarks/net10.0/Veldrid.Benchmarks.dll \
+            --backend metal \
+            --exporters JSON \
+            --filter '*' \
+            --artifacts BenchmarkResults/metal
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: benchmark-results-metal-${{ github.run_number }}
+          path: BenchmarkResults/metal/
+          retention-days: 90

@@ -181,6 +181,14 @@ namespace Veldrid.Vk
         // texture-update batch needs it to pack many region uploads into one staging buffer correctly).
         internal ulong OptimalBufferCopyOffsetAlignment => physicalDeviceProperties.limits.optimalBufferCopyOffsetAlignment;
 
+        // VkPhysicalDeviceLimits.timestampPeriod — nanoseconds per timestamp tick.
+        // Exposed via BackendInfoVulkan.TimestampPeriodNanoseconds for GPU timing.
+        internal double PhysicalDeviceTimestampPeriod => physicalDeviceProperties.limits.timestampPeriod;
+
+        // VkPhysicalDeviceLimits.timestampComputeAndGraphics — whether timestamp queries
+        // are supported on both graphics and compute queues.
+        internal bool PhysicalDeviceSupportsTimestampQueries => physicalDeviceProperties.limits.timestampComputeAndGraphics;
+
         // Internal accessors for VkTextureUpdateBatch: the batch lives in the same assembly so it goes straight
         // through the existing private helpers rather than duplicating the staging-buffer / shared-command-pool
         // bookkeeping. RentStagingBuffer / ReturnUnusedStagingBuffer mirror getFreeStagingBuffer plus the
@@ -258,6 +266,11 @@ namespace Veldrid.Vk
         private VkCommandPool graphicsCommandPool;
         private VkQueue graphicsQueue;
         private VkDebugReportCallbackEXT debugCallbackHandle;
+        private VkDebugUtilsMessengerEXT debugMessengerHandle;
+        // True when VK_EXT_debug_utils is active (preferred; RenderDoc-compatible).
+        // When false but debugMarkerEnabled is true, the legacy VK_EXT_debug_marker
+        // device extension is used instead (object names + command-list labels).
+        internal bool debugUtilsEnabled;
         internal bool debugMarkerEnabled;
         private readonly Stack<SharedCommandPool> sharedGraphicsCommandPools = new Stack<SharedCommandPool>();
         private bool standardValidationSupported;
@@ -312,7 +325,7 @@ namespace Veldrid.Vk
                 physicalDeviceFeatures.independentBlend,
                 true,
                 true,
-                debugMarkerEnabled,
+                debugMarkerEnabled || debugUtilsEnabled,
                 true,
                 physicalDeviceFeatures.shaderFloat64,
                 variableRateShading: HasFragmentShadingRate,
@@ -379,6 +392,31 @@ namespace Veldrid.Vk
             VkDebugReportCallbackEXT handle;
             var result = InstanceApi.vkCreateDebugReportCallbackEXT(&debugCallbackCi, null, &handle);
             if (result == VkResult.Success) debugCallbackHandle = handle;
+        }
+
+        // Preferred debug messenger using VK_EXT_debug_utils (supersedes debug_report).
+        // Called from createInstance() when VK_EXT_debug_utils is available.
+        // Severity/type flags mirror the staticDebugCallback behaviour:
+        //   - Warnings + errors produce console output; errors additionally call FailFast.
+        //   - INFO/VERBOSE messages are suppressed to reduce noise.
+        private void enableDebugUtilsMessenger()
+        {
+            Debug.WriteLine("Enabling Vulkan debug utils messenger.");
+            var ci = new VkDebugUtilsMessengerCreateInfoEXT
+            {
+                messageSeverity = VkDebugUtilsMessageSeverityFlagsEXT.Warning
+                                | VkDebugUtilsMessageSeverityFlagsEXT.Error,
+                messageType     = VkDebugUtilsMessageTypeFlagsEXT.General
+                                | VkDebugUtilsMessageTypeFlagsEXT.Validation
+                                | VkDebugUtilsMessageTypeFlagsEXT.Performance,
+                pfnUserCallback = &staticDebugUtilsCallback
+            };
+            VkDebugUtilsMessengerEXT handle;
+            var result = InstanceApi.vkCreateDebugUtilsMessengerEXT(&ci, null, &handle);
+            if (result == VkResult.Success)
+                debugMessengerHandle = handle;
+            else
+                Debug.WriteLine($"[Veldrid] VK_EXT_debug_utils: vkCreateDebugUtilsMessengerEXT failed ({result}) — messenger disabled.");
         }
 
         public VkExtensionProperties[] GetDeviceExtensionProperties()
@@ -456,8 +494,65 @@ namespace Veldrid.Vk
 
         internal void SetResourceName(IDeviceResource resource, string name)
         {
-            if (debugMarkerEnabled)
+            if (debugUtilsEnabled)
             {
+                // VK_EXT_debug_utils: use VkObjectType (no separate device extension needed).
+                switch (resource)
+                {
+                    case VkBuffer buffer:
+                        setDebugUtilsName(VkObjectType.Buffer, buffer.DeviceBuffer.Handle, name);
+                        break;
+
+                    case VkCommandList commandList:
+                        setDebugUtilsName(VkObjectType.CommandBuffer, (ulong)commandList.CommandBuffer.Handle, $"{name}_CommandBuffer");
+                        setDebugUtilsName(VkObjectType.CommandPool, commandList.CommandPool.Handle, $"{name}_CommandPool");
+                        break;
+
+                    case VkFramebuffer framebuffer:
+                        setDebugUtilsName(VkObjectType.Framebuffer, framebuffer.CurrentFramebuffer.Handle, name);
+                        break;
+
+                    case VkPipeline pipeline:
+                        setDebugUtilsName(VkObjectType.Pipeline, pipeline.DevicePipeline.Handle, name);
+                        setDebugUtilsName(VkObjectType.PipelineLayout, pipeline.PipelineLayout.Handle, name);
+                        break;
+
+                    case VkResourceLayout resourceLayout:
+                        setDebugUtilsName(VkObjectType.DescriptorSetLayout, resourceLayout.DescriptorSetLayout.Handle, name);
+                        break;
+
+                    case VkResourceSet resourceSet:
+                        setDebugUtilsName(VkObjectType.DescriptorSet, resourceSet.DescriptorSet.Handle, name);
+                        break;
+
+                    case VkSampler sampler:
+                        setDebugUtilsName(VkObjectType.Sampler, sampler.DeviceSampler.Handle, name);
+                        break;
+
+                    case VkShader shader:
+                        setDebugUtilsName(VkObjectType.ShaderModule, shader.ShaderModule.Handle, name);
+                        break;
+
+                    case VkTexture tex:
+                        setDebugUtilsName(VkObjectType.Image, tex.OptimalDeviceImage.Handle, name);
+                        break;
+
+                    case VkTextureView texView:
+                        setDebugUtilsName(VkObjectType.ImageView, texView.ImageView.Handle, name);
+                        break;
+
+                    case VkFence fence:
+                        setDebugUtilsName(VkObjectType.Fence, fence.DeviceFence.Handle, name);
+                        break;
+
+                    case VkSwapchain sc:
+                        setDebugUtilsName(VkObjectType.SwapchainKHR, sc.DeviceSwapchain.Handle, name);
+                        break;
+                }
+            }
+            else if (debugMarkerEnabled)
+            {
+                // Legacy fallback: VK_EXT_debug_marker (device extension).
                 switch (resource)
                 {
                     case VkBuffer buffer:
@@ -556,6 +651,7 @@ namespace Veldrid.Vk
             DeviceApi.vkCmdClearColorImage(cb, texture.OptimalDeviceImage, VkImageLayout.TransferDstOptimal, &color, 1, &range);
             var colorLayout = texture.IsSwapchainTexture ? VkImageLayout.PresentSrcKHR : VkImageLayout.ColorAttachmentOptimal;
             texture.TransitionImageLayout(cb, 0, texture.MipLevels, 0, effectiveLayers, colorLayout);
+            pool.TrackResource(texture.RefCount);
             pool.EndAndSubmit(cb);
         }
 
@@ -583,6 +679,7 @@ namespace Veldrid.Vk
                 1,
                 &range);
             texture.TransitionImageLayout(cb, 0, texture.MipLevels, 0, effectiveLayers, VkImageLayout.DepthStencilAttachmentOptimal);
+            pool.TrackResource(texture.RefCount);
             pool.EndAndSubmit(cb);
         }
 
@@ -601,6 +698,7 @@ namespace Veldrid.Vk
             var pool = getFreeCommandPool();
             var cb = pool.BeginNewCommandBuffer();
             texture.TransitionImageLayout(cb, 0, texture.MipLevels, 0, texture.ActualArrayLayers, layout);
+            pool.TrackResource(texture.RefCount);
             pool.EndAndSubmit(cb);
         }
 
@@ -671,7 +769,12 @@ namespace Veldrid.Vk
 
             mainSwapchain?.Dispose();
 
-            if (debugCallbackHandle.Handle != 0)
+            if (debugMessengerHandle.Handle != 0)
+            {
+                InstanceApi.vkDestroyDebugUtilsMessengerEXT(debugMessengerHandle, null);
+                debugMessengerHandle = default;
+            }
+            else if (debugCallbackHandle.Handle != 0)
             {
                 InstanceApi.vkDestroyDebugReportCallbackEXT(debugCallbackHandle, null);
                 debugCallbackHandle = default;
@@ -954,6 +1057,13 @@ namespace Veldrid.Vk
 
                 if (submittedSharedCommandPools.Remove(completedCb, out var sharedPool))
                 {
+                    // Reset the command buffer before returning the pool to the cache so the
+                    // Vulkan validation layer no longer considers the CB as referencing any resources.
+                    // Without this reset, destroying a resource (image/buffer) that this CB recorded
+                    // against — even after vkDeviceWaitIdle — triggers VUID-vkDestroyImage-image-01000
+                    // / VUID-vkDestroyBuffer-buffer-00922. The GPU fence has already signaled so the
+                    // reset is safe.
+                    sharedPool.Reset();
                     lock (graphicsCommandPoolLock)
                     {
                         if (sharedPool.IsCached)
@@ -999,8 +1109,40 @@ namespace Veldrid.Vk
             CheckResult(result);
         }
 
+        // VK_EXT_debug_utils preferred path for object naming.
+        // Uses VkObjectType (spec-canonical) instead of the legacy VkDebugReportObjectTypeEXT.
+        // Note: VK_EXT_debug_utils is an instance extension; all its device-level functions
+        // (vkSetDebugUtilsObjectNameEXT, vkCmdBeginDebugUtilsLabelEXT, etc.) are dispatched
+        // through VkInstanceApi in Vortice (loaded via vkGetInstanceProcAddr).
+        private void setDebugUtilsName(VkObjectType objectType, ulong objectHandle, string name)
+        {
+            Debug.Assert(debugUtilsEnabled);
+
+            int byteCount = Encoding.UTF8.GetByteCount(name);
+            byte* utf8Ptr = stackalloc byte[byteCount + 1];
+            fixed (char* namePtr = name) Encoding.UTF8.GetBytes(namePtr, name.Length, utf8Ptr, byteCount);
+            utf8Ptr[byteCount] = 0;
+
+            var nameInfo = new VkDebugUtilsObjectNameInfoEXT
+            {
+                objectType   = objectType,
+                objectHandle = objectHandle,
+                pObjectName  = utf8Ptr
+            };
+            var result = InstanceApi.vkSetDebugUtilsObjectNameEXT(device, &nameInfo);
+            CheckResult(result);
+        }
+
         private void createInstance(bool debug, VulkanDeviceOptions options)
         {
+            // Ensure the Vulkan library is loaded and global function pointers are initialised.
+            // IsVulkanLoaded() / tryLoadVulkan() calls vkInitialize() as its first step, so
+            // invoking it here is safe and idempotent.  We do this explicitly because
+            // GraphicsDevice.CreateVulkan() instantiates VkGraphicsDevice directly, bypassing the
+            // IsSupported() guard, so vkInitialize() might not have been called yet.
+            if (!IsVulkanLoaded())
+                throw new VeldridException("Failed to load the Vulkan library. Ensure libvulkan.so.1 (or equivalent) is installed.");
+
             var availableInstanceLayers = new HashSet<string>(EnumerateInstanceLayers());
             var availableInstanceExtensions = new HashSet<string>(GetInstanceExtensions());
 
@@ -1067,23 +1209,28 @@ namespace Veldrid.Vk
                 }
             }
 
+            // VK_KHR_get_surface_capabilities2 + VK_EXT_surface_maintenance1 are required
+            // by VK_EXT_swapchain_maintenance1 to query per-mode compatibility sets.
+            // Placed in surfaceExtensions (NOT added directly to instanceExtensions) so that:
+            //   1. They are automatically included in the instance extension list via the
+            //      foreach below, and
+            //   2. HasSurfaceExtension(VkKhrGetSurfaceCapabilities2) returns true, which is
+            //      the gate checked in createLogicalDevice() before enabling the device-level
+            //      VK_EXT_swapchain_maintenance1 extension.
+            // If these were added directly to instanceExtensions after the foreach (as was
+            // previously the case), HasSurfaceExtension() would never find them and
+            // HasSwapchainMaintenance1 would always remain false.
+            bool hasSurfaceCapabilities2 = availableInstanceExtensions.Contains(CommonStrings.VkKhrGetSurfaceCapabilities2);
+            if (hasSurfaceCapabilities2) surfaceExtensions.Add(CommonStrings.VkKhrGetSurfaceCapabilities2);
+
+            bool hasSurfaceMaintenance1 = hasSurfaceCapabilities2
+                                          && availableInstanceExtensions.Contains(CommonStrings.VkExtSurfaceMaintenance1);
+            if (hasSurfaceMaintenance1) surfaceExtensions.Add(CommonStrings.VkExtSurfaceMaintenance1);
+
             foreach (var ext in surfaceExtensions) instanceExtensions.Add(ext);
 
             bool hasDeviceProperties2 = availableInstanceExtensions.Contains(CommonStrings.VkKhrGetPhysicalDeviceProperties2);
             if (hasDeviceProperties2) instanceExtensions.Add(CommonStrings.VkKhrGetPhysicalDeviceProperties2);
-
-            // VK_KHR_get_surface_capabilities2 + VK_EXT_surface_maintenance1 are required
-            // by VK_EXT_swapchain_maintenance1 to query per-mode compatibility sets.
-            // Both are instance-level; the device-level extension is detected later.
-            // VK_KHR_get_surface_capabilities2 is requested unconditionally here when
-            // available, satisfying the dependency for queryCompatiblePresentModes which
-            // calls vkGetPhysicalDeviceSurfaceCapabilities2KHR at swapchain creation time.
-            bool hasSurfaceCapabilities2 = availableInstanceExtensions.Contains(CommonStrings.VkKhrGetSurfaceCapabilities2);
-            if (hasSurfaceCapabilities2) instanceExtensions.Add(CommonStrings.VkKhrGetSurfaceCapabilities2);
-
-            bool hasSurfaceMaintenance1 = hasSurfaceCapabilities2
-                                          && availableInstanceExtensions.Contains(CommonStrings.VkExtSurfaceMaintenance1);
-            if (hasSurfaceMaintenance1) instanceExtensions.Add(CommonStrings.VkExtSurfaceMaintenance1);
 
             string[] requestedInstanceExtensions = options.InstanceExtensions ?? Array.Empty<string>();
             var tempStrings = new List<FixedUtf8String>();
@@ -1098,10 +1245,22 @@ namespace Veldrid.Vk
             }
 
             bool debugReportExtensionAvailable = false;
+            bool debugUtilsExtensionAvailable = false;
 
             if (debug)
             {
-                if (availableInstanceExtensions.Contains(CommonStrings.VkExtDebugReportExtensionName))
+                // VK_EXT_debug_utils (preferred — used by RenderDoc for frame capture and by
+                // VK-GL-CTS for validation). Supersedes both VK_EXT_debug_report (instance
+                // callback) and VK_EXT_debug_marker (device object names + cmd labels).
+                if (availableInstanceExtensions.Contains(CommonStrings.VkExtDebugUtilsExtensionName))
+                {
+                    debugUtilsExtensionAvailable = true;
+                    instanceExtensions.Add(CommonStrings.VkExtDebugUtilsExtensionName);
+                }
+
+                // Legacy fallback: only request debug_report when debug_utils is unavailable.
+                if (!debugUtilsExtensionAvailable
+                    && availableInstanceExtensions.Contains(CommonStrings.VkExtDebugReportExtensionName))
                 {
                     debugReportExtensionAvailable = true;
                     instanceExtensions.Add(CommonStrings.VkExtDebugReportExtensionName);
@@ -1126,11 +1285,42 @@ namespace Veldrid.Vk
             instanceCi.enabledLayerCount = instanceLayers.Count;
             if (instanceLayers.Count > 0) instanceCi.ppEnabledLayerNames = (byte**)instanceLayers.Data;
 
+            // When the Khronos validation layer is active, enable two extra validation features
+            // (inspired by VK-GL-CTS, ANGLE, and RenderDoc CI setups):
+            //
+            //   SynchronizationValidation — catches missing pipeline barriers, incorrect image
+            //     layout transitions, and semaphore hazards at runtime (bugs that parameter
+            //     validation alone won't detect).
+            //
+            //   BestPractices — warns about performance anti-patterns: sub-optimal attachment
+            //     loadOp/storeOp choices, redundant barriers, small descriptor sets, etc.
+            //     This is the Vulkan analogue of D3D12's ID3D12InfoQueue performance warnings
+            //     and maps directly to the "best practices" checks in RenderDoc's analysis.
+            VkValidationFeaturesEXT validationFeatures = default;
+            VkValidationFeatureEnableEXT* validationFeatureEnables = stackalloc VkValidationFeatureEnableEXT[2];
+            if (debug && khronosValidationSupported)
+            {
+                validationFeatureEnables[0] = VkValidationFeatureEnableEXT.SynchronizationValidation;
+                validationFeatureEnables[1] = VkValidationFeatureEnableEXT.BestPractices;
+                validationFeatures = new VkValidationFeaturesEXT
+                {
+                    enabledValidationFeatureCount = 2,
+                    pEnabledValidationFeatures    = validationFeatureEnables
+                };
+                instanceCi.pNext = &validationFeatures;
+            }
+
             var result = vkCreateInstance(in instanceCi, null, out instance);
             CheckResult(result);
             InstanceApi = new VkInstanceApi(instance);
 
-            if (debug && debugReportExtensionAvailable) EnableDebugCallback();
+            if (debug && debugUtilsExtensionAvailable)
+            {
+                debugUtilsEnabled = true;
+                enableDebugUtilsMessenger();
+            }
+            else if (debug && debugReportExtensionAvailable)
+                EnableDebugCallback();
 
             foreach (var tempStr in tempStrings) tempStr.Dispose();
         }
@@ -1152,11 +1342,47 @@ namespace Veldrid.Vk
             if (Debugger.IsAttached) Debugger.Break();
 #endif
 
-            string fullMessage = $"[{flags}] ({objectType}) {message}";
+            if (flags == VkDebugReportFlagsEXT.Error)
+            {
+                // Cannot throw a managed exception from an UnmanagedCallersOnly function — doing so is
+                // undefined behaviour and crashes the runtime. Use FailFast which terminates the process
+                // cleanly without unwinding managed frames through the native Vulkan callback boundary.
+                Environment.FailFast($"A Vulkan validation error was encountered: [{flags}] ({objectType}) {message}");
+            }
 
-            if (flags == VkDebugReportFlagsEXT.Error) throw new VeldridException($"A Vulkan validation error was encountered: {fullMessage}");
+            Console.WriteLine($"[{flags}] ({objectType}) {message}");
+            return 0;
+        }
 
-            Console.WriteLine(fullMessage);
+        // VK_EXT_debug_utils callback (preferred over VkDebugReportCallbackEXT).
+        // The severity/type fields give much richer context than the old flags enum:
+        //   - Error severity → FailFast (same rule as staticDebugCallback)
+        //   - Warning → console output
+        // pCallbackData contains the message itself, messageIdName (VUID string), and
+        // optional object handles with their debug names (set via setDebugUtilsName).
+        [System.Runtime.InteropServices.UnmanagedCallersOnly]
+        private static uint staticDebugUtilsCallback(
+            VkDebugUtilsMessageSeverityFlagsEXT messageSeverity,
+            VkDebugUtilsMessageTypeFlagsEXT messageTypes,
+            VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+            void* pUserData)
+        {
+            if (pCallbackData == null) return 0;
+
+            string message = Util.GetString(pCallbackData->pMessage);
+            string vuid    = Util.GetString(pCallbackData->pMessageIdName);
+
+#if DEBUG
+            if (Debugger.IsAttached) Debugger.Break();
+#endif
+
+            if ((messageSeverity & VkDebugUtilsMessageSeverityFlagsEXT.Error) != 0)
+            {
+                // Cannot throw from [UnmanagedCallersOnly] — use FailFast instead.
+                Environment.FailFast($"[Vulkan Error] [{vuid}] {message}");
+            }
+
+            Console.WriteLine($"[Vulkan {messageSeverity}] [{vuid}] {message}");
             return 0;
         }
 
@@ -1271,9 +1497,17 @@ namespace Veldrid.Vk
 
                     if (extensionName == "VK_EXT_debug_marker")
                     {
-                        activeExtensions[activeExtensionCount++] = CommonStrings.VkExtDebugMarkerExtensionName;
-                        requiredInstanceExtensions.Remove(extensionName);
-                        debugMarkerEnabled = true;
+                        // Only activate VK_EXT_debug_marker when VK_EXT_debug_utils is unavailable.
+                        // debug_utils supersedes debug_marker (object names + command labels) and
+                        // does not require a device extension — it's an instance extension whose
+                        // device functions (vkSetDebugUtilsObjectNameEXT, vkCmdBeginDebugUtilsLabelEXT,
+                        // etc.) are loaded from VkDeviceApi automatically.
+                        if (!debugUtilsEnabled)
+                        {
+                            activeExtensions[activeExtensionCount++] = CommonStrings.VkExtDebugMarkerExtensionName;
+                            requiredInstanceExtensions.Remove(extensionName);
+                            debugMarkerEnabled = true;
+                        }
                     }
                     else if (extensionName == "VK_KHR_swapchain")
                     {
@@ -1922,6 +2156,19 @@ namespace Veldrid.Vk
                 }
             }
 
+            // VK_EXT_debug_utils: validate instance-level function pointers.
+            // All debug_utils device functions (object names + command labels) are in
+            // VkInstanceApi in Vortice (dispatched via vkGetInstanceProcAddr).
+            if (debugUtilsEnabled)
+            {
+                debugUtilsEnabled = InstanceApi.vkSetDebugUtilsObjectNameEXT_ptr.Value     != null
+                                 && InstanceApi.vkCmdBeginDebugUtilsLabelEXT_ptr.Value     != null
+                                 && InstanceApi.vkCmdEndDebugUtilsLabelEXT_ptr.Value       != null
+                                 && InstanceApi.vkCmdInsertDebugUtilsLabelEXT_ptr.Value    != null;
+                if (!debugUtilsEnabled)
+                    Debug.WriteLine("[Veldrid] VK_EXT_debug_utils: messenger created but function pointers are null — object naming and command labels disabled.");
+            }
+
             // VK_EXT_debug_marker: validate all four function pointers before allowing
             // marker calls. Some drivers list the extension but fail to load its functions.
             if (debugMarkerEnabled)
@@ -2528,6 +2775,9 @@ namespace Veldrid.Vk
             private readonly VkGraphicsDevice gd;
             private readonly VkCommandPool pool;
             private readonly VkCommandBuffer cb;
+            // Optional resource whose RefCount is held for the lifetime of this submission.
+            // Set via TrackResource() before EndAndSubmit() and released in Reset().
+            private ResourceRefCount _trackedResource;
 
             public SharedCommandPool(VkGraphicsDevice gd, bool isCached)
             {
@@ -2548,6 +2798,23 @@ namespace Veldrid.Vk
                 result = gd.DeviceApi.vkAllocateCommandBuffers(&allocateInfo, &localCb);
                 cb = localCb;
                 CheckResult(result);
+            }
+
+            /// <summary>
+            /// Increments <paramref name="rrc"/> so the resource is kept alive until this pool's
+            /// command buffer finishes executing on the GPU and <see cref="Reset"/> is called.
+            /// Call this before <see cref="EndAndSubmit"/> for every resource the recorded commands
+            /// reference, so the resource cannot be destroyed while the GPU is still using it.
+            /// </summary>
+            internal void TrackResource(ResourceRefCount rrc)
+            {
+                // Only one resource per pool is needed for the internal clear/transition paths.
+                // If this is ever called twice the second call replaces the first — that is safe
+                // because the only callers (ClearColorTexture, ClearDepthTexture,
+                // TransitionImageLayout) each touch exactly one VkTexture.
+                _trackedResource?.Decrement();
+                _trackedResource = rrc;
+                rrc.Increment();
             }
 
             public VkCommandBuffer BeginNewCommandBuffer()
@@ -2572,8 +2839,21 @@ namespace Veldrid.Vk
                 gd.submitCommandBuffer(null, cb, 0, null, 0, null, null);
             }
 
+            internal void Reset()
+            {
+                // Reset all command buffers in the pool at once. This releases any internal references
+                // those CBs hold to Vulkan resources so they can be safely destroyed.
+                var result = gd.DeviceApi.vkResetCommandPool(pool, VkCommandPoolResetFlags.None);
+                CheckResult(result);
+                // Release the tracked resource now that the GPU is done and the CB is reset.
+                _trackedResource?.Decrement();
+                _trackedResource = null;
+            }
+
             internal void Destroy()
             {
+                _trackedResource?.Decrement();
+                _trackedResource = null;
                 gd.DeviceApi.vkDestroyCommandPool(pool, null);
             }
         }

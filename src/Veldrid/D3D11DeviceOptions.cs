@@ -17,5 +17,11 @@ namespace Veldrid
         ///     See <see cref="Vortice.Direct3D11.DeviceCreationFlags" /> for details.
         /// </summary>
         public uint DeviceCreationFlags;
+
+        /// <summary>
+        ///     When true, the device is created on the WARP software adapter instead of any hardware GPU.
+        ///     Useful for headless CI environments where no physical GPU is available.
+        /// </summary>
+        public bool UseWarpAdapter;
     }
 }

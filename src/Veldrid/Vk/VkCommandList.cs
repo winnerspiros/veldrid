@@ -122,7 +122,18 @@ namespace Veldrid.Vk
                 // Each CB appears at most once in the list; use Remove to avoid the
                 // unnecessary O(n) continuation and the stale i-- bookkeeping.
                 if (submittedCommandBuffers.Remove(completedCb))
+                {
+                    // Reset the command buffer immediately after the GPU fence signals so the
+                    // Vulkan validation layer no longer considers it as referencing any resources
+                    // (images, buffers, etc.). Without an immediate reset, destroying resources
+                    // that the CB recorded against triggers VUID-vkDestroyImage-image-01000 /
+                    // VUID-vkDestroyBuffer-buffer-00922 even though the GPU work is complete.
+                    // vkResetCommandBuffer is safe to call here: the associated fence has already
+                    // signaled, meaning all GPU access to those resources has finished.
+                    var resetResult = gd.DeviceApi.vkResetCommandBuffer(completedCb, VkCommandBufferResetFlags.None);
+                    CheckResult(resetResult);
                     availableCommandBuffers.Enqueue(completedCb);
+                }
             }
 
             lock (stagingLock)
@@ -2307,40 +2318,50 @@ namespace Veldrid.Vk
 
         private protected override void PushDebugGroupCore(string name)
         {
-            if (!gd.debugMarkerEnabled) return;
-
-            var markerInfo = new VkDebugMarkerMarkerInfoEXT();
-
             int byteCount = Encoding.UTF8.GetByteCount(name);
             byte* utf8Ptr = stackalloc byte[byteCount + 1];
             fixed (char* namePtr = name) Encoding.UTF8.GetBytes(namePtr, name.Length, utf8Ptr, byteCount);
             utf8Ptr[byteCount] = 0;
 
-            markerInfo.pMarkerName = utf8Ptr;
-
-            gd.DeviceApi.vkCmdDebugMarkerBeginEXT(CommandBuffer, &markerInfo);
+            if (gd.debugUtilsEnabled)
+            {
+                // VK_EXT_debug_utils preferred path (RenderDoc-compatible).
+                // All debug_utils functions are on VkInstanceApi in Vortice.
+                var labelInfo = new VkDebugUtilsLabelEXT { pLabelName = utf8Ptr };
+                gd.InstanceApi.vkCmdBeginDebugUtilsLabelEXT(CommandBuffer, &labelInfo);
+            }
+            else if (gd.debugMarkerEnabled)
+            {
+                var markerInfo = new VkDebugMarkerMarkerInfoEXT { pMarkerName = utf8Ptr };
+                gd.DeviceApi.vkCmdDebugMarkerBeginEXT(CommandBuffer, &markerInfo);
+            }
         }
 
         private protected override void PopDebugGroupCore()
         {
-            if (!gd.debugMarkerEnabled) return;
-            gd.DeviceApi.vkCmdDebugMarkerEndEXT(CommandBuffer);
+            if (gd.debugUtilsEnabled)
+                gd.InstanceApi.vkCmdEndDebugUtilsLabelEXT(CommandBuffer);
+            else if (gd.debugMarkerEnabled)
+                gd.DeviceApi.vkCmdDebugMarkerEndEXT(CommandBuffer);
         }
 
         private protected override void InsertDebugMarkerCore(string name)
         {
-            if (!gd.debugMarkerEnabled) return;
-
-            var markerInfo = new VkDebugMarkerMarkerInfoEXT();
-
             int byteCount = Encoding.UTF8.GetByteCount(name);
             byte* utf8Ptr = stackalloc byte[byteCount + 1];
             fixed (char* namePtr = name) Encoding.UTF8.GetBytes(namePtr, name.Length, utf8Ptr, byteCount);
             utf8Ptr[byteCount] = 0;
 
-            markerInfo.pMarkerName = utf8Ptr;
-
-            gd.DeviceApi.vkCmdDebugMarkerInsertEXT(CommandBuffer, &markerInfo);
+            if (gd.debugUtilsEnabled)
+            {
+                var labelInfo = new VkDebugUtilsLabelEXT { pLabelName = utf8Ptr };
+                gd.InstanceApi.vkCmdInsertDebugUtilsLabelEXT(CommandBuffer, &labelInfo);
+            }
+            else if (gd.debugMarkerEnabled)
+            {
+                var markerInfo = new VkDebugMarkerMarkerInfoEXT { pMarkerName = utf8Ptr };
+                gd.DeviceApi.vkCmdDebugMarkerInsertEXT(CommandBuffer, &markerInfo);
+            }
         }
 
         private protected override void SetShadingRateCore(ShadingRate rate)

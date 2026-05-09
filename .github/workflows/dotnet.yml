@@ -9,9 +9,14 @@ name: Veldrid CI build
 #   The library targets net10.0 — a single cross-platform binary.
 #   Backend-specific code paths are validated by each platform's CI:
 #   - Windows:  D3D11, D3D12, Vulkan, OpenGL compilation
-#   - Linux:    Vulkan, OpenGL, OpenGL ES compilation (covers Android backends)
-#   - macOS:    Metal compilation (covers iOS backends)
-#   iOS and Android use the same compiled binary at runtime.
+#   - Linux:    Vulkan, OpenGL, OpenGL ES compilation
+#   - macOS:    Metal compilation
+#   - Android:  Vulkan/OpenGL ES compilation (net10.0-android TFM)
+#   - iOS:      Metal/OpenGL ES compilation  (net10.0-ios TFM)
+#
+# The Android and iOS jobs override TargetFramework on the command line so the
+# main Veldrid.csproj (which stays net10.0) is recompiled for each mobile TFM.
+# This catches any API-availability regressions without needing a real device.
 
 on:
   create: # when tags are created
@@ -87,6 +92,14 @@ jobs:
           ${{ runner.os }}-nuget-
     - name: Restore dependencies
       run: dotnet restore src
+    - name: Check for vulnerable packages
+      run: |
+        output=$(dotnet list src package --vulnerable --include-transitive 2>&1)
+        echo "$output"
+        if echo "$output" | grep -q "has the following vulnerable packages"; then
+          echo "::error::Vulnerable NuGet packages detected — check the output above and update the affected packages."
+          exit 1
+        fi
     - name: Build
       run: dotnet build --no-restore src -c Release -p:TreatWarningsAsErrors=true
     - name: Verify NuGet Packages
@@ -116,3 +129,184 @@ jobs:
       run: dotnet build --no-restore src -c Release -p:TreatWarningsAsErrors=true
     - name: Verify NuGet Packages
       run: dotnet pack --no-build src -c Release
+
+  # Compile Veldrid for net10.0-android to catch Android-specific API regressions
+  # (missing Vulkan symbols, broken Android surface code, etc.) without a device.
+  build_android:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 10.0.x
+    - name: Install Android workload
+      run: dotnet workload install android
+    - name: Cache NuGet packages
+      uses: actions/cache@v5
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-android-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props', '**/packages.lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-android-nuget-
+    - name: Restore dependencies (Android)
+      # Step 1: restore Veldrid for net10.0-android.  NuGet recurses into project
+      # references (MetalBindings, OpenGLBindings) and writes net10.0-android into
+      # their project.assets.json — even though GlobalPropertiesToRemove=TargetFramework
+      # is set on those <ProjectReference> items (that metadata is honored at BUILD time
+      # by MSBuild but is ignored by NuGet during restore).
+      run: dotnet restore src/Veldrid -p:TargetFramework=net10.0-android
+    - name: Re-restore sub-libraries (Android)
+      # Step 2: restore MetalBindings and OpenGLBindings with their own declared TFM
+      # (net10.0) to overwrite the net10.0-android entries NuGet wrote above.  After
+      # this step their project.assets.json contain "net10.0", matching what MSBuild
+      # will build them as when GlobalPropertiesToRemove strips the android TFM.
+      run: |
+        dotnet restore src/Veldrid.MetalBindings
+        dotnet restore src/Veldrid.OpenGLBindings
+    - name: Build (Android)
+      run: dotnet build --no-restore src/Veldrid -c Release -p:TargetFramework=net10.0-android -p:TreatWarningsAsErrors=true
+
+  # Compile Veldrid for net10.0-ios to catch iOS/Metal-specific API regressions
+  # (Metal shader includes, iOS surface extensions, etc.) without a device.
+  build_ios:
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 10.0.x
+    - name: Install iOS workload
+      run: dotnet workload install ios
+    - name: Cache NuGet packages
+      uses: actions/cache@v5
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-ios-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props', '**/packages.lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-ios-nuget-
+    - name: Restore dependencies (iOS)
+      # Step 1: restore Veldrid for net10.0-ios.  NuGet recurses into project
+      # references (MetalBindings, OpenGLBindings) and writes net10.0-ios into
+      # their project.assets.json — even though GlobalPropertiesToRemove=TargetFramework
+      # is set on those <ProjectReference> items (that metadata is honored at BUILD time
+      # by MSBuild but is ignored by NuGet during restore).
+      run: dotnet restore src/Veldrid -p:TargetFramework=net10.0-ios
+    - name: Re-restore sub-libraries (iOS)
+      # Step 2: restore MetalBindings and OpenGLBindings with their own declared TFM
+      # (net10.0) to overwrite the net10.0-ios entries NuGet wrote above.  After
+      # this step their project.assets.json contain "net10.0", matching what MSBuild
+      # will build them as when GlobalPropertiesToRemove strips the ios TFM.
+      run: |
+        dotnet restore src/Veldrid.MetalBindings
+        dotnet restore src/Veldrid.OpenGLBindings
+    - name: Build (iOS)
+      run: dotnet build --no-restore src/Veldrid -c Release -p:TargetFramework=net10.0-ios -p:TreatWarningsAsErrors=true
+
+  # ──────────────────────────────────────────────────────────────────────────────
+  # Smoke tests — actually instantiate a GraphicsDevice and run buffer + texture
+  # round-trip tests against software / virtual adapters so bugs in the runtime
+  # code paths are caught early, not just compilation errors.
+  # ──────────────────────────────────────────────────────────────────────────────
+
+  # Vulkan smoke test via lavapipe (Mesa CPU Vulkan driver — no GPU required).
+  smoke_vulkan:
+    runs-on: ubuntu-latest
+    needs: build_linux   # ensure it compiles before we try to run it
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 10.0.x
+    - name: Cache NuGet packages
+      uses: actions/cache@v5
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props', '**/packages.lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+    - name: Install Mesa lavapipe (CPU Vulkan ICD) and Khronos validation layers
+      # mesa-vulkan-drivers provides lavapipe (lvp_icd.json) — a CPU Vulkan ICD that
+      # works without a GPU, perfect for headless CI.
+      # vulkan-validationlayers provides VK_LAYER_KHRONOS_validation which the smoke
+      # test enables via --validation to catch Vulkan spec violations automatically.
+      run: sudo apt-get install -y mesa-vulkan-drivers vulkan-validationlayers
+    - name: Restore & build smoke test
+      run: |
+        dotnet restore src/Veldrid.SmokeTest
+        dotnet build --no-restore src/Veldrid.SmokeTest -c Release
+    - name: Run Vulkan smoke test (lavapipe + Khronos validation layer)
+      # Force lavapipe as the only ICD so we don't accidentally pick up a GPU
+      # driver that may not be available on the GitHub-hosted runner.
+      # --validation enables VK_LAYER_KHRONOS_validation which catches Vulkan spec
+      # violations (invalid state, wrong barriers, missing features, etc.) at runtime.
+      run: |
+        VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
+          dotnet bin/Release/Veldrid.SmokeTest/net10.0/Veldrid.SmokeTest.dll --backend vulkan --validation
+
+  # D3D11 / D3D12 smoke tests via the WARP software adapter (no GPU required).
+  smoke_d3d:
+    runs-on: windows-latest
+    needs: build_windows   # ensure it compiles before we try to run it
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 10.0.x
+    - name: Cache NuGet packages
+      uses: actions/cache@v5
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props', '**/packages.lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+    - name: Restore & build smoke test
+      run: |
+        dotnet restore src/Veldrid.SmokeTest
+        dotnet build --no-restore src/Veldrid.SmokeTest -c Release
+    - name: Run D3D11 WARP smoke test
+      run: dotnet bin\Release\Veldrid.SmokeTest\net10.0\Veldrid.SmokeTest.dll --backend d3d11-warp
+    - name: Run D3D12 WARP smoke test
+      run: dotnet bin\Release\Veldrid.SmokeTest\net10.0\Veldrid.SmokeTest.dll --backend d3d12-warp
+
+  # Metal smoke test — runs on macOS where the Metal runtime is available.
+  smoke_metal:
+    runs-on: macos-latest
+    needs: build_macos   # ensure it compiles before we try to run it
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 10.0.x
+    - name: Cache NuGet packages
+      uses: actions/cache@v5
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props', '**/packages.lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+    - name: Restore & build smoke test
+      run: |
+        dotnet restore src/Veldrid.SmokeTest
+        dotnet build --no-restore src/Veldrid.SmokeTest -c Release
+    - name: Run Metal smoke test
+      run: dotnet bin/Release/Veldrid.SmokeTest/net10.0/Veldrid.SmokeTest.dll --backend metal

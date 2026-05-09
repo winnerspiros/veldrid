@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using Vortice.Vulkan;
@@ -303,9 +304,7 @@ namespace Veldrid.Vk
                 pipelineCi.pNext = &pipelineRenderingCi;
                 pipelineCi.renderPass = VkRenderPass.Null;
 
-                Vortice.Vulkan.VkPipeline localPipeline;
-                var result = gd.DeviceApi.vkCreateGraphicsPipelines(gd.PipelineCache, 1, &pipelineCi, null, &localPipeline);
-                devicePipeline = localPipeline;
+                var result = createGraphicsPipelinesWithFeedback(&pipelineCi, out devicePipeline);
                 CheckResult(result);
             }
             else
@@ -409,9 +408,7 @@ namespace Veldrid.Vk
 
                 pipelineCi.renderPass = renderPass;
 
-                Vortice.Vulkan.VkPipeline localPipeline;
-                var result = gd.DeviceApi.vkCreateGraphicsPipelines(gd.PipelineCache, 1, &pipelineCi, null, &localPipeline);
-                devicePipeline = localPipeline;
+                var result = createGraphicsPipelinesWithFeedback(&pipelineCi, out devicePipeline);
                 CheckResult(result);
             }
 
@@ -492,13 +489,7 @@ namespace Veldrid.Vk
             stageCi.pSpecializationInfo = specDescs != null ? &specializationInfo : null;
             pipelineCi.stage = stageCi;
 
-            Vortice.Vulkan.VkPipeline localPipeline;
-            var result = gd.DeviceApi.vkCreateComputePipelines(gd.PipelineCache,
-                1,
-                &pipelineCi,
-                null,
-                &localPipeline);
-            devicePipeline = localPipeline;
+            var result = createComputePipelineWithFeedback(&pipelineCi, out devicePipeline);
             CheckResult(result);
 
             ResourceSetCount = (uint)description.ResourceLayouts.Length;
@@ -524,6 +515,113 @@ namespace Veldrid.Vk
                 gd.DeviceApi.vkDestroyPipelineLayout(pipelineLayout, null);
                 gd.DeviceApi.vkDestroyPipeline(devicePipeline, null);
                 if (!IsComputePipeline) gd.DeviceApi.vkDestroyRenderPass(renderPass, null);
+            }
+        }
+
+        // Chain VkPipelineCreationFeedbackCreateInfo and call vkCreateGraphicsPipelines,
+        // then emit a Debug.WriteLine on a cache miss so shader compilation hitches show
+        // up in debug traces (the same signal RenderDoc uses for its PSO-thrashing warnings).
+        // Falls through to a plain create when HasPipelineCreationCacheControl is false.
+        private VkResult createGraphicsPipelinesWithFeedback(
+            VkGraphicsPipelineCreateInfo* pipelineCi,
+            out Vortice.Vulkan.VkPipeline pipeline)
+        {
+            Vortice.Vulkan.VkPipeline localPipeline;
+
+            if (!gd.HasPipelineCreationCacheControl)
+            {
+                var r = gd.DeviceApi.vkCreateGraphicsPipelines(gd.PipelineCache, 1, pipelineCi, null, &localPipeline);
+                pipeline = localPipeline;
+                return r;
+            }
+
+            VkPipelineCreationFeedback overallFeedback = default;
+            // Maximum number of shader stages in a graphics pipeline (VS + HS + DS + GS + FS = 5).
+            const int maxStages = 5;
+            VkPipelineCreationFeedback* stageFeedbacks = stackalloc VkPipelineCreationFeedback[maxStages];
+            int stageCount = (int)Math.Min(pipelineCi->stageCount, (uint)maxStages);
+
+            var feedbackCi = new VkPipelineCreationFeedbackCreateInfo
+            {
+                pPipelineCreationFeedback          = &overallFeedback,
+                pipelineStageCreationFeedbackCount = (uint)stageCount,
+                pPipelineStageCreationFeedbacks    = stageFeedbacks
+            };
+
+            // Thread the feedback struct into the pNext chain without disturbing existing entries.
+            feedbackCi.pNext   = pipelineCi->pNext;
+            pipelineCi->pNext = &feedbackCi;
+
+            var result = gd.DeviceApi.vkCreateGraphicsPipelines(gd.PipelineCache, 1, pipelineCi, null, &localPipeline);
+            pipeline = localPipeline;
+
+            // Restore original pNext so callers don't see a dangling pointer after we return.
+            pipelineCi->pNext = feedbackCi.pNext;
+
+            if (result == VkResult.Success)
+                logPipelineCreationFeedback("Graphics", ref overallFeedback, stageFeedbacks, stageCount);
+
+            return result;
+        }
+
+        private VkResult createComputePipelineWithFeedback(
+            VkComputePipelineCreateInfo* pipelineCi,
+            out Vortice.Vulkan.VkPipeline pipeline)
+        {
+            Vortice.Vulkan.VkPipeline localPipeline;
+
+            if (!gd.HasPipelineCreationCacheControl)
+            {
+                var r = gd.DeviceApi.vkCreateComputePipelines(gd.PipelineCache, 1, pipelineCi, null, &localPipeline);
+                pipeline = localPipeline;
+                return r;
+            }
+
+            VkPipelineCreationFeedback overallFeedback = default;
+            VkPipelineCreationFeedback stageFeedback   = default;
+
+            var feedbackCi = new VkPipelineCreationFeedbackCreateInfo
+            {
+                pPipelineCreationFeedback          = &overallFeedback,
+                pipelineStageCreationFeedbackCount = 1,
+                pPipelineStageCreationFeedbacks    = &stageFeedback
+            };
+            feedbackCi.pNext   = pipelineCi->pNext;
+            pipelineCi->pNext = &feedbackCi;
+
+            var result = gd.DeviceApi.vkCreateComputePipelines(gd.PipelineCache, 1, pipelineCi, null, &localPipeline);
+            pipeline = localPipeline;
+            pipelineCi->pNext = feedbackCi.pNext;
+
+            if (result == VkResult.Success)
+                logPipelineCreationFeedback("Compute", ref overallFeedback, &stageFeedback, 1);
+
+            return result;
+        }
+
+        private static void logPipelineCreationFeedback(
+            string kind,
+            ref VkPipelineCreationFeedback overall,
+            VkPipelineCreationFeedback* stages,
+            int stageCount)
+        {
+            // Only log when the driver populated the feedback.
+            if ((overall.flags & VkPipelineCreationFeedbackFlags.Valid) == 0) return;
+
+            bool cacheHit = (overall.flags & VkPipelineCreationFeedbackFlags.ApplicationPipelineCacheHit) != 0;
+            double ms     = overall.duration / 1_000_000.0;
+
+            if (!cacheHit)
+            {
+                // Cache miss = shader compiled from source. This is the expensive path that
+                // causes frame-rate hitches in titles and that RenderDoc's PSO-thrashing
+                // analysis flags. Surface it prominently in debug output.
+                Debug.WriteLine($"[Veldrid] {kind} PSO cache MISS — compiled in {ms:F2} ms. "
+                              + "Consider warming the pipeline cache at startup or pre-building PSOs.");
+            }
+            else
+            {
+                Debug.WriteLine($"[Veldrid] {kind} PSO cache hit — loaded in {ms:F2} ms.");
             }
         }
     }

@@ -500,6 +500,13 @@ namespace Veldrid.Vk
         {
             try
             {
+                // Vortice.Vulkan 3.x requires an explicit vkInitialize() call to load the
+                // Vulkan library and populate the global function pointers (vkCreateInstance,
+                // vkEnumerateInstanceExtensionProperties, etc.).  Without it every global
+                // function pointer is zero and the first call crashes with SIGSEGV.
+                var initResult = vkInitialize();
+                if (initResult != VkResult.Success) return false;
+
                 uint propCount;
                 vkEnumerateInstanceExtensionProperties((byte*)null, &propCount, null);
                 return true;

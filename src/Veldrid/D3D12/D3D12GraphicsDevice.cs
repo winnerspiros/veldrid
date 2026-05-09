@@ -38,6 +38,11 @@ namespace Veldrid.D3D12
         public ulong FrameFenceValue => Volatile.Read(ref frameFenceValue);
         public ID3D12Fence FrameFence => frameFence;
 
+        // Cached result of ID3D12CommandQueue::GetTimestampFrequency() — GPU ticks per second.
+        // Queried once at device creation; zero means the queue does not support timestamp queries.
+        // Exposed via BackendInfoD3D12.TimestampFrequencyHz.
+        public ulong TimestampFrequencyHz { get; private set; }
+
         public override bool AllowTearing
         {
             get => mainSwapchain?.AllowTearing ?? false;
@@ -120,7 +125,12 @@ namespace Veldrid.D3D12
             dxgiFactory = VorticeDXGI.CreateDXGIFactory2<IDXGIFactory4>(isDebugEnabled);
 
             // 3. Select adapter.
-            if (d3d12Options.AdapterPtr != IntPtr.Zero)
+            if (d3d12Options.UseWarpAdapter)
+            {
+                // WARP software adapter — works headlessly in CI with no physical GPU.
+                dxgiAdapter = dxgiFactory.EnumWarpAdapter<IDXGIAdapter>();
+            }
+            else if (d3d12Options.AdapterPtr != IntPtr.Zero)
             {
                 dxgiAdapter = new IDXGIAdapter(d3d12Options.AdapterPtr);
             }
@@ -144,6 +154,13 @@ namespace Veldrid.D3D12
             // 5. Create command queue.
             var queueDesc = new CommandQueueDescription(CommandListType.Direct);
             commandQueue = device.CreateCommandQueue(queueDesc);
+
+            // Cache GPU timestamp frequency once at construction time.
+            // GetTimestampFrequency returns 0 on success and fills 'freq'; a non-zero HRESULT
+            // means the queue does not support timestamps (uncommon on hardware, possible on some
+            // software adapters). We treat any failure as "unsupported" and leave the property at 0.
+            if (commandQueue.GetTimestampFrequency(out ulong timestampFreq).Success)
+                TimestampFrequencyHz = timestampFreq;
 
             // 6. Create frame fence.
             frameFenceValue = 0;

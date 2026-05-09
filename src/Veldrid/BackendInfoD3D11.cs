@@ -53,6 +53,25 @@ namespace Veldrid
         {
             return Util.AssertSubtype<Texture, D3D11Texture>(texture).DeviceTexture.NativePointer;
         }
+
+        /// <summary>
+        ///     GPU timestamp frequency in ticks per second, obtained once at device creation via a
+        ///     <c>D3D11_QUERY_TIMESTAMP_DISJOINT</c> round-trip on the immediate context.
+        ///     Divide a raw <c>D3D11_QUERY_TIMESTAMP</c> delta by this value to obtain elapsed
+        ///     seconds, or multiply <c>1e9 / TimestampFrequencyHz</c> to get nanoseconds per tick
+        ///     (the D3D11 equivalent of <c>VkPhysicalDeviceLimits.timestampPeriod</c>).
+        ///     A value of 0 means the adapter does not support timestamp queries, or reported a
+        ///     disjoint result during initialisation (uncommon; possible on some virtual adapters).
+        /// </summary>
+        public ulong TimestampFrequencyHz => gd.TimestampFrequencyHz;
+
+        /// <summary>
+        ///     Returns <see langword="true" /> when <see cref="TimestampFrequencyHz" /> is
+        ///     non-zero, indicating that GPU timestamp queries are supported on this adapter.
+        ///     Mirrors the Vulkan <c>timestampComputeAndGraphics</c> and <c>timestampValidBits</c>
+        ///     concepts.
+        /// </summary>
+        public bool SupportsTimestampQueries => gd.SupportsTimestampQueries;
     }
 }
 #endif

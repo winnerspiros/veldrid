@@ -91,6 +91,27 @@ namespace Veldrid
         public bool HasPipelineCreationCacheControl => gd.HasPipelineCreationCacheControl;
 
         /// <summary>
+        ///     The number of nanoseconds that corresponds to one timestamp tick on the current
+        ///     physical device (<c>VkPhysicalDeviceLimits.timestampPeriod</c>).
+        ///     Multiply raw timestamp query results by this value to convert to nanoseconds.
+        ///     A value of 0 means timestamps are not supported by the device.
+        /// </summary>
+        /// <remarks>
+        ///     Per the Vulkan spec the value may be fractional (e.g. 1.0/256 on some Qualcomm
+        ///     parts), so a <c>double</c> is returned rather than a <c>float</c> to avoid
+        ///     precision loss when accumulating multiple timestamp differences.
+        /// </remarks>
+        public double TimestampPeriodNanoseconds => gd.PhysicalDeviceTimestampPeriod;
+
+        /// <summary>
+        ///     Whether the physical device supports timestamp queries on both the graphics
+        ///     and compute queues (<c>VkPhysicalDeviceLimits.timestampComputeAndGraphics</c>).
+        ///     When false, timestamp queries may only be issued on queues whose
+        ///     <c>VkQueueFamilyProperties.timestampValidBits</c> is non-zero.
+        /// </summary>
+        public bool SupportsTimestampQueries => gd.PhysicalDeviceSupportsTimestampQueries;
+
+        /// <summary>
         ///     Returns the current contents of the device's <c>VkPipelineCache</c> as a serialised blob,
         ///     suitable for persisting to disk and feeding back into
         ///     <see cref="VulkanDeviceOptions.PipelineCacheData" /> on the next launch. The blob's first
