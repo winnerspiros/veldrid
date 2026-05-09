@@ -14,6 +14,9 @@
         public static FixedUtf8String VkExtMetalSurfaceExtensionName { get; } = "VK_EXT_metal_surface";
         public static FixedUtf8String VkExtDebugReportExtensionName { get; } = "VK_EXT_debug_report";
         public static FixedUtf8String VkExtDebugMarkerExtensionName { get; } = "VK_EXT_debug_marker";
+        // Preferred debug extension (supersedes debug_report + debug_marker).
+        // Required by RenderDoc for frame capture; used by VK-GL-CTS for validation.
+        public static FixedUtf8String VkExtDebugUtilsExtensionName { get; } = "VK_EXT_debug_utils";
         public static FixedUtf8String StandardValidationLayerName { get; } = "VK_LAYER_LUNARG_standard_validation";
         public static FixedUtf8String KhronosValidationLayerName { get; } = "VK_LAYER_KHRONOS_validation";
         public static FixedUtf8String Main { get; } = "main";

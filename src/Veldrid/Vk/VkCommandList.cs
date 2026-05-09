@@ -2318,40 +2318,50 @@ namespace Veldrid.Vk
 
         private protected override void PushDebugGroupCore(string name)
         {
-            if (!gd.debugMarkerEnabled) return;
-
-            var markerInfo = new VkDebugMarkerMarkerInfoEXT();
-
             int byteCount = Encoding.UTF8.GetByteCount(name);
             byte* utf8Ptr = stackalloc byte[byteCount + 1];
             fixed (char* namePtr = name) Encoding.UTF8.GetBytes(namePtr, name.Length, utf8Ptr, byteCount);
             utf8Ptr[byteCount] = 0;
 
-            markerInfo.pMarkerName = utf8Ptr;
-
-            gd.DeviceApi.vkCmdDebugMarkerBeginEXT(CommandBuffer, &markerInfo);
+            if (gd.debugUtilsEnabled)
+            {
+                // VK_EXT_debug_utils preferred path (RenderDoc-compatible).
+                // All debug_utils functions are on VkInstanceApi in Vortice.
+                var labelInfo = new VkDebugUtilsLabelEXT { pLabelName = utf8Ptr };
+                gd.InstanceApi.vkCmdBeginDebugUtilsLabelEXT(CommandBuffer, &labelInfo);
+            }
+            else if (gd.debugMarkerEnabled)
+            {
+                var markerInfo = new VkDebugMarkerMarkerInfoEXT { pMarkerName = utf8Ptr };
+                gd.DeviceApi.vkCmdDebugMarkerBeginEXT(CommandBuffer, &markerInfo);
+            }
         }
 
         private protected override void PopDebugGroupCore()
         {
-            if (!gd.debugMarkerEnabled) return;
-            gd.DeviceApi.vkCmdDebugMarkerEndEXT(CommandBuffer);
+            if (gd.debugUtilsEnabled)
+                gd.InstanceApi.vkCmdEndDebugUtilsLabelEXT(CommandBuffer);
+            else if (gd.debugMarkerEnabled)
+                gd.DeviceApi.vkCmdDebugMarkerEndEXT(CommandBuffer);
         }
 
         private protected override void InsertDebugMarkerCore(string name)
         {
-            if (!gd.debugMarkerEnabled) return;
-
-            var markerInfo = new VkDebugMarkerMarkerInfoEXT();
-
             int byteCount = Encoding.UTF8.GetByteCount(name);
             byte* utf8Ptr = stackalloc byte[byteCount + 1];
             fixed (char* namePtr = name) Encoding.UTF8.GetBytes(namePtr, name.Length, utf8Ptr, byteCount);
             utf8Ptr[byteCount] = 0;
 
-            markerInfo.pMarkerName = utf8Ptr;
-
-            gd.DeviceApi.vkCmdDebugMarkerInsertEXT(CommandBuffer, &markerInfo);
+            if (gd.debugUtilsEnabled)
+            {
+                var labelInfo = new VkDebugUtilsLabelEXT { pLabelName = utf8Ptr };
+                gd.InstanceApi.vkCmdInsertDebugUtilsLabelEXT(CommandBuffer, &labelInfo);
+            }
+            else if (gd.debugMarkerEnabled)
+            {
+                var markerInfo = new VkDebugMarkerMarkerInfoEXT { pMarkerName = utf8Ptr };
+                gd.DeviceApi.vkCmdDebugMarkerInsertEXT(CommandBuffer, &markerInfo);
+            }
         }
 
         private protected override void SetShadingRateCore(ShadingRate rate)
