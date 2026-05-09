@@ -9,9 +9,14 @@ name: Veldrid CI build
 #   The library targets net10.0 — a single cross-platform binary.
 #   Backend-specific code paths are validated by each platform's CI:
 #   - Windows:  D3D11, D3D12, Vulkan, OpenGL compilation
-#   - Linux:    Vulkan, OpenGL, OpenGL ES compilation (covers Android backends)
-#   - macOS:    Metal compilation (covers iOS backends)
-#   iOS and Android use the same compiled binary at runtime.
+#   - Linux:    Vulkan, OpenGL, OpenGL ES compilation
+#   - macOS:    Metal compilation
+#   - Android:  Vulkan/OpenGL ES compilation (net10.0-android TFM)
+#   - iOS:      Metal/OpenGL ES compilation  (net10.0-ios TFM)
+#
+# The Android and iOS jobs override TargetFramework on the command line so the
+# main Veldrid.csproj (which stays net10.0) is recompiled for each mobile TFM.
+# This catches any API-availability regressions without needing a real device.
 
 on:
   create: # when tags are created
@@ -87,6 +92,14 @@ jobs:
           ${{ runner.os }}-nuget-
     - name: Restore dependencies
       run: dotnet restore src
+    - name: Check for vulnerable packages
+      run: |
+        output=$(dotnet list src package --vulnerable --include-transitive 2>&1)
+        echo "$output"
+        if echo "$output" | grep -q "has the following vulnerable packages"; then
+          echo "::error::Vulnerable NuGet packages detected — check the output above and update the affected packages."
+          exit 1
+        fi
     - name: Build
       run: dotnet build --no-restore src -c Release -p:TreatWarningsAsErrors=true
     - name: Verify NuGet Packages
@@ -116,3 +129,57 @@ jobs:
       run: dotnet build --no-restore src -c Release -p:TreatWarningsAsErrors=true
     - name: Verify NuGet Packages
       run: dotnet pack --no-build src -c Release
+
+  # Compile Veldrid for net10.0-android to catch Android-specific API regressions
+  # (missing Vulkan symbols, broken Android surface code, etc.) without a device.
+  build_android:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 10.0.x
+    - name: Install Android workload
+      run: dotnet workload install android
+    - name: Cache NuGet packages
+      uses: actions/cache@v5
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-android-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props', '**/packages.lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-android-nuget-
+    - name: Restore dependencies (Android)
+      run: dotnet restore src -p:TargetFramework=net10.0-android
+    - name: Build (Android)
+      run: dotnet build --no-restore src -c Release -p:TargetFramework=net10.0-android -p:TreatWarningsAsErrors=true
+
+  # Compile Veldrid for net10.0-ios to catch iOS/Metal-specific API regressions
+  # (Metal shader includes, iOS surface extensions, etc.) without a device.
+  build_ios:
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 10.0.x
+    - name: Install iOS workload
+      run: dotnet workload install ios
+    - name: Cache NuGet packages
+      uses: actions/cache@v5
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-ios-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props', '**/packages.lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-ios-nuget-
+    - name: Restore dependencies (iOS)
+      run: dotnet restore src -p:TargetFramework=net10.0-ios
+    - name: Build (iOS)
+      run: dotnet build --no-restore src -c Release -p:TargetFramework=net10.0-ios -p:TreatWarningsAsErrors=true
