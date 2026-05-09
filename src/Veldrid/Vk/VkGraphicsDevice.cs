@@ -181,6 +181,14 @@ namespace Veldrid.Vk
         // texture-update batch needs it to pack many region uploads into one staging buffer correctly).
         internal ulong OptimalBufferCopyOffsetAlignment => physicalDeviceProperties.limits.optimalBufferCopyOffsetAlignment;
 
+        // VkPhysicalDeviceLimits.timestampPeriod — nanoseconds per timestamp tick.
+        // Exposed via BackendInfoVulkan.TimestampPeriodNanoseconds for GPU timing.
+        internal double PhysicalDeviceTimestampPeriod => physicalDeviceProperties.limits.timestampPeriod;
+
+        // VkPhysicalDeviceLimits.timestampComputeAndGraphics — whether timestamp queries
+        // are supported on both graphics and compute queues.
+        internal bool PhysicalDeviceSupportsTimestampQueries => physicalDeviceProperties.limits.timestampComputeAndGraphics;
+
         // Internal accessors for VkTextureUpdateBatch: the batch lives in the same assembly so it goes straight
         // through the existing private helpers rather than duplicating the staging-buffer / shared-command-pool
         // bookkeeping. RentStagingBuffer / ReturnUnusedStagingBuffer mirror getFreeStagingBuffer plus the
@@ -1277,18 +1285,27 @@ namespace Veldrid.Vk
             instanceCi.enabledLayerCount = instanceLayers.Count;
             if (instanceLayers.Count > 0) instanceCi.ppEnabledLayerNames = (byte**)instanceLayers.Data;
 
-            // When the Khronos validation layer is active, enable synchronization validation
-            // (inspired by VK-GL-CTS and ANGLE CI setups). This catches missing pipeline
-            // barriers, incorrect image layout transitions, and semaphore hazards at runtime —
-            // bugs that basic parameter validation alone won't detect.
+            // When the Khronos validation layer is active, enable two extra validation features
+            // (inspired by VK-GL-CTS, ANGLE, and RenderDoc CI setups):
+            //
+            //   SynchronizationValidation — catches missing pipeline barriers, incorrect image
+            //     layout transitions, and semaphore hazards at runtime (bugs that parameter
+            //     validation alone won't detect).
+            //
+            //   BestPractices — warns about performance anti-patterns: sub-optimal attachment
+            //     loadOp/storeOp choices, redundant barriers, small descriptor sets, etc.
+            //     This is the Vulkan analogue of D3D12's ID3D12InfoQueue performance warnings
+            //     and maps directly to the "best practices" checks in RenderDoc's analysis.
             VkValidationFeaturesEXT validationFeatures = default;
-            VkValidationFeatureEnableEXT syncFeature = VkValidationFeatureEnableEXT.SynchronizationValidation;
+            VkValidationFeatureEnableEXT* validationFeatureEnables = stackalloc VkValidationFeatureEnableEXT[2];
             if (debug && khronosValidationSupported)
             {
+                validationFeatureEnables[0] = VkValidationFeatureEnableEXT.SynchronizationValidation;
+                validationFeatureEnables[1] = VkValidationFeatureEnableEXT.BestPractices;
                 validationFeatures = new VkValidationFeaturesEXT
                 {
-                    enabledValidationFeatureCount = 1,
-                    pEnabledValidationFeatures    = &syncFeature
+                    enabledValidationFeatureCount = 2,
+                    pEnabledValidationFeatures    = validationFeatureEnables
                 };
                 instanceCi.pNext = &validationFeatures;
             }
