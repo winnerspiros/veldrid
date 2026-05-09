@@ -1064,20 +1064,28 @@ namespace Veldrid.Vk
                 }
             }
 
+            // VK_KHR_get_surface_capabilities2 + VK_EXT_surface_maintenance1 are required
+            // by VK_EXT_swapchain_maintenance1 to query per-mode compatibility sets.
+            // Placed in surfaceExtensions (NOT added directly to instanceExtensions) so that:
+            //   1. They are automatically included in the instance extension list via the
+            //      foreach below, and
+            //   2. HasSurfaceExtension(VkKhrGetSurfaceCapabilities2) returns true, which is
+            //      the gate checked in createLogicalDevice() before enabling the device-level
+            //      VK_EXT_swapchain_maintenance1 extension.
+            // If these were added directly to instanceExtensions after the foreach (as was
+            // previously the case), HasSurfaceExtension() would never find them and
+            // HasSwapchainMaintenance1 would always remain false.
+            bool hasSurfaceCapabilities2 = availableInstanceExtensions.Contains(CommonStrings.VkKhrGetSurfaceCapabilities2);
+            if (hasSurfaceCapabilities2) surfaceExtensions.Add(CommonStrings.VkKhrGetSurfaceCapabilities2);
+
+            bool hasSurfaceMaintenance1 = hasSurfaceCapabilities2
+                                          && availableInstanceExtensions.Contains(CommonStrings.VkExtSurfaceMaintenance1);
+            if (hasSurfaceMaintenance1) surfaceExtensions.Add(CommonStrings.VkExtSurfaceMaintenance1);
+
             foreach (var ext in surfaceExtensions) instanceExtensions.Add(ext);
 
             bool hasDeviceProperties2 = availableInstanceExtensions.Contains(CommonStrings.VkKhrGetPhysicalDeviceProperties2);
             if (hasDeviceProperties2) instanceExtensions.Add(CommonStrings.VkKhrGetPhysicalDeviceProperties2);
-
-            // VK_KHR_get_surface_capabilities2 + VK_EXT_surface_maintenance1 are required
-            // by VK_EXT_swapchain_maintenance1 to query per-mode compatibility sets.
-            // Both are instance-level; the device-level extension is detected later.
-            bool hasSurfaceCapabilities2 = availableInstanceExtensions.Contains(CommonStrings.VkKhrGetSurfaceCapabilities2);
-            if (hasSurfaceCapabilities2) instanceExtensions.Add(CommonStrings.VkKhrGetSurfaceCapabilities2);
-
-            bool hasSurfaceMaintenance1 = hasSurfaceCapabilities2
-                                          && availableInstanceExtensions.Contains(CommonStrings.VkExtSurfaceMaintenance1);
-            if (hasSurfaceMaintenance1) instanceExtensions.Add(CommonStrings.VkExtSurfaceMaintenance1);
 
             string[] requestedInstanceExtensions = options.InstanceExtensions ?? Array.Empty<string>();
             var tempStrings = new List<FixedUtf8String>();
