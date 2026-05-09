@@ -153,9 +153,17 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-android-nuget-
     - name: Restore dependencies (Android)
-      run: dotnet restore src -p:TargetFramework=net10.0-android
+      # Restore only the library projects — Veldrid.Benchmarks and Veldrid.SmokeTest only
+      # target net10.0 (desktop) and cannot be built with a mobile TFM override.
+      run: |
+        dotnet restore src/Veldrid -p:TargetFramework=net10.0-android
+        dotnet restore src/Veldrid.OpenGLBindings -p:TargetFramework=net10.0-android
+        dotnet restore src/Veldrid.MetalBindings -p:TargetFramework=net10.0-android
     - name: Build (Android)
-      run: dotnet build --no-restore src -c Release -p:TargetFramework=net10.0-android -p:TreatWarningsAsErrors=true
+      run: |
+        dotnet build --no-restore src/Veldrid -c Release -p:TargetFramework=net10.0-android -p:TreatWarningsAsErrors=true
+        dotnet build --no-restore src/Veldrid.OpenGLBindings -c Release -p:TargetFramework=net10.0-android -p:TreatWarningsAsErrors=true
+        dotnet build --no-restore src/Veldrid.MetalBindings -c Release -p:TargetFramework=net10.0-android -p:TreatWarningsAsErrors=true
 
   # Compile Veldrid for net10.0-ios to catch iOS/Metal-specific API regressions
   # (Metal shader includes, iOS surface extensions, etc.) without a device.
@@ -180,9 +188,17 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-ios-nuget-
     - name: Restore dependencies (iOS)
-      run: dotnet restore src -p:TargetFramework=net10.0-ios
+      # Restore only the library projects — Veldrid.Benchmarks and Veldrid.SmokeTest only
+      # target net10.0 (desktop) and cannot be built with a mobile TFM override.
+      run: |
+        dotnet restore src/Veldrid -p:TargetFramework=net10.0-ios
+        dotnet restore src/Veldrid.OpenGLBindings -p:TargetFramework=net10.0-ios
+        dotnet restore src/Veldrid.MetalBindings -p:TargetFramework=net10.0-ios
     - name: Build (iOS)
-      run: dotnet build --no-restore src -c Release -p:TargetFramework=net10.0-ios -p:TreatWarningsAsErrors=true
+      run: |
+        dotnet build --no-restore src/Veldrid -c Release -p:TargetFramework=net10.0-ios -p:TreatWarningsAsErrors=true
+        dotnet build --no-restore src/Veldrid.OpenGLBindings -c Release -p:TargetFramework=net10.0-ios -p:TreatWarningsAsErrors=true
+        dotnet build --no-restore src/Veldrid.MetalBindings -c Release -p:TargetFramework=net10.0-ios -p:TreatWarningsAsErrors=true
 
   # ──────────────────────────────────────────────────────────────────────────────
   # Smoke tests — actually instantiate a GraphicsDevice and run buffer + texture

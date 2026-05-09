@@ -624,3 +624,5 @@ namespace Veldrid.Vk
                 Debug.WriteLine($"[Veldrid] {kind} PSO cache hit — loaded in {ms:F2} ms.");
             }
         }
+    }
+}
