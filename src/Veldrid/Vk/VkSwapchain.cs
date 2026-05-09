@@ -136,7 +136,9 @@ namespace Veldrid.Vk
         private ulong displayTimingLastEarliestPresentTime;
 
         // True when VK_GOOGLE_display_timing is active and the refresh duration was
-        // successfully queried for the current deviceSwapchain.
+        // successfully queried for the current deviceSwapchain. This is the swapchain-level
+        // flag (displayTimingRefreshDuration != 0), distinct from gd.HasDisplayTiming which
+        // reflects device-level extension availability and stays true across swapchain recreates.
         public bool HasDisplayTiming => displayTimingRefreshDuration != 0;
 
         // The presentID to stamp on the next VkPresentTimeGOOGLE entry.

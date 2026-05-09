@@ -131,6 +131,8 @@ namespace Veldrid.Vk
         private static readonly Lazy<bool> s_is_supported = new Lazy<bool>(checkIsSupported, true);
         private readonly Lock graphicsCommandPoolLock = new Lock();
         private readonly Lock graphicsQueueLock = new Lock();
+        // Protects vkQueuePresentKHR submissions on the separate present queue
+        // (when PresentQueueIndex != GraphicsQueueIndex) against concurrent access.
         private readonly Lock presentQueueLock = new Lock();
         private readonly ConcurrentDictionary<VkFormat, VkFilter> filters = new ConcurrentDictionary<VkFormat, VkFilter>();
         private readonly BackendInfoVulkan vulkanInfo;
