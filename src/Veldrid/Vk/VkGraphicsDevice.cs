@@ -131,6 +131,7 @@ namespace Veldrid.Vk
         private static readonly Lazy<bool> s_is_supported = new Lazy<bool>(checkIsSupported, true);
         private readonly Lock graphicsCommandPoolLock = new Lock();
         private readonly Lock graphicsQueueLock = new Lock();
+        private readonly Lock presentQueueLock = new Lock();
         private readonly ConcurrentDictionary<VkFormat, VkFilter> filters = new ConcurrentDictionary<VkFormat, VkFilter>();
         private readonly BackendInfoVulkan vulkanInfo;
 
@@ -1072,6 +1073,9 @@ namespace Veldrid.Vk
             // VK_KHR_get_surface_capabilities2 + VK_EXT_surface_maintenance1 are required
             // by VK_EXT_swapchain_maintenance1 to query per-mode compatibility sets.
             // Both are instance-level; the device-level extension is detected later.
+            // VK_KHR_get_surface_capabilities2 is requested unconditionally here when
+            // available, satisfying the dependency for queryCompatiblePresentModes which
+            // calls vkGetPhysicalDeviceSurfaceCapabilities2KHR at swapchain creation time.
             bool hasSurfaceCapabilities2 = availableInstanceExtensions.Contains(CommonStrings.VkKhrGetSurfaceCapabilities2);
             if (hasSurfaceCapabilities2) instanceExtensions.Add(CommonStrings.VkKhrGetSurfaceCapabilities2);
 
@@ -1385,17 +1389,27 @@ namespace Veldrid.Vk
                         hasMeshShader = !isAndroidAdreno;
                     }
                     // VK_EXT_swapchain_maintenance1 (and the promoted KHR variant in
-                    // Vulkan 1.4) only become useful if the prerequisite instance
-                    // extensions were enabled — otherwise we can't query the
-                    // present-mode compatibility set, so the swapchain create call
-                    // would have nothing valid to chain.
-                    else if ((extensionName == "VK_EXT_swapchain_maintenance1"
-                              || extensionName == "VK_KHR_swapchain_maintenance1")
-                             && HasSurfaceExtension(CommonStrings.VkKhrGetSurfaceCapabilities2))
+                    // Vulkan 1.4) enables present-mode hot-swap and per-present mode info.
+                    // Per the Vulkan spec, VK_EXT_swapchain_maintenance1 has a dependency
+                    // chain that implies VK_KHR_get_surface_capabilities2 must be available
+                    // when this extension is exposed by the driver. createInstance already
+                    // enables VK_KHR_get_surface_capabilities2 unconditionally when present,
+                    // so no additional gate is required here.
+                    // Android Adreno: skip — pNext chaining for present-mode info is unreliable
+                    // on this vendor (same broken-stub class as sync2, fragment shading rate, etc.).
+                    else if (extensionName == "VK_EXT_swapchain_maintenance1"
+                             || extensionName == "VK_KHR_swapchain_maintenance1")
                     {
-                        activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        if (isAndroidAdreno)
+                        {
+                            Debug.WriteLine("[Veldrid] Android Adreno: skipping VK_EXT_swapchain_maintenance1 at vkCreateDevice (unreliable pNext handling on this vendor).");
+                        }
+                        else
+                        {
+                            activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        }
                         requiredInstanceExtensions.Remove(extensionName);
-                        hasSwapchainMaintenance1 = true;
+                        hasSwapchainMaintenance1 = !isAndroidAdreno;
                     }
                     // VK_KHR_synchronization2: enables vkQueueSubmit2 with per-semaphore
                     // stage masks. Core in Vulkan 1.3; also available as KHR extension.
@@ -2138,7 +2152,7 @@ namespace Veldrid.Vk
             }
             else
             {
-                lock (vkSc)
+                lock (presentQueueLock)
                 {
                     presentResult = DeviceApi.vkQueuePresentKHR(vkSc.PresentQueue, &presentInfo);
                     if (vkSc.HasDisplayTiming

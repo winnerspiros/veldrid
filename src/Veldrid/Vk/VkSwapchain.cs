@@ -965,7 +965,11 @@ namespace Veldrid.Vk
         // keep stack usage bounded (in practice 1–3 entries per frame).
         public void DrainPastPresentationTimings()
         {
-            if (!gd.HasDisplayTiming)
+            // Guard on the swapchain-level flag (displayTimingRefreshDuration != 0), NOT gd.HasDisplayTiming.
+            // After a swapchain recreate where initDisplayTiming couldn't get a valid refresh duration,
+            // displayTimingRefreshDuration is 0 and there is no timing baseline; draining would produce
+            // garbage earliestPresentTime values that corrupt the next frame's desiredPresentTime.
+            if (!HasDisplayTiming)
                 return;
 
             uint count = 0;
