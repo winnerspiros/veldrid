@@ -1250,6 +1250,8 @@ namespace Veldrid.Vk
             bool hasPortabilitySubset = false; // VK_KHR_portability_subset (MoltenVK/macOS)
             IntPtr[] activeExtensions = new IntPtr[props.Length];
             uint activeExtensionCount = 0;
+            bool isAndroidAdreno = OperatingSystem.IsAndroid()
+                && physicalDeviceProperties.vendorID == VK_VENDOR_ID_QUALCOMM;
 
             // On Vulkan 1.1+, VK_KHR_maintenance1 is core.
             if (preferStandardClipY && DeviceApiVersion.IsAtLeast(1, 1))
@@ -1305,16 +1307,30 @@ namespace Veldrid.Vk
                     }
                     else if (extensionName == "VK_KHR_push_descriptor")
                     {
-                        activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        if (isAndroidAdreno)
+                        {
+                            Debug.WriteLine("[Veldrid] Android Adreno: skipping VK_KHR_push_descriptor at vkCreateDevice (broken non-null function stubs).");
+                        }
+                        else
+                        {
+                            activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        }
                         requiredInstanceExtensions.Remove(extensionName);
-                        hasPushDescriptors = true;
+                        hasPushDescriptors = !isAndroidAdreno;
                     }
                     else if (extensionName == "VK_KHR_dynamic_rendering")
                     {
-                        // On 1.3+ this is core; enabling the extension is harmless.
-                        activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        // On 1.3+ this is core; enabling the extension is harmless on non-Adreno devices.
+                        if (isAndroidAdreno)
+                        {
+                            Debug.WriteLine("[Veldrid] Android Adreno: skipping VK_KHR_dynamic_rendering at vkCreateDevice (broken non-null function stubs).");
+                        }
+                        else
+                        {
+                            activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        }
                         requiredInstanceExtensions.Remove(extensionName);
-                        hasDynamicRendering = true;
+                        hasDynamicRendering = !isAndroidAdreno;
                     }
                     else if (extensionName == "VK_EXT_memory_budget")
                     {
@@ -1324,9 +1340,16 @@ namespace Veldrid.Vk
                     }
                     else if (extensionName == "VK_EXT_host_image_copy")
                     {
-                        activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        if (isAndroidAdreno)
+                        {
+                            Debug.WriteLine("[Veldrid] Android Adreno: skipping VK_EXT_host_image_copy at vkCreateDevice (broken non-null function stubs).");
+                        }
+                        else
+                        {
+                            activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        }
                         requiredInstanceExtensions.Remove(extensionName);
-                        hasHostImageCopy = true;
+                        hasHostImageCopy = !isAndroidAdreno;
                     }
                     else if (extensionName == "VK_EXT_descriptor_indexing")
                     {
@@ -1337,15 +1360,29 @@ namespace Veldrid.Vk
                     }
                     else if (extensionName == "VK_KHR_fragment_shading_rate")
                     {
-                        activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        if (isAndroidAdreno)
+                        {
+                            Debug.WriteLine("[Veldrid] Android Adreno: skipping VK_KHR_fragment_shading_rate at vkCreateDevice (broken non-null function stubs).");
+                        }
+                        else
+                        {
+                            activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        }
                         requiredInstanceExtensions.Remove(extensionName);
-                        hasFragmentShadingRate = true;
+                        hasFragmentShadingRate = !isAndroidAdreno;
                     }
                     else if (extensionName == "VK_EXT_mesh_shader")
                     {
-                        activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        if (isAndroidAdreno)
+                        {
+                            Debug.WriteLine("[Veldrid] Android Adreno: skipping VK_EXT_mesh_shader at vkCreateDevice (broken non-null function stubs).");
+                        }
+                        else
+                        {
+                            activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        }
                         requiredInstanceExtensions.Remove(extensionName);
-                        hasMeshShader = true;
+                        hasMeshShader = !isAndroidAdreno;
                     }
                     // VK_EXT_swapchain_maintenance1 (and the promoted KHR variant in
                     // Vulkan 1.4) only become useful if the prerequisite instance
@@ -1364,9 +1401,16 @@ namespace Veldrid.Vk
                     // stage masks. Core in Vulkan 1.3; also available as KHR extension.
                     else if (extensionName == "VK_KHR_synchronization2")
                     {
-                        activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        if (isAndroidAdreno)
+                        {
+                            Debug.WriteLine("[Veldrid] Android Adreno: skipping VK_KHR_synchronization2 at vkCreateDevice (broken non-null function stubs).");
+                        }
+                        else
+                        {
+                            activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        }
                         requiredInstanceExtensions.Remove(extensionName);
-                        hasSynchronization2 = true;
+                        hasSynchronization2 = !isAndroidAdreno;
                     }
                     // VK_KHR_timeline_semaphore: foundation for replacing the per-CL fence
                     // pool with a single monotonically-incrementing counter queried via
@@ -1385,9 +1429,16 @@ namespace Veldrid.Vk
                     // of display-induced latency on FIFO / FIFO_RELAXED present modes.
                     else if (extensionName == "VK_GOOGLE_display_timing")
                     {
-                        activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        if (isAndroidAdreno)
+                        {
+                            Debug.WriteLine("[Veldrid] Android Adreno: skipping VK_GOOGLE_display_timing at vkCreateDevice (broken non-null function stubs).");
+                        }
+                        else
+                        {
+                            activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                        }
                         requiredInstanceExtensions.Remove(extensionName);
-                        hasDisplayTiming = true;
+                        hasDisplayTiming = !isAndroidAdreno;
                     }
                     else if (requiredInstanceExtensions.Remove(extensionName)) activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
                 }
@@ -1405,20 +1456,6 @@ namespace Veldrid.Vk
             deviceCreateInfo.pQueueCreateInfos = queueCreateInfos;
 
             deviceCreateInfo.pEnabledFeatures = &deviceFeatures;
-
-            // Detect Android Adreno BEFORE building the device pNext chain so that we
-            // can avoid requesting extension features that are known to have broken
-            // implementations on this vendor.  physicalDeviceProperties is populated by
-            // createPhysicalDevice() which runs before createLogicalDevice().
-            //
-            // Several extensions (dynamic rendering, synchronization2, fragment shading
-            // rate) are force-disabled on Adreno after device creation.  Including their
-            // feature structs in the pNext chain would ask the driver to activate features
-            // that we immediately disable in software, which is semantically incorrect and
-            // potentially confusing to the driver.  Skipping the pNext entries here is the
-            // cleanest policy: the driver is never told to enable the broken features at all.
-            bool isAndroidAdreno = OperatingSystem.IsAndroid()
-                && physicalDeviceProperties.vendorID == VK_VENDOR_ID_QUALCOMM;
 
             // Chain feature structs via pNext for extensions that require opt-in.
             VkPhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeatures;

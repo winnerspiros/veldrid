@@ -104,8 +104,9 @@ namespace Veldrid.Vk
                 storageBufferDynamicCount,
                 storageImageCount);
 
-            // Use push descriptor layout when the extension is available, there are no
-            // dynamic bindings, and the descriptor count fits within the device limit.
+            // Use push descriptor layout only when the device really supports push descriptors.
+            // This keeps IsPushDescriptorLayout false on drivers where push descriptors are
+            // force-disabled (e.g. Android Adreno with broken non-null stubs).
             if (gd.HasPushDescriptors
                 && DynamicBufferCount == 0
                 && elements.Length <= gd.MaxPushDescriptors)
