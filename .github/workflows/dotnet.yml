@@ -153,10 +153,20 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-android-nuget-
     - name: Restore dependencies (Android)
-      # The ProjectReference items for MetalBindings/OpenGLBindings in Veldrid.csproj carry
-      # GlobalPropertiesToRemove=TargetFramework, which prevents the net10.0-android override
-      # from cascading into those net10.0-only sub-libraries (avoids NETSDK1005).
+      # Step 1: restore Veldrid for net10.0-android.  NuGet recurses into project
+      # references (MetalBindings, OpenGLBindings) and writes net10.0-android into
+      # their project.assets.json — even though GlobalPropertiesToRemove=TargetFramework
+      # is set on those <ProjectReference> items (that metadata is honored at BUILD time
+      # by MSBuild but is ignored by NuGet during restore).
       run: dotnet restore src/Veldrid -p:TargetFramework=net10.0-android
+    - name: Re-restore sub-libraries (Android)
+      # Step 2: restore MetalBindings and OpenGLBindings with their own declared TFM
+      # (net10.0) to overwrite the net10.0-android entries NuGet wrote above.  After
+      # this step their project.assets.json contain "net10.0", matching what MSBuild
+      # will build them as when GlobalPropertiesToRemove strips the android TFM.
+      run: |
+        dotnet restore src/Veldrid.MetalBindings
+        dotnet restore src/Veldrid.OpenGLBindings
     - name: Build (Android)
       run: dotnet build --no-restore src/Veldrid -c Release -p:TargetFramework=net10.0-android -p:TreatWarningsAsErrors=true
 
@@ -183,10 +193,20 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-ios-nuget-
     - name: Restore dependencies (iOS)
-      # The ProjectReference items for MetalBindings/OpenGLBindings in Veldrid.csproj carry
-      # GlobalPropertiesToRemove=TargetFramework, which prevents the net10.0-ios override
-      # from cascading into those net10.0-only sub-libraries (avoids NETSDK1005).
+      # Step 1: restore Veldrid for net10.0-ios.  NuGet recurses into project
+      # references (MetalBindings, OpenGLBindings) and writes net10.0-ios into
+      # their project.assets.json — even though GlobalPropertiesToRemove=TargetFramework
+      # is set on those <ProjectReference> items (that metadata is honored at BUILD time
+      # by MSBuild but is ignored by NuGet during restore).
       run: dotnet restore src/Veldrid -p:TargetFramework=net10.0-ios
+    - name: Re-restore sub-libraries (iOS)
+      # Step 2: restore MetalBindings and OpenGLBindings with their own declared TFM
+      # (net10.0) to overwrite the net10.0-ios entries NuGet wrote above.  After
+      # this step their project.assets.json contain "net10.0", matching what MSBuild
+      # will build them as when GlobalPropertiesToRemove strips the ios TFM.
+      run: |
+        dotnet restore src/Veldrid.MetalBindings
+        dotnet restore src/Veldrid.OpenGLBindings
     - name: Build (iOS)
       run: dotnet build --no-restore src/Veldrid -c Release -p:TargetFramework=net10.0-ios -p:TreatWarningsAsErrors=true
 
