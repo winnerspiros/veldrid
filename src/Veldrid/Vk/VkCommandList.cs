@@ -1150,7 +1150,7 @@ namespace Veldrid.Vk
                     currentStagingInfo.Resources.Add(vkSet.RefCount);
                     for (int i = 0; i < vkSet.RefCounts.Count; i++) currentStagingInfo.Resources.Add(vkSet.RefCounts[i]);
 
-                    if (vkSet.IsPushDescriptor)
+                    if (vkSet.IsPushDescriptor && gd.HasPushDescriptors)
                     {
                         // Flush any pending traditional batch before the push.
                         if (currentBatchCount != 0)
@@ -1198,7 +1198,7 @@ namespace Veldrid.Vk
                             else
                             {
                                 var nextSet = Util.AssertSubtype<ResourceSet, VkResourceSet>(resourceSets[currentSlot + 1].Set);
-                                if (nextSet.IsPushDescriptor)
+                                if (nextSet.IsPushDescriptor && gd.HasPushDescriptors)
                                     batchEnded = true;
                             }
                         }
@@ -1263,6 +1263,11 @@ namespace Veldrid.Vk
             VkPipelineLayout pipelineLayout,
             uint setIndex)
         {
+            // Defensive guard: this path must be unreachable when push descriptors are disabled.
+            Debug.Assert(gd.HasPushDescriptors, "pushDescriptorSet called on a device without push descriptor support");
+            if (!gd.HasPushDescriptors)
+                return;
+
             var writes = vkSet.PushWrites;
             var bufferInfos = vkSet.PushBufferInfos;
             var imageInfos = vkSet.PushImageInfos;
