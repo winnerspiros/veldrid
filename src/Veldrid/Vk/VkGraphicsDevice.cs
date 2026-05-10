@@ -664,6 +664,39 @@ namespace Veldrid.Vk
             pool.EndAndSubmit(cb);
         }
 
+        // Like ClearColorTexture but transitions to ShaderReadOnlyOptimal as the final layout.
+        // Used to zero-initialize Sampled-only textures (no RenderTarget flag → no
+        // VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) on construction so the shader sees transparent
+        // black before the first upload, rather than undefined GPU memory.
+        //
+        // ClearColorTexture transitions to ColorAttachmentOptimal, which the Vulkan spec
+        // (§12.8) requires to be supported by the image's usageFlags — Sampled-only images
+        // do not have COLOR_ATTACHMENT_BIT, making ColorAttachmentOptimal a spec violation
+        // there.  ShaderReadOnlyOptimal is always valid for Sampled images.
+        //
+        // All non-transient VkTexture images carry VK_IMAGE_USAGE_TRANSFER_DST_BIT
+        // (see VkFormats.VdToVkTextureUsage), so vkCmdClearColorImage is always valid here.
+        internal void ClearSampledColorTexture(VkTexture texture, VkClearColorValue color)
+        {
+            uint effectiveLayers = texture.ArrayLayers;
+            if ((texture.Usage & TextureUsage.Cubemap) != 0) effectiveLayers *= 6;
+            var range = new VkImageSubresourceRange(
+                VkImageAspectFlags.Color,
+                0,
+                texture.MipLevels,
+                0,
+                effectiveLayers);
+            var pool = getFreeCommandPool();
+            var cb = pool.BeginNewCommandBuffer();
+            texture.TransitionImageLayout(cb, 0, texture.MipLevels, 0, effectiveLayers, VkImageLayout.TransferDstOptimal);
+            DeviceApi.vkCmdClearColorImage(cb, texture.OptimalDeviceImage, VkImageLayout.TransferDstOptimal, &color, 1, &range);
+            // End in ShaderReadOnlyOptimal so transitionIfSampled() becomes a no-op for this
+            // texture (all subresources are already in the correct layout after this CB).
+            texture.TransitionImageLayout(cb, 0, texture.MipLevels, 0, effectiveLayers, VkImageLayout.ShaderReadOnlyOptimal);
+            pool.TrackResource(texture.RefCount);
+            pool.EndAndSubmit(cb);
+        }
+
         internal void ClearDepthTexture(VkTexture texture, VkClearDepthStencilValue clearValue)
         {
             uint effectiveLayers = texture.ArrayLayers;
@@ -1529,6 +1562,12 @@ namespace Veldrid.Vk
             }
 
             var deviceFeatures = physicalDeviceFeatures;
+            // Disable robustBufferAccess: the driver adds per-access GPU bounds checking for
+            // every shader buffer/image read when this is on, measurably reducing GPU throughput
+            // (typically 5–15 % on fragment-bound workloads) even when no out-of-bounds access
+            // ever occurs.  osu! never intentionally accesses buffers or images out-of-bounds,
+            // so the safety guarantee from this feature is unnecessary overhead.
+            deviceFeatures.robustBufferAccess = false;
 
             var props = GetDeviceExtensionProperties();
 
