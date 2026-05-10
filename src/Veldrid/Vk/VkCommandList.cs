@@ -17,6 +17,14 @@ namespace Veldrid.Vk
 
         public override bool IsDisposed => destroyed;
 
+        /// <summary>
+        /// True if this command list has called <see cref="SetFramebufferCore"/> with a
+        /// <see cref="VkSwapchainFramebuffer"/> at any point since the last <see cref="Begin"/>.
+        /// Used by <see cref="VkGraphicsDevice.SubmitCommandsCore"/> to decide which submit
+        /// should carry the image-available semaphore wait.
+        /// </summary>
+        internal bool UsesSwapchainFramebuffer => usesSwapchainFramebuffer;
+
         public override string Name
         {
             get => name;
@@ -56,6 +64,11 @@ namespace Veldrid.Vk
         // Graphics State
         private VkFramebufferBase currentFramebuffer;
         private bool currentFramebufferEverActive;
+        // Set (and sticky for the recording lifetime) when SetFramebufferCore is called
+        // with a VkSwapchainFramebuffer.  VkGraphicsDevice.SubmitCommandsCore reads this
+        // to decide whether to attach the pending image-available semaphore as a wait: only
+        // the submit that writes to the swapchain image needs to wait for the compositor.
+        private bool usesSwapchainFramebuffer;
         private VkRenderPass activeRenderPass;
         private VkPipeline currentGraphicsPipeline;
         private BoundResourceSetInfo[] currentGraphicsResourceSets = Array.Empty<BoundResourceSetInfo>();
@@ -175,6 +188,7 @@ namespace Veldrid.Vk
 
             ClearCachedState();
             currentFramebuffer = null;
+            usesSwapchainFramebuffer = false;
             currentGraphicsPipeline = null;
             clearSets(currentGraphicsResourceSets);
             Util.ClearArray(scissorRects);
@@ -944,7 +958,11 @@ namespace Veldrid.Vk
             Util.EnsureArrayMinimumSize(ref validColorClearValues, clearValueCount);
             currentStagingInfo.Resources.Add(vkFb.RefCount);
 
-            if (fb is VkSwapchainFramebuffer scFb) currentStagingInfo.Resources.Add(scFb.Swapchain.RefCount);
+            if (fb is VkSwapchainFramebuffer scFb)
+            {
+                currentStagingInfo.Resources.Add(scFb.Swapchain.RefCount);
+                usesSwapchainFramebuffer = true;
+            }
         }
 
         protected override void SetGraphicsResourceSetCore(uint slot, ResourceSet rs, uint dynamicOffsetsCount, ref uint dynamicOffsets)
