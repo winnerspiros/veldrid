@@ -310,3 +310,267 @@ jobs:
         dotnet build --no-restore src/Veldrid.SmokeTest -c Release
     - name: Run Metal smoke test
       run: dotnet bin/Release/Veldrid.SmokeTest/net10.0/Veldrid.SmokeTest.dll --backend metal
+
+  # ──────────────────────────────────────────────────────────────────────────────
+  # Inline Vulkan benchmarks — runs on every PR and every push to the default
+  # branch.  Deliberately excluded from pure feature-branch pushes to avoid
+  # spending 10-20 minutes of CI budget on WIP commits that haven't been through
+  # review yet.  The weekly benchmarks.yml still runs the full matrix on a
+  # schedule; this job gives per-PR visibility into regressions against lavapipe.
+  # ──────────────────────────────────────────────────────────────────────────────
+  bench_vulkan:
+    runs-on: ubuntu-latest
+    needs: smoke_vulkan
+    # Only run on PRs and pushes to the default branch (not every feature branch).
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'push' &&
+       github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 10.0.x
+    - name: Cache NuGet packages
+      uses: actions/cache@v5
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props', '**/packages.lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+    - name: Install Mesa lavapipe (CPU Vulkan ICD)
+      run: sudo apt-get install -y mesa-vulkan-drivers
+    - name: Restore & build benchmarks
+      run: |
+        dotnet restore src/Veldrid.Benchmarks
+        dotnet build --no-restore src/Veldrid.Benchmarks -c Release
+    - name: Run Vulkan benchmarks (lavapipe)
+      run: |
+        VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
+          dotnet bin/Release/Veldrid.Benchmarks/net10.0/Veldrid.Benchmarks.dll \
+            --backend vulkan \
+            --exporters JSON \
+            --filter '*' \
+            --artifacts BenchmarkResults/vulkan
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v7
+      if: always()
+      with:
+        name: benchmark-results-vulkan-ci-${{ github.run_number }}
+        path: BenchmarkResults/vulkan/
+        retention-days: 90
+
+  # ──────────────────────────────────────────────────────────────────────────────
+  # CI report — aggregates the outcomes of every job in this workflow into a
+  # single Markdown summary written to $GITHUB_STEP_SUMMARY (visible as the
+  # "Summary" tab of the workflow run in the GitHub Actions UI).
+  #
+  # Includes:
+  #   • Build status table (all platform build + smoke jobs)
+  #   • Benchmark results table parsed from BenchmarkDotNet JSON artifacts
+  #     (only populated when bench_vulkan ran)
+  #   • Performance insights: slowest benchmark, fastest backend, % spread
+  #
+  # Runs with `if: always()` so it executes even when upstream jobs fail or are
+  # skipped, giving the team a single-pane-of-glass view of the run.
+  # ──────────────────────────────────────────────────────────────────────────────
+  ci_report:
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - build_windows
+      - build_linux
+      - build_macos
+      - build_android
+      - build_ios
+      - smoke_vulkan
+      - smoke_d3d
+      - smoke_metal
+      - bench_vulkan
+    permissions:
+      contents: read
+
+    steps:
+    - name: Download benchmark artifacts (if available)
+      uses: actions/download-artifact@v4
+      # Continue even if the artifact doesn't exist (bench_vulkan was skipped).
+      continue-on-error: true
+      with:
+        pattern: benchmark-results-vulkan-ci-${{ github.run_number }}
+        path: /tmp/bench-artifacts
+        merge-multiple: true
+
+    - name: Generate CI summary
+      env:
+        # Pass each job's outcome so the Python script can render a status table.
+        RESULT_BUILD_WINDOWS: ${{ needs.build_windows.result }}
+        RESULT_BUILD_LINUX:   ${{ needs.build_linux.result }}
+        RESULT_BUILD_MACOS:   ${{ needs.build_macos.result }}
+        RESULT_BUILD_ANDROID: ${{ needs.build_android.result }}
+        RESULT_BUILD_IOS:     ${{ needs.build_ios.result }}
+        RESULT_SMOKE_VULKAN:  ${{ needs.smoke_vulkan.result }}
+        RESULT_SMOKE_D3D:     ${{ needs.smoke_d3d.result }}
+        RESULT_SMOKE_METAL:   ${{ needs.smoke_metal.result }}
+        RESULT_BENCH_VULKAN:  ${{ needs.bench_vulkan.result }}
+        BENCH_ARTIFACT_DIR:   /tmp/bench-artifacts
+        GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        python3 - <<'PYEOF'
+        import os, json, glob, re
+        from datetime import datetime
+
+        summary_path = os.environ['GITHUB_STEP_SUMMARY']
+
+        def icon(result):
+            return {'success': '✅', 'failure': '❌', 'skipped': '⏭️', 'cancelled': '🚫'}.get(result, '❓')
+
+        def write(text=''):
+            with open(summary_path, 'a') as f:
+                f.write(text + '\n')
+
+        # ── Header ───────────────────────────────────────────────────────────────
+        write('# 🔬 Veldrid CI Report')
+        write(f'**Run:** [{os.environ["GH_RUN_URL"]}]({os.environ["GH_RUN_URL"]})')
+        write(f'**Generated:** {datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")}')
+        write()
+
+        # ── Build & smoke status ──────────────────────────────────────────────
+        write('## 📦 Build & Smoke Status')
+        write()
+        write('| Job | Platform | Result |')
+        write('|-----|----------|--------|')
+
+        jobs = [
+            ('build_windows', 'Windows (D3D11/D3D12/Vulkan/OGL)',  os.environ['RESULT_BUILD_WINDOWS']),
+            ('build_linux',   'Linux (Vulkan/OGL)',                 os.environ['RESULT_BUILD_LINUX']),
+            ('build_macos',   'macOS (Metal)',                      os.environ['RESULT_BUILD_MACOS']),
+            ('build_android', 'Android (Vulkan/OGLES)',             os.environ['RESULT_BUILD_ANDROID']),
+            ('build_ios',     'iOS (Metal/OGLES)',                  os.environ['RESULT_BUILD_IOS']),
+            ('smoke_vulkan',  'Vulkan smoke (lavapipe)',            os.environ['RESULT_SMOKE_VULKAN']),
+            ('smoke_d3d',     'D3D11/D3D12 smoke (WARP)',          os.environ['RESULT_SMOKE_D3D']),
+            ('smoke_metal',   'Metal smoke (macOS)',                os.environ['RESULT_SMOKE_METAL']),
+        ]
+        all_passed = True
+        for job_id, label, result in jobs:
+            if result not in ('success', 'skipped'):
+                all_passed = False
+            write(f'| `{job_id}` | {label} | {icon(result)} `{result}` |')
+        write()
+
+        if all_passed:
+            write('> 🟢 All required jobs passed.')
+        else:
+            write('> 🔴 One or more jobs failed — see details above.')
+        write()
+
+        # ── Benchmark results ─────────────────────────────────────────────────
+        bench_result = os.environ['RESULT_BENCH_VULKAN']
+        write('## ⚡ Benchmark Results (Vulkan / lavapipe)')
+        write()
+
+        if bench_result == 'skipped':
+            write('> ⏭️ Benchmark job was skipped (only runs on PRs and default-branch pushes).')
+            write()
+            write('Run manually:')
+            write('```bash')
+            write('VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \\')
+            write('  dotnet run --project src/Veldrid.Benchmarks -c Release -- --backend vulkan')
+            write('```')
+        elif bench_result != 'success':
+            write(f'> ❌ Benchmark job ended with result `{bench_result}` — no results to display.')
+        else:
+            artifact_dir = os.environ['BENCH_ARTIFACT_DIR']
+            json_files = glob.glob(f'{artifact_dir}/**/*.json', recursive=True)
+            # Filter to BenchmarkDotNet full-report files (contain "Benchmarks" key).
+            report_files = []
+            for f in json_files:
+                try:
+                    with open(f) as fh:
+                        data = json.load(fh)
+                    if 'Benchmarks' in data:
+                        report_files.append((f, data))
+                except Exception:
+                    pass
+
+            if not report_files:
+                write('> ⚠️ Benchmark artifact was uploaded but no BenchmarkDotNet JSON reports were found.')
+            else:
+                # Collect all benchmark entries across files.
+                all_entries = []
+                host_info = None
+                for fpath, data in report_files:
+                    if host_info is None:
+                        host_info = data.get('HostEnvironmentInfo', {})
+                    for b in data.get('Benchmarks', []):
+                        stats = b.get('Statistics', {})
+                        mean_ns = stats.get('Mean', None)
+                        sd_ns   = stats.get('StandardDeviation', None)
+                        # Extract parameter values from FullName, e.g. "(SizeInBytes: 1024)"
+                        full_name = b.get('FullName', b.get('Type', '') + '.' + b.get('Method', ''))
+                        # Shorten: "Veldrid.Benchmarks.BufferUpdateBenchmark.UpdateAndWait(SizeInBytes: 1024)"
+                        #       → "BufferUpdateBenchmark · UpdateAndWait (SizeInBytes=1024)"
+                        short = re.sub(r'^Veldrid\.Benchmarks\.', '', full_name)
+                        short = re.sub(r'\(([^)]+)\)', lambda m: ' (' + m.group(1) + ')', short)
+                        all_entries.append({
+                            'name': short,
+                            'mean_ns': mean_ns,
+                            'sd_ns': sd_ns,
+                        })
+
+                def fmt_ns(ns):
+                    if ns is None:
+                        return 'N/A'
+                    if ns < 1_000:
+                        return f'{ns:.1f} ns'
+                    if ns < 1_000_000:
+                        return f'{ns/1_000:.2f} µs'
+                    if ns < 1_000_000_000:
+                        return f'{ns/1_000_000:.2f} ms'
+                    return f'{ns/1_000_000_000:.3f} s'
+
+                # Host environment summary.
+                if host_info:
+                    os_info  = host_info.get('OsVersion', {})
+                    runtime  = host_info.get('RuntimeVersion', '')
+                    cpu      = host_info.get('ProcessorName', '')
+                    write(f'**Host:** {os_info.get("Value", "")} · {runtime} · {cpu}')
+                    write()
+
+                write('| Benchmark | Mean | ±StdDev |')
+                write('|-----------|------|---------|')
+                for e in sorted(all_entries, key=lambda x: x['name']):
+                    write(f'| `{e["name"]}` | {fmt_ns(e["mean_ns"])} | {fmt_ns(e["sd_ns"])} |')
+                write()
+
+                # Insights.
+                valid = [e for e in all_entries if e['mean_ns'] is not None]
+                if valid:
+                    slowest = max(valid, key=lambda e: e['mean_ns'])
+                    fastest = min(valid, key=lambda e: e['mean_ns'])
+                    write('### 💡 Insights')
+                    write()
+                    write(f'- **Slowest operation:** `{slowest["name"]}` at {fmt_ns(slowest["mean_ns"])} '
+                          '— expected for large data transfers; dominated by host→GPU DMA bandwidth.')
+                    write(f'- **Fastest operation:** `{fastest["name"]}` at {fmt_ns(fastest["mean_ns"])}.')
+                    # Flag high relative noise as a potential measurement quality issue.
+                    noisy = [e for e in valid if e['sd_ns'] and e['mean_ns'] > 0 and
+                             e['sd_ns'] / e['mean_ns'] > 0.10]
+                    if noisy:
+                        write(f'- **High variance (>10% σ/mean):** '
+                              + ', '.join(f'`{e["name"]}`' for e in noisy)
+                              + ' — consider re-running on a quieter runner or increasing IterationCount.')
+                    write()
+                    write('> 📌 These numbers reflect **CPU-side API overhead** on lavapipe (software Vulkan).')
+                    write('> Absolute values are not meaningful for GPU throughput; use them to track')
+                    write('> **regressions** relative to previous runs on the same runner type.')
+
+        write()
+        write('---')
+        write('*Generated by the `ci_report` job in `.github/workflows/dotnet.yml`*')
+        PYEOF

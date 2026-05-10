@@ -16,6 +16,7 @@ namespace Veldrid.Vk
         public VkSwapchainKHR DeviceSwapchain => deviceSwapchain;
         public uint ImageIndex => currentImageIndex;
         public VkSemaphore ImageAvailableSemaphore => imageAvailableSemaphore;
+        public VkSemaphore RenderFinishedSemaphore => renderFinishedSemaphore;
         public VkSurfaceKHR Surface => surface;
 
         public VkQueue PresentQueue => presentQueue;
@@ -106,6 +107,11 @@ namespace Veldrid.Vk
         private readonly bool colorSrgb;
         private VkSwapchainKHR deviceSwapchain;
         private VkSemaphore imageAvailableSemaphore;
+        // Signalled by a null graphics-queue submit in SwapBuffersCore (after all
+        // rendering work has been enqueued).  Passed to vkQueuePresentKHR as a wait
+        // semaphore so the compositor never reads a partially-rendered image, and the
+        // Adreno driver can pipeline the present without blocking the CPU thread.
+        private VkSemaphore renderFinishedSemaphore;
         private bool syncToVBlank;
         private bool? newSyncToVBlank;
         private uint currentImageIndex;
@@ -202,8 +208,10 @@ namespace Veldrid.Vk
 
             var semCi = new VkSemaphoreCreateInfo();
             gd.DeviceApi.vkCreateSemaphore(&semCi, null, out imageAvailableSemaphore);
-
-            // Initial acquire: signal the image-available semaphore and register it with
+            // renderFinishedSemaphore is signalled by SwapBuffersCore before every
+            // vkQueuePresentKHR.  The compositor waits on it instead of relying on
+            // implicit driver synchronisation (which stalls the CPU on Adreno).
+            gd.DeviceApi.vkCreateSemaphore(&semCi, null, out renderFinishedSemaphore);
             // the device so the first SubmitCommandsCore call waits on it before writing
             // to the swapchain image.
             if (AcquireNextImage())
@@ -581,17 +589,19 @@ namespace Veldrid.Vk
 
             uint maxImageCount = surfaceCapabilities.maxImageCount == 0 ? uint.MaxValue : surfaceCapabilities.maxImageCount;
 
-            // Image count tuning for latency:
-            // IMMEDIATE: use minImageCount (typically 2) — with no vblank queuing there
-            //   is at most one pending-display image at any time, so a third image only
-            //   adds memory without reducing latency. Acquire never stalls in IMMEDIATE
-            //   mode because the driver returns the just-replaced image immediately.
-            // FIFO / FIFO_RELAXED / MAILBOX: use minImageCount + 1 (triple-buffering) to
-            //   prevent the GPU from stalling on vkAcquireNextImageKHR while the display
-            //   controller holds two images across the vblank boundary.
-            uint imageCount = presentMode == VkPresentModeKHR.Immediate
-                ? Math.Min(maxImageCount, surfaceCapabilities.minImageCount)
-                : Math.Min(maxImageCount, surfaceCapabilities.minImageCount + 1);
+            // Image count: always use minImageCount + 1 (triple-buffering equivalent).
+            //
+            // IMMEDIATE mode on Android does NOT free swapchain images instantly: SurfaceFlinger
+            // holds the previously displayed image until the compositor's own vsync tick confirms
+            // the new one is on screen (typically 1–2 vblank periods at 120 Hz = 8–16 ms).
+            // With only minImageCount (= 2) images, vkAcquireNextImageKHR blocks the CPU render
+            // thread for that entire hold period, collapsing the theoretical "uncapped" IMMEDIATE
+            // throughput to ~60 fps on a 120 Hz display.
+            //
+            // With minImageCount + 1 (= 3), there is always a third image that was rendered and
+            // returned to the application before the compositor swaps — the acquire never stalls.
+            // The one extra frame of memory (~6 MB at 1440p R8G8B8A8) is a worthwhile trade.
+            uint imageCount = Math.Min(maxImageCount, surfaceCapabilities.minImageCount + 1);
 
             var swapchainCi = new VkSwapchainCreateInfoKHR();
             swapchainCi.surface = surface;
@@ -1047,6 +1057,7 @@ namespace Veldrid.Vk
         private void disposeCore()
         {
             gd.DeviceApi.vkDestroySemaphore(imageAvailableSemaphore, null);
+            gd.DeviceApi.vkDestroySemaphore(renderFinishedSemaphore, null);
             framebuffer.Dispose();
             gd.DeviceApi.vkDestroySwapchainKHR(deviceSwapchain, null);
             gd.InstanceApi.vkDestroySurfaceKHR(Surface, null);
