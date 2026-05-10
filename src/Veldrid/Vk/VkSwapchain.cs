@@ -106,6 +106,23 @@ namespace Veldrid.Vk
         // Lets the per-present chain be skipped in the common single-mode case.
         public bool HasPresentModeHotSwap => compatiblePresentModes != null && compatiblePresentModes.Length > 1;
 
+        // Whether renderFinishedSemaphore was already signalled via SubmitCommandsCore
+        // (folded into the swapchain CL submit) for the same-queue case.
+        // True means SwapBuffersCore can skip its null vkQueueSubmit for this frame.
+        internal bool RenderFinishedPreSignaled => renderFinishedPreSignaled;
+
+        // Called by SubmitCommandsCore to record that renderFinishedSemaphore was included
+        // as a signal semaphore in the swapchain CL's vkQueueSubmit.  Only called for the
+        // same-queue case (PresentQueueIndex == GraphicsQueueIndex) where FIFO ordering
+        // ensures the present always executes after all prior render work regardless of
+        // how many additional non-swapchain command lists are submitted afterwards.
+        internal void MarkRenderFinishedSignaled() => renderFinishedPreSignaled = true;
+
+        // Called by SwapBuffersCore after handling the present, to reset the flag for the
+        // next frame.  Also called on swapchain recreation so a stale pre-signal state from
+        // a previous swapchain is never inherited by the new one.
+        internal void ClearRenderFinishedSignaled() => renderFinishedPreSignaled = false;
+
         private readonly VkGraphicsDevice gd;
         private readonly VkSwapchainFramebuffer framebuffer;
         // The original SwapchainSource is retained so we can re-create the underlying
@@ -125,6 +142,11 @@ namespace Veldrid.Vk
         // semaphore so the compositor never reads a partially-rendered image, and the
         // Adreno driver can pipeline the present without blocking the CPU thread.
         private VkSemaphore renderFinishedSemaphore;
+        // When true, the renderFinishedSemaphore has already been signalled inside
+        // SubmitCommandsCore (folded into the swapchain CL's vkQueueSubmit call) for the
+        // same-queue path, so SwapBuffersCore can skip its own null submit.
+        // Cleared by SwapBuffersCore after each present so the flag is fresh for the next frame.
+        private bool renderFinishedPreSignaled;
         private bool syncToVBlank;
         private bool? newSyncToVBlank;
         private uint currentImageIndex;
@@ -490,6 +512,11 @@ namespace Veldrid.Vk
         private bool createSwapchain(uint width, uint height)
         {
             lastCreateSurfaceLost = false;
+            // Reset the pre-signal flag so a new swapchain never inherits a stale
+            // "already signalled" state from its predecessor.  Without this, the very
+            // first SwapBuffersCore after a recreation would skip the null submit while
+            // the renderFinishedSemaphore has NOT yet been signalled by any submit.
+            renderFinishedPreSignaled = false;
 
             // Obtain the surface capabilities first -- this will indicate whether the surface has been lost.
             var result = gd.InstanceApi.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(gd.PhysicalDevice, surface, out var surfaceCapabilities);

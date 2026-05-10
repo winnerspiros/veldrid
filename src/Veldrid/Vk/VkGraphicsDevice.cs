@@ -1123,6 +1123,18 @@ namespace Veldrid.Vk
                 if (submittedFences.Count == 0)
                     return;
 
+                // Fast path: if the oldest pending fence hasn't signalled yet, it is very
+                // likely that all later ones haven't either (GPU queue is FIFO ordered).
+                // Skip the full scan to avoid N expensive vkGetFenceStatus driver calls
+                // (each involves a kernel round-trip on Adreno) when the GPU is still
+                // processing previous work.
+                //
+                // In the rare multi-threaded case where list order doesn't match submission
+                // order, the worst consequence is one extra frame of delayed resource
+                // recycling — never a correctness issue, since RefCounts keep resources alive.
+                if (DeviceApi.vkGetFenceStatus(submittedFences[0].Fence) != VkResult.Success)
+                    return;
+
                 // Scan ALL submitted fences — do not assume they are in completion order.
                 //
                 // When multiple threads submit command buffers concurrently (e.g. the render
@@ -2450,8 +2462,40 @@ namespace Veldrid.Vk
                 pendingImageAvailableSemaphore = VkSemaphore.Null;
             }
 
-            if (waitSem != VkSemaphore.Null)
+            // Performance optimisation: for the common same-queue case (present queue ==
+            // graphics queue, which is universal on Android/Adreno), fold the
+            // renderFinishedSemaphore signal into this submit instead of emitting a
+            // separate null vkQueueSubmit in SwapBuffersCore.
+            //
+            // Safety: on a single FIFO GPU queue, vkQueuePresentKHR is always enqueued
+            // AFTER all prior render submits.  Even if more non-swapchain command lists
+            // are submitted after this one (before SwapBuffersCore), the present cannot
+            // start until it reaches the front of the queue, which is only after those
+            // later submits complete — so the renderFinishedSemaphore never misfires.
+            //
+            // We guard !sc.RenderFinishedPreSignaled so that if the app submits the
+            // swapchain CL more than once per frame (unusual but legal), only the first
+            // submit signals the semaphore; subsequent ones are no-ops.  The semaphore
+            // is a binary type and double-signalling would be a spec violation.
+            //
+            // The separate-queue path (rare, desktop-only) is intentionally excluded:
+            // the cross-queue ordering there cannot guarantee the semaphore is consumed
+            // before a subsequent same-swapchain signal on the graphics queue.
+            VkSemaphore signalSem = VkSemaphore.Null;
+            if (vkCl.LastUsedSwapchain is { } sc
+                && sc.PresentQueueIndex == GraphicsQueueIndex
+                && !sc.RenderFinishedPreSignaled)
+            {
+                signalSem = sc.RenderFinishedSemaphore;
+                sc.MarkRenderFinishedSignaled();
+            }
+
+            if (waitSem != VkSemaphore.Null && signalSem != VkSemaphore.Null)
+                submitCommandList(cl, 1, &waitSem, 1, &signalSem, fence);
+            else if (waitSem != VkSemaphore.Null)
                 submitCommandList(cl, 1, &waitSem, 0, null, fence);
+            else if (signalSem != VkSemaphore.Null)
+                submitCommandList(cl, 0, null, 1, &signalSem, fence);
             else
                 submitCommandList(cl, 0, null, 0, null, fence);
         }
@@ -2526,22 +2570,24 @@ namespace Veldrid.Vk
             // Signal renderFinishedSemaphore so vkQueuePresentKHR can wait on it
             // rather than relying on implicit driver serialisation.
             //
-            // The null submit (0 command buffers) executes after all previously queued
-            // render work because the graphics queue is strictly ordered — no explicit
-            // dependencies are needed for same-queue ordering.  The semaphore gives the
-            // compositor a GPU-side "rendering is done" signal so it can pipeline the
-            // display scan-out without stalling the CPU.  Without this, the Adreno driver
-            // was observed to inject a CPU-blocking implicit wait inside vkQueuePresentKHR,
-            // costing a full GPU frame time (~4 ms) on every present call.
+            // Fast path (same-queue only): if SubmitCommandsCore already folded the
+            // renderFinishedSemaphore signal into the swapchain CL's vkQueueSubmit, skip
+            // this null submit entirely, saving one expensive vkQueueSubmit per frame.
             //
-            // Safety-net: if SubmitCommandsCore never saw a swapchain-framebuffer command
-            // list this frame (e.g. headless/offscreen render, or app didn't call Draw),
-            // pendingImageAvailableSemaphore may still be set.  Fold it into this null
-            // submit as a wait so it is consumed and vkAcquireNextImageKHR can re-signal
-            // it next frame without a binary-semaphore double-signal error.
+            // Slow path (fallback): emit a null submit that signals the semaphore after
+            // all prior render work (FIFO ordering).  This covers:
+            //   • Frames where no swapchain CL was submitted (headless / offscreen).
+            //   • The separate-queue case (cross-queue safety requires the explicit submit).
+            //   • Any leftover pendingImageAvailableSemaphore (safety-net consume).
             var renderFinishedSem = vkSc.RenderFinishedSemaphore;
             var leftoverAcquireSem = pendingImageAvailableSemaphore;
             pendingImageAvailableSemaphore = VkSemaphore.Null;
+
+            // Consume the pre-signal flag before entering the lock so the flag is
+            // always reset even if an exception escapes (swapchain recreation, etc.).
+            bool skipNullSubmit = vkSc.RenderFinishedPreSignaled
+                && leftoverAcquireSem == VkSemaphore.Null;
+            vkSc.ClearRenderFinishedSignaled();
 
             VkResult presentResult;
             if (vkSc.PresentQueueIndex == GraphicsQueueIndex)
@@ -2551,7 +2597,11 @@ namespace Veldrid.Vk
                     // Null submit on the same queue: signals the semaphore after all
                     // previously submitted render work completes (queue FIFO ordering).
                     // Also waits on any unconsumed image-available semaphore (safety-net).
-                    signalSemaphoreOnGraphicsQueue(renderFinishedSem, leftoverAcquireSem);
+                    // Skipped when renderFinishedSemaphore was already pre-signalled by
+                    // SubmitCommandsCore (and no leftover acquire semaphore needs consuming),
+                    // saving one vkQueueSubmit per frame on same-queue devices (Android).
+                    if (!skipNullSubmit)
+                        signalSemaphoreOnGraphicsQueue(renderFinishedSem, leftoverAcquireSem);
 
                     presentInfo.waitSemaphoreCount = 1;
                     presentInfo.pWaitSemaphores = &renderFinishedSem;
@@ -2571,6 +2621,8 @@ namespace Veldrid.Vk
             {
                 // Separate present queue: signal on the graphics queue first, then wait
                 // on the present queue.  Cross-queue semaphore ordering is per-spec.
+                // The pre-signal optimisation is not used for cross-queue (see comments in
+                // SubmitCommandsCore), so this path always emits the null submit.
                 lock (graphicsQueueLock)
                     signalSemaphoreOnGraphicsQueue(renderFinishedSem, leftoverAcquireSem);
 

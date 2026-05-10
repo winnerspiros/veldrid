@@ -25,6 +25,16 @@ namespace Veldrid.Vk
         /// </summary>
         internal bool UsesSwapchainFramebuffer => usesSwapchainFramebuffer;
 
+        /// <summary>
+        /// The last <see cref="VkSwapchain"/> whose framebuffer was set on this command list
+        /// during the current <see cref="Begin"/>/<see cref="End"/> recording cycle, or
+        /// <see langword="null"/> if no swapchain framebuffer was ever bound.
+        /// Used by <see cref="VkGraphicsDevice.SubmitCommandsCore"/> to pre-signal the
+        /// swapchain's render-finished semaphore in the same <c>vkQueueSubmit</c>, so that
+        /// <see cref="VkGraphicsDevice.SwapBuffersCore"/> can skip its own null submit.
+        /// </summary>
+        internal VkSwapchain LastUsedSwapchain => lastUsedSwapchain;
+
         public override string Name
         {
             get => name;
@@ -70,6 +80,11 @@ namespace Veldrid.Vk
         // the pending image-available semaphore as a wait: only the submit that writes to the
         // swapchain image needs to wait for the compositor to release it.
         private bool usesSwapchainFramebuffer;
+        // The last swapchain whose framebuffer was bound during this recording cycle.
+        // Set alongside usesSwapchainFramebuffer; cleared in Begin().  Used by
+        // SubmitCommandsCore to pre-signal that swapchain's renderFinishedSemaphore in the
+        // same vkQueueSubmit, eliminating the separate null-submit in SwapBuffersCore.
+        private VkSwapchain lastUsedSwapchain;
         private VkRenderPass activeRenderPass;
         private VkPipeline currentGraphicsPipeline;
         private BoundResourceSetInfo[] currentGraphicsResourceSets = Array.Empty<BoundResourceSetInfo>();
@@ -190,6 +205,7 @@ namespace Veldrid.Vk
             ClearCachedState();
             currentFramebuffer = null;
             usesSwapchainFramebuffer = false;
+            lastUsedSwapchain = null;
             currentGraphicsPipeline = null;
             clearSets(currentGraphicsResourceSets);
             Util.ClearArray(scissorRects);
@@ -963,6 +979,7 @@ namespace Veldrid.Vk
             {
                 currentStagingInfo.Resources.Add(scFb.Swapchain.RefCount);
                 usesSwapchainFramebuffer = true;
+                lastUsedSwapchain = scFb.Swapchain;
             }
         }
 
