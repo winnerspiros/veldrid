@@ -122,8 +122,6 @@ namespace Veldrid.Vk
         // consecutive dispatch with unchanged compute resource sets.
         private bool computeAnySetsPendingBind;
 
-        private string name;
-
         // Dirty bits for the preDrawCommand texture-layout scan.
         //
         // graphicsAnySetDirty: set when any graphics resource set slot is changed (new VkResourceSet
@@ -132,13 +130,27 @@ namespace Veldrid.Vk
         //
         // graphicsForceTransitionScan: set by preDispatchCommand to force one additional scan on the
         //   next draw.  Compute dispatches transition storage textures to General; the following
-        //   graphics draw must re-scan to bring those textures back to ShaderReadOnlyOptimal (or
-        //   whatever layout the graphics pipeline expects).
+        //   graphics draw must re-scan to bring those textures back to ShaderReadOnlyOptimal.
+        //   Also set by CopyTextureCore and GenerateMipmapsCore because those operations can leave
+        //   non-sampled storage images in Transfer*Optimal, which the next graphics draw must fix.
         //
-        // When BOTH bits are false, preDrawCommand skips the O(sets × textures × subresources) scan
-        // and saves several hundred ns of CPU work on every redundant draw call.
+        // When BOTH bits are false, preDrawCommand skips the O(sets × textures × subresources) scan.
         private bool graphicsAnySetDirty;
         private bool graphicsForceTransitionScan;
+
+        // Dirty bits for the preDispatchCommand texture-layout scan.
+        //
+        // computeAnySetDirty: set when any compute resource set slot is changed or the command list
+        //   is begun.  Signals that newly bound textures may need a layout transition before dispatch.
+        //
+        // computeForceTransitionScan: set by preDrawCommand (graphics draws may leave sampled textures
+        //   in ShaderReadOnlyOptimal which may be wrong for compute storage access) and by
+        //   CopyTextureCore / GenerateMipmapsCore (those leave non-sampled textures in Transfer*Optimal).
+        //
+        // When BOTH bits are false, preDispatchCommand skips the O(sets × textures) scan, saving
+        // the same overhead as the symmetric graphicsAnySetDirty / graphicsForceTransitionScan gate.
+        private bool computeAnySetDirty;
+        private bool computeForceTransitionScan;
 
         // Dirty bit for the vkCmdBindDescriptorSets path.
         //
@@ -153,6 +165,7 @@ namespace Veldrid.Vk
         // per draw.  For 500 draws × 8 resource slots this saves ~20-32 µs/frame of wasted work.
         private bool graphicsAnySetsPendingBind;
 
+        private string name;
         private StagingResourceInfo currentStagingInfo;
 
         public VkCommandList(VkGraphicsDevice gd, ref CommandListDescription description)
@@ -265,6 +278,8 @@ namespace Veldrid.Vk
             currentComputePipeline = null;
             clearSets(currentComputeResourceSets);
             computeAnySetsPendingBind = false;
+            computeAnySetDirty = true;
+            computeForceTransitionScan = false;
         }
 
         public override void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ)
@@ -475,6 +490,12 @@ namespace Veldrid.Vk
             currentStagingInfo.Resources.Add(srcVkTexture.RefCount);
             VkTexture dstVkTexture = Util.AssertSubtype<Texture, VkTexture>(destination);
             currentStagingInfo.Resources.Add(dstVkTexture.RefCount);
+
+            // A copy can leave non-sampled textures in Transfer*Optimal.  Force both the graphics
+            // and compute pre-dispatch/pre-draw transition scans so the next draw or dispatch sees
+            // those textures in the correct layout (ShaderReadOnlyOptimal / General).
+            graphicsForceTransitionScan = true;
+            computeForceTransitionScan = true;
         }
 
         internal static void CopyTextureCore_VkCommandBuffer(
@@ -1059,6 +1080,7 @@ namespace Veldrid.Vk
                 currentComputeResourceSets[slot] = new BoundResourceSetInfo(rs, dynamicOffsetsCount, ref dynamicOffsets);
                 computeResourceSetsChanged[slot] = true;
                 computeAnySetsPendingBind = true;
+                computeAnySetDirty = true;
                 Util.AssertSubtype<ResourceSet, VkResourceSet>(rs);
             }
         }
@@ -1128,6 +1150,12 @@ namespace Veldrid.Vk
 
                 graphicsAnySetDirty = false;
                 graphicsForceTransitionScan = false;
+
+                // The graphics scan may have transitioned sampled textures to ShaderReadOnlyOptimal.
+                // If any of those textures are also used as compute storage images, the next dispatch
+                // must re-scan and transition them back to General.  Force the scan unconditionally
+                // (symmetric to graphicsForceTransitionScan being set by preDispatchCommand).
+                computeForceTransitionScan = true;
             }
 
             // Emit all accumulated transitions as a single vkCmdPipelineBarrier.
@@ -1439,16 +1467,32 @@ namespace Veldrid.Vk
             if (currentComputePipeline is null)
                 throw new VeldridException("A compute pipeline must be bound before dispatching.");
 
-            for (uint currentSlot = 0; currentSlot < currentComputePipeline.ResourceSetCount; currentSlot++)
+            // Scan compute resource sets for texture layout transitions, but ONLY when resource sets
+            // may have changed since the last dispatch (computeAnySetDirty) or an intervening
+            // graphics draw / copy / mipgen left textures in an unexpected layout
+            // (computeForceTransitionScan).
+            //
+            // Mirrors the graphicsAnySetDirty || graphicsForceTransitionScan gate in preDrawCommand.
+            // When both bits are false (consecutive dispatches with the same resource sets and no
+            // intervening graphics draws or copies), textures are already in the correct layout from
+            // the previous dispatch — skipping the O(sets × textures) scan saves several hundred ns
+            // of CPU work per dispatch.
+            if (computeAnySetDirty || computeForceTransitionScan)
             {
-                if (currentComputeResourceSets[currentSlot].Set is null)
-                    continue;
+                for (uint currentSlot = 0; currentSlot < currentComputePipeline.ResourceSetCount; currentSlot++)
+                {
+                    if (currentComputeResourceSets[currentSlot].Set is null)
+                        continue;
 
-                var vkSet = Util.AssertSubtype<ResourceSet, VkResourceSet>(
-                    currentComputeResourceSets[currentSlot].Set);
+                    var vkSet = Util.AssertSubtype<ResourceSet, VkResourceSet>(
+                        currentComputeResourceSets[currentSlot].Set);
 
-                appendTransitions(vkSet.SampledTextures, VkImageLayout.ShaderReadOnlyOptimal);
-                appendTransitions(vkSet.StorageTextures, VkImageLayout.General);
+                    appendTransitions(vkSet.SampledTextures, VkImageLayout.ShaderReadOnlyOptimal);
+                    appendTransitions(vkSet.StorageTextures, VkImageLayout.General);
+                }
+
+                computeAnySetDirty = false;
+                computeForceTransitionScan = false;
             }
 
             flushTransitionBarriers();
@@ -2466,6 +2510,14 @@ namespace Veldrid.Vk
             }
 
             flushTransitionBarriers();
+
+            // GenerateMipmaps uses Transfer*Optimal intermediate layouts and restores each mip to
+            // its final stable layout.  Force both graphics and compute transition scans on the next
+            // draw/dispatch so that any texture that ended up in a different layout than expected
+            // (e.g. a non-sampled storage image left in General by the finalLayout logic above) is
+            // correctly transitioned back to the layout required by the next consumer.
+            graphicsForceTransitionScan = true;
+            computeForceTransitionScan = true;
         }
 
         private protected override void PushDebugGroupCore(string name)
