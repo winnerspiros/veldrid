@@ -423,7 +423,7 @@ jobs:
       run: |
         python3 - <<'PYEOF'
         import os, json, glob, re
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         summary_path = os.environ['GITHUB_STEP_SUMMARY']
 
@@ -437,7 +437,7 @@ jobs:
         # ── Header ───────────────────────────────────────────────────────────────
         write('# 🔬 Veldrid CI Report')
         write(f'**Run:** [{os.environ["GH_RUN_URL"]}]({os.environ["GH_RUN_URL"]})')
-        write(f'**Generated:** {datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")}')
+        write(f'**Generated:** {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}')
         write()
 
         # ── Build & smoke status ──────────────────────────────────────────────

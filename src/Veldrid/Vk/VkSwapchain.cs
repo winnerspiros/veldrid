@@ -15,7 +15,20 @@ namespace Veldrid.Vk
 
         public VkSwapchainKHR DeviceSwapchain => deviceSwapchain;
         public uint ImageIndex => currentImageIndex;
+        /// <summary>
+        /// Signalled by <c>vkAcquireNextImageKHR</c> when the next swapchain image is available
+        /// for rendering.  Consumed as a <c>vkQueueSubmit</c> wait semaphore in
+        /// <see cref="VkGraphicsDevice.SubmitCommandsCore"/> so the GPU waits internally
+        /// (the CPU never blocks).
+        /// </summary>
         public VkSemaphore ImageAvailableSemaphore => imageAvailableSemaphore;
+        /// <summary>
+        /// Signalled by a zero-command-buffer submit on the graphics queue in
+        /// <see cref="VkGraphicsDevice.SwapBuffersCore"/> — after all render work has been
+        /// enqueued — and passed to <c>vkQueuePresentKHR</c> as a wait semaphore.  This tells
+        /// the compositor exactly when rendering is done so it can pipeline the display
+        /// scan-out without blocking the CPU thread.
+        /// </summary>
         public VkSemaphore RenderFinishedSemaphore => renderFinishedSemaphore;
         public VkSurfaceKHR Surface => surface;
 
@@ -210,8 +223,10 @@ namespace Veldrid.Vk
             gd.DeviceApi.vkCreateSemaphore(&semCi, null, out imageAvailableSemaphore);
             // renderFinishedSemaphore is signalled by SwapBuffersCore before every
             // vkQueuePresentKHR.  The compositor waits on it instead of relying on
-            // implicit driver synchronisation (which stalls the CPU on Adreno).
+            // implicit driver synchronization (which stalls the CPU on Adreno).
             gd.DeviceApi.vkCreateSemaphore(&semCi, null, out renderFinishedSemaphore);
+
+            // Initial acquire: signal the image-available semaphore and register it with
             // the device so the first SubmitCommandsCore call waits on it before writing
             // to the swapchain image.
             if (AcquireNextImage())
