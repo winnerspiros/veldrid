@@ -506,9 +506,11 @@ jobs:
                 host_info = None
                 for fpath, data in report_files:
                     if host_info is None:
-                        host_info = data.get('HostEnvironmentInfo', {})
+                        # HostEnvironmentInfo may be absent or explicitly null.
+                        host_info = data.get('HostEnvironmentInfo') or {}
                     for b in data.get('Benchmarks', []):
-                        stats = b.get('Statistics', {})
+                        # Statistics may be absent or explicitly null in incomplete runs.
+                        stats = b.get('Statistics') or {}
                         mean_ns = stats.get('Mean', None)
                         sd_ns   = stats.get('StandardDeviation', None)
                         # Extract parameter values from FullName, e.g. "(SizeInBytes: 1024)"
@@ -535,11 +537,15 @@ jobs:
                     return f'{ns/1_000_000_000:.3f} s'
 
                 # Host environment summary.
+                # BenchmarkDotNet 0.14+ emits OsVersion as a plain string.
+                # Older releases emitted it as a nested object {"Value": "..."}.
+                # Handle both shapes defensively.
                 if host_info:
-                    os_info  = host_info.get('OsVersion', {})
+                    os_raw   = host_info.get('OsVersion', '')
+                    os_str   = os_raw.get('Value', '') if isinstance(os_raw, dict) else (os_raw or '')
                     runtime  = host_info.get('RuntimeVersion', '')
                     cpu      = host_info.get('ProcessorName', '')
-                    write(f'**Host:** {os_info.get("Value", "")} · {runtime} · {cpu}')
+                    write(f'**Host:** {os_str} · {runtime} · {cpu}')
                     write()
 
                 write('| Benchmark | Mean | ±StdDev |')

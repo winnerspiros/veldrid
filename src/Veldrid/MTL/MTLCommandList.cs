@@ -486,7 +486,11 @@ namespace Veldrid.MTL
 
         protected override void ResolveTextureCore(Texture source, Texture destination)
         {
-            // TODO: This approach destroys the contents of the source Texture (according to the docs).
+            // MTLStoreActionStoreAndMultisampleResolve both stores the MSAA tile data back to the
+            // source texture AND writes the resolved (single-sample) result to resolveTexture.
+            // Using MultisampleResolve alone would leave the source texture contents undefined after
+            // the render pass, which would corrupt any subsequent reads of the MSAA buffer (e.g. a
+            // second resolve pass, or a pipeline that samples the MSAA surface directly).
             ensureNoBlitEncoder();
             ensureNoRenderPass();
 
@@ -497,7 +501,7 @@ namespace Veldrid.MTL
             var colorAttachment = rpDesc.colorAttachments[0];
             colorAttachment.texture = mtlSrc.DeviceTexture;
             colorAttachment.loadAction = MTLLoadAction.Load;
-            colorAttachment.storeAction = MTLStoreAction.MultisampleResolve;
+            colorAttachment.storeAction = MTLStoreAction.StoreAndMultisampleResolve;
             colorAttachment.resolveTexture = mtlDst.DeviceTexture;
 
             using (NSAutoreleasePool.Begin())
