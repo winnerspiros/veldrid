@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
@@ -108,6 +109,19 @@ namespace Veldrid.Vk
         private VkPipeline currentComputePipeline;
         private BoundResourceSetInfo[] currentComputeResourceSets = Array.Empty<BoundResourceSetInfo>();
         private bool[] computeResourceSetsChanged;
+
+        // Dirty bit for the compute vkCmdBindDescriptorSets path.
+        //
+        // Mirrors graphicsAnySetsPendingBind for the compute pipeline:
+        //   Set by SetComputeResourceSetCore when a compute slot's resource set actually changes.
+        //   Cleared after flushNewResourceSets returns in preDispatchCommand.
+        //   False at Begin() (no sets yet).
+        //
+        // When false, flushNewResourceSets is not called, saving the O(resourceSetCount) slot-scan
+        // loop + stackalloc that would otherwise emit zero vkCmdBindDescriptorSets on every
+        // consecutive dispatch with unchanged compute resource sets.
+        private bool computeAnySetsPendingBind;
+
         private string name;
 
         // Dirty bits for the preDrawCommand texture-layout scan.
@@ -250,6 +264,7 @@ namespace Veldrid.Vk
 
             currentComputePipeline = null;
             clearSets(currentComputeResourceSets);
+            computeAnySetsPendingBind = false;
         }
 
         public override void Dispatch(uint groupCountX, uint groupCountY, uint groupCountZ)
@@ -813,7 +828,10 @@ namespace Veldrid.Vk
                 {
                     uint pixelSize = FormatSizeHelpers.GetSizeInBytes(srcVkTexture.Format);
                     uint regionCount = zLimit * height;
-                    var copyRegions = new VkBufferCopy[regionCount];
+                    // Use ArrayPool to avoid per-call heap allocation. For a 256×256 texture
+                    // regionCount = 256, so new VkBufferCopy[256] would allocate ~3KB on the heap
+                    // every call. ArrayPool reuses the same backing array across frames.
+                    var copyRegions = ArrayPool<VkBufferCopy>.Shared.Rent((int)regionCount);
                     int idx = 0;
 
                     for (uint zz = 0; zz < zLimit; zz++)
@@ -837,6 +855,8 @@ namespace Veldrid.Vk
 
                     fixed (VkBufferCopy* regionsPtr = copyRegions)
                         deviceApi.vkCmdCopyBuffer(cb, srcBuffer, dstBuffer, regionCount, regionsPtr);
+
+                    ArrayPool<VkBufferCopy>.Shared.Return(copyRegions);
                 }
                 else // IsCompressedFormat
                 {
@@ -848,7 +868,8 @@ namespace Veldrid.Vk
                     uint compressedDstY = dstY / 4;
                     uint blockSizeInBytes = FormatHelpers.GetBlockSizeInBytes(source.Format);
                     uint regionCount = zLimit * numRows;
-                    var copyRegions = new VkBufferCopy[regionCount];
+                    // Same ArrayPool strategy as the uncompressed path above.
+                    var copyRegions = ArrayPool<VkBufferCopy>.Shared.Rent((int)regionCount);
                     int idx = 0;
 
                     for (uint zz = 0; zz < zLimit; zz++)
@@ -872,6 +893,8 @@ namespace Veldrid.Vk
 
                     fixed (VkBufferCopy* regionsPtr = copyRegions)
                         deviceApi.vkCmdCopyBuffer(cb, srcBuffer, dstBuffer, regionCount, regionsPtr);
+
+                    ArrayPool<VkBufferCopy>.Shared.Return(copyRegions);
                 }
             }
         }
@@ -1035,6 +1058,7 @@ namespace Veldrid.Vk
                 currentComputeResourceSets[slot].Offsets.Dispose();
                 currentComputeResourceSets[slot] = new BoundResourceSetInfo(rs, dynamicOffsetsCount, ref dynamicOffsets);
                 computeResourceSetsChanged[slot] = true;
+                computeAnySetsPendingBind = true;
                 Util.AssertSubtype<ResourceSet, VkResourceSet>(rs);
             }
         }
@@ -1435,12 +1459,18 @@ namespace Veldrid.Vk
             // transition scan so those textures are brought back to ShaderReadOnlyOptimal.
             graphicsForceTransitionScan = true;
 
-            flushNewResourceSets(
-                currentComputeResourceSets,
-                computeResourceSetsChanged,
-                currentComputePipeline.ResourceSetCount,
-                VkPipelineBindPoint.Compute,
-                currentComputePipeline.PipelineLayout);
+            // Only call flushNewResourceSets when at least one compute resource set slot has changed
+            // since the last dispatch.  Mirrors the graphicsAnySetsPendingBind gate in preDrawCommand.
+            if (computeAnySetsPendingBind)
+            {
+                flushNewResourceSets(
+                    currentComputeResourceSets,
+                    computeResourceSetsChanged,
+                    currentComputePipeline.ResourceSetCount,
+                    VkPipelineBindPoint.Compute,
+                    currentComputePipeline.PipelineLayout);
+                computeAnySetsPendingBind = false;
+            }
         }
 
         private void ensureRenderPassActive()
