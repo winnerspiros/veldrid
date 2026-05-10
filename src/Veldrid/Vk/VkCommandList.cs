@@ -2608,8 +2608,9 @@ namespace Veldrid.Vk
 
             // List instead of HashSet for O(1) amortised Add and smaller constant-factor overhead.
             // Duplicate RefCounts are harmless: CommandBufferSubmitted calls Increment for each
-            // entry and recycleStagingInfoCore calls Decrement for each entry, so every Increment
-            // is matched by exactly one Decrement and the net effect is the same as deduplication.
+            // entry and recycleStagingInfoCore calls Decrement for each entry — every Increment is
+            // always matched by exactly one Decrement regardless of duplicates, so the per-resource
+            // refcount accurately reflects the number of in-flight command buffers using it.
             // The per-add cost drops from ~30-50 ns (HashSet bucket-lookup) to ~3-5 ns (List append),
             // which matters when dozens of resource-set bindings accumulate across hundreds of draws.
             public List<ResourceRefCount> Resources { get; } = new List<ResourceRefCount>();
