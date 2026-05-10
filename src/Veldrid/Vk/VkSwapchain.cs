@@ -203,6 +203,9 @@ namespace Veldrid.Vk
             var semCi = new VkSemaphoreCreateInfo();
             gd.DeviceApi.vkCreateSemaphore(&semCi, null, out imageAvailableSemaphore);
 
+            // Initial acquire: signal the image-available semaphore and register it with
+            // the device so the first SubmitCommandsCore call waits on it before writing
+            // to the swapchain image.
             if (AcquireNextImage())
                 gd.NotifyImageAcquired(imageAvailableSemaphore);
 
@@ -287,7 +290,7 @@ namespace Veldrid.Vk
             var result = gd.DeviceApi.vkAcquireNextImageKHR(deviceSwapchain,
                 acquire_timeout_ns,
                 semaphore,
-                default,
+                default, // no fence — GPU-side semaphore handles synchronisation
                 out currentImageIndex);
 
             if (result == VkResult.ErrorSurfaceLostKHR)
@@ -331,17 +334,19 @@ namespace Veldrid.Vk
         }
 
         // Replaces imageAvailableSemaphore with a fresh unsignaled one.
-        // When isSignaled=true (e.g. SuboptimalKHR just signalled it), drains the
-        // GPU first so no in-flight command is waiting on the old handle before it
-        // is destroyed.
+        // drainGpu must be true when the old semaphore is known to be signaled (e.g.
+        // SuboptimalKHR just signalled it): we must drain the GPU first so no
+        // in-flight vkQueueSubmit is still waiting on the old handle before it is
+        // destroyed.  Pass false when the acquire failed before signalling the
+        // semaphore (OutOfDate, Timeout, etc.) — no drain is needed in that case.
         // NOTE: uses WaitForIdleLockFree to avoid deadlocking if called while the
         // graphicsQueueLock is already held (e.g. from within SwapBuffersCore).
         private void recreateImageAvailableSemaphore(bool drainGpu)
         {
             if (drainGpu)
                 gd.WaitForIdleLockFree();
-            // Clear the device-side pending reference so it doesn't hold the
-            // old (soon-to-be-destroyed) semaphore handle.
+            // Clear the device-side pending reference BEFORE destroying the handle so
+            // a concurrent SubmitCommandsCore cannot consume a dangling semaphore.
             gd.ClearPendingImageAvailableSemaphore();
             gd.DeviceApi.vkDestroySemaphore(imageAvailableSemaphore, null);
             var semCi = new VkSemaphoreCreateInfo();
@@ -350,6 +355,8 @@ namespace Veldrid.Vk
 
         // After a non-Success acquire the semaphore may or may not be signaled.
         // Always rebuild it so the next acquire starts from a known-clean state.
+        // isSignaled must reflect whether the failed result signals the semaphore per
+        // spec (true for SuboptimalKHR; false for OutOfDate, Timeout, etc.).
         private void rebuildSemaphoreAfterFailedAcquire(bool isSignaled)
         {
             recreateImageAvailableSemaphore(drainGpu: isSignaled);
