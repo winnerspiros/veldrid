@@ -17,6 +17,14 @@ namespace Veldrid.Vk
 
         public override bool IsDisposed => destroyed;
 
+        /// <summary>
+        /// True if this command list has called <see cref="SetFramebufferCore"/> with a
+        /// <see cref="VkSwapchainFramebuffer"/> at any point since the last <see cref="Begin"/>.
+        /// Used by <see cref="VkGraphicsDevice.SubmitCommandsCore"/> to decide which submit
+        /// should carry the image-available semaphore wait.
+        /// </summary>
+        internal bool UsesSwapchainFramebuffer => usesSwapchainFramebuffer;
+
         public override string Name
         {
             get => name;
@@ -56,6 +64,12 @@ namespace Veldrid.Vk
         // Graphics State
         private VkFramebufferBase currentFramebuffer;
         private bool currentFramebufferEverActive;
+        // Set (sticky within a single Begin/End recording cycle) when SetFramebufferCore is
+        // called with a VkSwapchainFramebuffer.  Cleared in Begin() so each recording starts
+        // clean.  VkGraphicsDevice.SubmitCommandsCore reads this to decide whether to attach
+        // the pending image-available semaphore as a wait: only the submit that writes to the
+        // swapchain image needs to wait for the compositor to release it.
+        private bool usesSwapchainFramebuffer;
         private VkRenderPass activeRenderPass;
         private VkPipeline currentGraphicsPipeline;
         private BoundResourceSetInfo[] currentGraphicsResourceSets = Array.Empty<BoundResourceSetInfo>();
@@ -175,6 +189,7 @@ namespace Veldrid.Vk
 
             ClearCachedState();
             currentFramebuffer = null;
+            usesSwapchainFramebuffer = false;
             currentGraphicsPipeline = null;
             clearSets(currentGraphicsResourceSets);
             Util.ClearArray(scissorRects);
@@ -203,7 +218,7 @@ namespace Veldrid.Vk
             commandBufferBegun = false;
             commandBufferEnded = true;
 
-            if (!currentFramebufferEverActive && currentFramebuffer != null)
+            if (!currentFramebufferEverActive && currentFramebuffer is not null)
                 beginCurrentRenderPass();
 
             if (activeRenderPass != VkRenderPass.Null)
@@ -211,7 +226,7 @@ namespace Veldrid.Vk
                 endCurrentRenderPass();
                 currentFramebuffer!.TransitionToFinalLayout(CommandBuffer);
             }
-            else if (currentFramebufferEverActive && currentFramebuffer != null)
+            else if (currentFramebufferEverActive && currentFramebuffer is not null)
             {
                 // The render pass was already ended mid-frame (e.g. by ensureNoRenderPass()
                 // called from CopyTexture or Dispatch) and no SetFramebufferCore was called
@@ -923,7 +938,7 @@ namespace Veldrid.Vk
         {
             if (activeRenderPass.Handle != VkRenderPass.Null)
                 endCurrentRenderPass();
-            else if (!currentFramebufferEverActive && currentFramebuffer != null)
+            else if (!currentFramebufferEverActive && currentFramebuffer is not null)
             {
                 // This forces any queued up texture clears to be emitted.
                 beginCurrentRenderPass();
@@ -936,15 +951,19 @@ namespace Veldrid.Vk
             currentFramebuffer = vkFb;
             currentFramebufferEverActive = false;
             newFramebuffer = true;
-            Util.EnsureArrayMinimumSize(ref scissorRects, Math.Max(1, (uint)vkFb.ColorTargets.Count));
-            Util.EnsureArrayMinimumSize(ref cachedViewports, Math.Max(1, (uint)vkFb.ColorTargets.Count));
-            uint clearValueCount = (uint)vkFb.ColorTargets.Count;
-            Util.EnsureArrayMinimumSize(ref clearValues, clearValueCount + 1); // Leave an extra space for the depth value (tracked separately).
+            uint colorCount = (uint)vkFb.ColorTargets.Count;
+            Util.EnsureArrayMinimumSize(ref scissorRects, Math.Max(1, colorCount));
+            Util.EnsureArrayMinimumSize(ref cachedViewports, Math.Max(1, colorCount));
+            Util.EnsureArrayMinimumSize(ref clearValues, colorCount + 1); // Leave an extra space for the depth value (tracked separately).
             Util.ClearArray(validColorClearValues);
-            Util.EnsureArrayMinimumSize(ref validColorClearValues, clearValueCount);
+            Util.EnsureArrayMinimumSize(ref validColorClearValues, colorCount);
             currentStagingInfo.Resources.Add(vkFb.RefCount);
 
-            if (fb is VkSwapchainFramebuffer scFb) currentStagingInfo.Resources.Add(scFb.Swapchain.RefCount);
+            if (fb is VkSwapchainFramebuffer scFb)
+            {
+                currentStagingInfo.Resources.Add(scFb.Swapchain.RefCount);
+                usesSwapchainFramebuffer = true;
+            }
         }
 
         protected override void SetGraphicsResourceSetCore(uint slot, ResourceSet rs, uint dynamicOffsetsCount, ref uint dynamicOffsets)
@@ -1007,13 +1026,13 @@ namespace Veldrid.Vk
             // the target layout, so scanning all resource sets every draw costs only a handful of
             // array reads (< 200 for a typical 8-set/10-texture-per-set setup) — negligible
             // compared to the GPU work recorded by the surrounding draw call.
-            if (currentGraphicsPipeline != null)
+            if (currentGraphicsPipeline is not null)
             {
                 uint setCount = currentGraphicsPipeline.ResourceSetCount;
 
                 for (int slot = 0; slot < setCount && slot < currentGraphicsResourceSets.Length; slot++)
                 {
-                    if (currentGraphicsResourceSets[slot].Set != null)
+                    if (currentGraphicsResourceSets[slot].Set is not null)
                     {
                         var vkSet = Util.AssertSubtype<ResourceSet, VkResourceSet>(currentGraphicsResourceSets[slot].Set);
                         appendTransitions(vkSet.SampledTextures, VkImageLayout.ShaderReadOnlyOptimal);
@@ -1028,7 +1047,7 @@ namespace Veldrid.Vk
             // Emit all accumulated transitions as a single vkCmdPipelineBarrier.
             flushTransitionBarriers();
 
-            if (currentGraphicsPipeline == null)
+            if (currentGraphicsPipeline is null)
                 throw new VeldridException("A graphics pipeline must be bound before drawing.");
 
             ensureRenderPassActive();
@@ -1061,9 +1080,10 @@ namespace Veldrid.Vk
         // (all subresources already correct) costs only MipLevels × ArrayLayers reads per texture.
         private void appendTransitions(List<VkTexture> textures, VkImageLayout layout)
         {
-            if (textures.Count == 0) return;
+            int texCount = textures.Count;
+            if (texCount == 0) return;
 
-            for (int i = 0; i < textures.Count; i++)
+            for (int i = 0; i < texCount; i++)
             {
                 var tex = textures[i];
 
@@ -1134,7 +1154,7 @@ namespace Veldrid.Vk
                     // After a pipeline switch clearSets() nullifies all Sets but leaves
                     // changed bits true. Skip null slots (treat like an unchanged slot:
                     // flush any in-progress batch and advance the first-set cursor).
-                    if (resourceSets[currentSlot].Set == null)
+                    if (resourceSets[currentSlot].Set is null)
                     {
                         if (currentBatchCount != 0)
                         {
@@ -1159,7 +1179,7 @@ namespace Veldrid.Vk
 
                     // Increment ref count on first use of a set.
                     currentStagingInfo.Resources.Add(vkSet.RefCount);
-                    for (int i = 0; i < vkSet.RefCounts.Count; i++) currentStagingInfo.Resources.Add(vkSet.RefCounts[i]);
+                    foreach (var rc in vkSet.RefCounts) currentStagingInfo.Resources.Add(rc);
 
                     if (vkSet.IsPushDescriptor && gd.HasPushDescriptors)
                     {
@@ -1204,7 +1224,7 @@ namespace Veldrid.Vk
                         {
                             if (!resourceSetsChanged[currentSlot + 1])
                                 batchEnded = true;
-                            else if (resourceSets[currentSlot + 1].Set == null)
+                            else if (resourceSets[currentSlot + 1].Set is null)
                                 batchEnded = true;
                             else
                             {
@@ -1321,12 +1341,12 @@ namespace Veldrid.Vk
         {
             ensureNoRenderPass();
 
-            if (currentComputePipeline == null)
+            if (currentComputePipeline is null)
                 throw new VeldridException("A compute pipeline must be bound before dispatching.");
 
             for (uint currentSlot = 0; currentSlot < currentComputePipeline.ResourceSetCount; currentSlot++)
             {
-                if (currentComputeResourceSets[currentSlot].Set == null)
+                if (currentComputeResourceSets[currentSlot].Set is null)
                     continue;
 
                 var vkSet = Util.AssertSubtype<ResourceSet, VkResourceSet>(
@@ -1962,8 +1982,9 @@ namespace Veldrid.Vk
             lock (stagingLock)
             {
                 VkBuffer ret = null;
+                int n = availableStagingBuffers.Count;
 
-                for (int i = 0; i < availableStagingBuffers.Count; i++)
+                for (int i = 0; i < n; i++)
                 {
                     var buffer = availableStagingBuffers[i];
 
@@ -1972,14 +1993,14 @@ namespace Veldrid.Vk
                         ret = buffer;
                         // Swap-remove: move the last element into this slot and shrink the list in
                         // O(1) rather than paying the O(n) element shift that List.Remove causes.
-                        int last = availableStagingBuffers.Count - 1;
+                        int last = n - 1;
                         availableStagingBuffers[i] = availableStagingBuffers[last];
                         availableStagingBuffers.RemoveAt(last);
                         break;
                     }
                 }
 
-                if (ret == null)
+                if (ret is null)
                 {
                     ret = (VkBuffer)gd.ResourceFactory.CreateBuffer(new BufferDescription(size, BufferUsage.Staging));
                     ret.Name = $"Staging Buffer (CommandList {name})";

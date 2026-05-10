@@ -219,6 +219,26 @@ namespace Veldrid.Vk
             lock (stagingResourcesLock) submittedStagingBuffers.Add(cb, buffer);
         }
 
+        // The semaphore signalled by the most recent vkAcquireNextImageKHR.
+        // Consumed (passed as a vkQueueSubmit wait semaphore) by the very next
+        // SubmitCommandsCore call so that the GPU — not the CPU — waits for the
+        // swapchain image to become available.  Null when no acquire is pending.
+        private VkSemaphore pendingImageAvailableSemaphore;
+
+        // Called by VkSwapchain.AcquireNextImage / recreateAndReacquire on success
+        // to register the freshly-signalled image-available semaphore.
+        internal void NotifyImageAcquired(VkSemaphore semaphore)
+        {
+            pendingImageAvailableSemaphore = semaphore;
+        }
+
+        // Called by VkSwapchain.recreateImageAvailableSemaphore so a stale semaphore
+        // handle is never consumed after the underlying object has been destroyed.
+        internal void ClearPendingImageAvailableSemaphore()
+        {
+            pendingImageAvailableSemaphore = VkSemaphore.Null;
+        }
+
         internal void ReturnTextureUpdateBatch(VkTextureUpdateBatch batch)
         {
             lock (stagingResourcesLock) textureUpdateBatchPool.Push(batch);
@@ -237,7 +257,7 @@ namespace Veldrid.Vk
                 if (textureUpdateBatchPool.Count > 0) batch = textureUpdateBatchPool.Pop();
             }
 
-            if (batch == null) return new VkTextureUpdateBatch(this);
+            if (batch is null) return new VkTextureUpdateBatch(this);
 
             batch.Reopen();
             return batch;
@@ -251,7 +271,7 @@ namespace Veldrid.Vk
                 if (bufferUpdateBatchPool.Count > 0) batch = bufferUpdateBatchPool.Pop();
             }
 
-            if (batch == null) return new VkBufferUpdateBatch(this);
+            if (batch is null) return new VkBufferUpdateBatch(this);
 
             batch.Reopen();
             return batch;
@@ -1120,8 +1140,9 @@ namespace Veldrid.Vk
                 //
                 // The in-place compaction below is O(N) in the number of outstanding fences
                 // (typically 1-3 per frame) and avoids any additional allocation.
+                int count = submittedFences.Count;
                 int writeIdx = 0;
-                for (int i = 0; i < submittedFences.Count; i++)
+                for (int i = 0; i < count; i++)
                 {
                     var fsi = submittedFences[i];
 
@@ -2360,7 +2381,8 @@ namespace Veldrid.Vk
 
             lock (stagingResourcesLock)
             {
-                for (int i = 0; i < availableStagingTextures.Count; i++)
+                int n = availableStagingTextures.Count;
+                for (int i = 0; i < n; i++)
                 {
                     var tex = availableStagingTextures[i];
 
@@ -2386,7 +2408,8 @@ namespace Veldrid.Vk
         {
             lock (stagingResourcesLock)
             {
-                for (int i = 0; i < availableStagingBuffers.Count; i++)
+                int n = availableStagingBuffers.Count;
+                for (int i = 0; i < n; i++)
                 {
                     var buffer = availableStagingBuffers[i];
 
@@ -2406,7 +2429,31 @@ namespace Veldrid.Vk
 
         private protected override void SubmitCommandsCore(CommandList cl, Fence fence)
         {
-            submitCommandList(cl, 0, null, 0, null, fence);
+            var vkCl = Util.AssertSubtype<CommandList, VkCommandList>(cl);
+
+            // Only attach the image-available semaphore as a wait if this command list
+            // actually used a VkSwapchainFramebuffer.  Non-swapchain submits (e.g.
+            // VkBufferUpdateBatch / VkTextureUpdateBatch — the first submissions in
+            // osu-framework's per-frame pipeline) don't write to the swapchain image and
+            // therefore don't need to wait for the compositor to release it.  Deferring
+            // the wait lets those submits start immediately on the GPU, overlapping the
+            // compositor's image-release period with useful buffer-update / upload work.
+            //
+            // The semaphore is consumed at most once per acquire.  If it hasn't been
+            // consumed by the time SwapBuffersCore runs (edge case: frame with no swapchain
+            // draw), it is folded into the null-signal submit there as a safety-net so
+            // vkAcquireNextImageKHR can re-signal it next frame.
+            VkSemaphore waitSem = VkSemaphore.Null;
+            if (vkCl.UsesSwapchainFramebuffer && pendingImageAvailableSemaphore != VkSemaphore.Null)
+            {
+                waitSem = pendingImageAvailableSemaphore;
+                pendingImageAvailableSemaphore = VkSemaphore.Null;
+            }
+
+            if (waitSem != VkSemaphore.Null)
+                submitCommandList(cl, 1, &waitSem, 0, null, fence);
+            else
+                submitCommandList(cl, 0, null, 0, null, fence);
         }
 
         private protected override void SwapBuffersCore(Swapchain swapchain)
@@ -2475,11 +2522,39 @@ namespace Veldrid.Vk
             // If a future contributor wants to enable it for desktop drivers,
             // gate the chain on `vkSc.gd.PhysicalDeviceProperties.vendorID != 0x5143`
             // (or skip entirely on Android) before adding it back.
+
+            // Signal renderFinishedSemaphore so vkQueuePresentKHR can wait on it
+            // rather than relying on implicit driver serialisation.
+            //
+            // The null submit (0 command buffers) executes after all previously queued
+            // render work because the graphics queue is strictly ordered — no explicit
+            // dependencies are needed for same-queue ordering.  The semaphore gives the
+            // compositor a GPU-side "rendering is done" signal so it can pipeline the
+            // display scan-out without stalling the CPU.  Without this, the Adreno driver
+            // was observed to inject a CPU-blocking implicit wait inside vkQueuePresentKHR,
+            // costing a full GPU frame time (~4 ms) on every present call.
+            //
+            // Safety-net: if SubmitCommandsCore never saw a swapchain-framebuffer command
+            // list this frame (e.g. headless/offscreen render, or app didn't call Draw),
+            // pendingImageAvailableSemaphore may still be set.  Fold it into this null
+            // submit as a wait so it is consumed and vkAcquireNextImageKHR can re-signal
+            // it next frame without a binary-semaphore double-signal error.
+            var renderFinishedSem = vkSc.RenderFinishedSemaphore;
+            var leftoverAcquireSem = pendingImageAvailableSemaphore;
+            pendingImageAvailableSemaphore = VkSemaphore.Null;
+
             VkResult presentResult;
             if (vkSc.PresentQueueIndex == GraphicsQueueIndex)
             {
                 lock (graphicsQueueLock)
                 {
+                    // Null submit on the same queue: signals the semaphore after all
+                    // previously submitted render work completes (queue FIFO ordering).
+                    // Also waits on any unconsumed image-available semaphore (safety-net).
+                    signalSemaphoreOnGraphicsQueue(renderFinishedSem, leftoverAcquireSem);
+
+                    presentInfo.waitSemaphoreCount = 1;
+                    presentInfo.pWaitSemaphores = &renderFinishedSem;
                     presentResult = DeviceApi.vkQueuePresentKHR(vkSc.PresentQueue, &presentInfo);
                     // Advance timing state on successful presents so the next frame's
                     // desiredPresentTime targets the correct vblank slot.
@@ -2494,8 +2569,15 @@ namespace Veldrid.Vk
             }
             else
             {
+                // Separate present queue: signal on the graphics queue first, then wait
+                // on the present queue.  Cross-queue semaphore ordering is per-spec.
+                lock (graphicsQueueLock)
+                    signalSemaphoreOnGraphicsQueue(renderFinishedSem, leftoverAcquireSem);
+
                 lock (presentQueueLock)
                 {
+                    presentInfo.waitSemaphoreCount = 1;
+                    presentInfo.pWaitSemaphores = &renderFinishedSem;
                     presentResult = DeviceApi.vkQueuePresentKHR(vkSc.PresentQueue, &presentInfo);
                     if (vkSc.HasDisplayTiming
                         && (presentResult == VkResult.Success || presentResult == VkResult.SuboptimalKHR))
@@ -2506,12 +2588,64 @@ namespace Veldrid.Vk
                     handlePresentResult(vkSc, presentResult);
                 }
             }
-            // acquireAndWaitNextImage is NOT a queue operation (vkAcquireNextImageKHR +
-            // vkWaitForFences only).  Holding the queue lock while blocking on the fence
-            // serialises ALL other queue traffic (texture-upload threads, etc.) for up to
-            // 250 ms per frame.  Move it outside both locks so other threads can submit
-            // while the render thread waits for the next swapchain image.
+            // acquireAndWaitNextImage is NOT a queue operation.  Holding the queue lock
+            // while it runs would serialise ALL other queue traffic (texture-upload
+            // threads, etc.) for up to 100 ms per frame.  Keep it outside both locks.
             acquireAndWaitNextImage(vkSc);
+        }
+
+        // Submits a zero-command-buffer batch that signals `signalSemaphore` on the graphics
+        // queue.  Because the graphics queue is strictly ordered, this signal fires only
+        // after ALL previously submitted work on that queue has completed.
+        //
+        // If `waitSemaphore` is not Null, it is also waited on in the same submit (used as
+        // a safety-net to consume any leftover pendingImageAvailableSemaphore when no CL in
+        // the frame used the swapchain framebuffer).
+        //
+        // CALLER MUST HOLD graphicsQueueLock.
+        private void signalSemaphoreOnGraphicsQueue(VkSemaphore signalSemaphore, VkSemaphore waitSemaphore = default)
+        {
+            if (HasSynchronization2)
+            {
+                var signalInfo = new VkSemaphoreSubmitInfo();
+                signalInfo.semaphore = signalSemaphore;
+                signalInfo.stageMask = VkPipelineStageFlags2.AllCommands;
+
+                var waitInfo = new VkSemaphoreSubmitInfo();
+                bool hasWait = waitSemaphore != VkSemaphore.Null;
+                if (hasWait)
+                {
+                    waitInfo.semaphore = waitSemaphore;
+                    waitInfo.stageMask = VkPipelineStageFlags2.AllCommands;
+                }
+
+                var si2 = new VkSubmitInfo2();
+                si2.signalSemaphoreInfoCount = 1;
+                si2.pSignalSemaphoreInfos = &signalInfo;
+                if (hasWait)
+                {
+                    si2.waitSemaphoreInfoCount = 1;
+                    si2.pWaitSemaphoreInfos = &waitInfo;
+                }
+                CheckResult(useQueueSubmit2Khr
+                    ? DeviceApi.vkQueueSubmit2KHR(graphicsQueue, 1, &si2, default)
+                    : DeviceApi.vkQueueSubmit2(graphicsQueue, 1, &si2, default));
+            }
+            else
+            {
+                var si = new VkSubmitInfo();
+                si.signalSemaphoreCount = 1;
+                si.pSignalSemaphores = &signalSemaphore;
+                bool hasWait = waitSemaphore != VkSemaphore.Null;
+                var waitDstStage = VkPipelineStageFlags.AllCommands;
+                if (hasWait)
+                {
+                    si.waitSemaphoreCount = 1;
+                    si.pWaitSemaphores = &waitSemaphore;
+                    si.pWaitDstStageMask = &waitDstStage;
+                }
+                CheckResult(DeviceApi.vkQueueSubmit(graphicsQueue, 1, &si, default));
+            }
         }
 
         // VK_ERROR_OUT_OF_DATE_KHR / VK_SUBOPTIMAL_KHR / VK_ERROR_SURFACE_LOST_KHR are
@@ -2552,8 +2686,11 @@ namespace Veldrid.Vk
 
         private void acquireAndWaitNextImage(VkSwapchain vkSc)
         {
-            if (vkSc.AcquireNextImage(device, VkSemaphore.Null, vkSc.ImageAvailableFence))
-                vkSc.WaitAndResetImageAvailableFence();
+            // Acquire the next swapchain image using a semaphore (not a fence) so the
+            // CPU never stalls.  The semaphore is passed to the next vkQueueSubmit as a
+            // wait semaphore; the GPU handles the synchronisation internally.
+            if (vkSc.AcquireNextImage())
+                NotifyImageAcquired(vkSc.ImageAvailableSemaphore);
         }
 
         private protected override void WaitForIdleCore()
