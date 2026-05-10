@@ -610,10 +610,10 @@ namespace Veldrid.Vk
             // A prior implementation used minImageCount (= 2 on Android) for IMMEDIATE on
             // the assumption that the driver returns just-replaced images instantly.  That
             // assumption is wrong: Android's SurfaceFlinger holds the previously displayed
-            // image for 1–2 vsync periods (~8–16 ms at 120 Hz) even in IMMEDIATE mode
-            // before handing it back to the application.  With only 2 images,
-            // vkAcquireNextImageKHR blocks the CPU render thread for that hold period every
-            // frame, collapsing "uncapped" IMMEDIATE throughput to ~60 fps on a 120 Hz display.
+            // image for 1–2 vsync periods even in IMMEDIATE mode before handing it back to
+            // the application.  With only 2 images, vkAcquireNextImageKHR blocks the CPU
+            // render thread for that hold period every frame, collapsing "uncapped" IMMEDIATE
+            // throughput to roughly half the display refresh rate.
             //
             // With minImageCount + 1 (= 3), there is always a third image that has already
             // been rendered and returned to the application — the acquire never stalls.
