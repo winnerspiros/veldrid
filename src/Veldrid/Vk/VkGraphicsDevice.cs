@@ -219,6 +219,26 @@ namespace Veldrid.Vk
             lock (stagingResourcesLock) submittedStagingBuffers.Add(cb, buffer);
         }
 
+        // The semaphore signalled by the most recent vkAcquireNextImageKHR.
+        // Consumed (passed as a vkQueueSubmit wait semaphore) by the very next
+        // SubmitCommandsCore call so that the GPU — not the CPU — waits for the
+        // swapchain image to become available.  Null when no acquire is pending.
+        private VkSemaphore pendingImageAvailableSemaphore;
+
+        // Called by VkSwapchain.AcquireNextImage / recreateAndReacquire on success
+        // to register the freshly-signalled image-available semaphore.
+        internal void NotifyImageAcquired(VkSemaphore semaphore)
+        {
+            pendingImageAvailableSemaphore = semaphore;
+        }
+
+        // Called by VkSwapchain.recreateImageAvailableSemaphore so a stale semaphore
+        // handle is never consumed after the underlying object has been destroyed.
+        internal void ClearPendingImageAvailableSemaphore()
+        {
+            pendingImageAvailableSemaphore = VkSemaphore.Null;
+        }
+
         internal void ReturnTextureUpdateBatch(VkTextureUpdateBatch batch)
         {
             lock (stagingResourcesLock) textureUpdateBatchPool.Push(batch);
@@ -2406,7 +2426,17 @@ namespace Veldrid.Vk
 
         private protected override void SubmitCommandsCore(CommandList cl, Fence fence)
         {
-            submitCommandList(cl, 0, null, 0, null, fence);
+            // Consume any pending image-available semaphore from the most recent
+            // vkAcquireNextImageKHR so the GPU waits for the swapchain image instead
+            // of the CPU.  Cleared immediately so subsequent SubmitCommands calls
+            // within the same frame don't double-consume it.
+            var waitSem = pendingImageAvailableSemaphore;
+            pendingImageAvailableSemaphore = VkSemaphore.Null;
+
+            if (waitSem != VkSemaphore.Null)
+                submitCommandList(cl, 1, &waitSem, 0, null, fence);
+            else
+                submitCommandList(cl, 0, null, 0, null, fence);
         }
 
         private protected override void SwapBuffersCore(Swapchain swapchain)
@@ -2552,8 +2582,11 @@ namespace Veldrid.Vk
 
         private void acquireAndWaitNextImage(VkSwapchain vkSc)
         {
-            if (vkSc.AcquireNextImage(device, VkSemaphore.Null, vkSc.ImageAvailableFence))
-                vkSc.WaitAndResetImageAvailableFence();
+            // Acquire the next swapchain image using a semaphore (not a fence) so the
+            // CPU never stalls.  The semaphore is passed to the next vkQueueSubmit as a
+            // wait semaphore; the GPU handles the synchronisation internally.
+            if (vkSc.AcquireNextImage())
+                NotifyImageAcquired(vkSc.ImageAvailableSemaphore);
         }
 
         private protected override void WaitForIdleCore()

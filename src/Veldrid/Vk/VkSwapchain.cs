@@ -15,7 +15,7 @@ namespace Veldrid.Vk
 
         public VkSwapchainKHR DeviceSwapchain => deviceSwapchain;
         public uint ImageIndex => currentImageIndex;
-        public Vortice.Vulkan.VkFence ImageAvailableFence => imageAvailableFence;
+        public VkSemaphore ImageAvailableSemaphore => imageAvailableSemaphore;
         public VkSurfaceKHR Surface => surface;
 
         public VkQueue PresentQueue => presentQueue;
@@ -105,7 +105,7 @@ namespace Veldrid.Vk
         private VkQueue presentQueue;
         private readonly bool colorSrgb;
         private VkSwapchainKHR deviceSwapchain;
-        private Vortice.Vulkan.VkFence imageAvailableFence;
+        private VkSemaphore imageAvailableSemaphore;
         private bool syncToVBlank;
         private bool? newSyncToVBlank;
         private uint currentImageIndex;
@@ -200,12 +200,11 @@ namespace Veldrid.Vk
                 throw new VeldridException("The Vulkan surface was not ready in time; cannot create a swapchain.");
             }
 
-            var fenceCi = new VkFenceCreateInfo();
-            fenceCi.flags = VkFenceCreateFlags.None;
-            gd.DeviceApi.vkCreateFence(&fenceCi, null, out imageAvailableFence);
+            var semCi = new VkSemaphoreCreateInfo();
+            gd.DeviceApi.vkCreateSemaphore(&semCi, null, out imageAvailableSemaphore);
 
-            if (AcquireNextImage(this.gd.Device, VkSemaphore.Null, imageAvailableFence))
-                WaitAndResetImageAvailableFence();
+            if (AcquireNextImage())
+                gd.NotifyImageAcquired(imageAvailableSemaphore);
 
             RefCount = new ResourceRefCount(disposeCore);
         }
@@ -256,7 +255,14 @@ namespace Veldrid.Vk
                 needsRecreation = true;
         }
 
-        public bool AcquireNextImage(VkDevice device, VkSemaphore semaphore, Vortice.Vulkan.VkFence fence)
+        // Acquires the next swapchain image, signalling imageAvailableSemaphore
+        // (not a fence) so that the CPU never blocks waiting for the WSI to release
+        // an image.  On success the caller must pass ImageAvailableSemaphore to the
+        // next vkQueueSubmit as a wait semaphore so that the GPU stalls instead.
+        // Returns false when the acquire was skipped (vsync toggle, zero-extent
+        // surface, swapchain-lost recovery) — the caller should not submit a new
+        // wait-semaphore in that case.
+        public bool AcquireNextImage()
         {
             if (newSyncToVBlank != null)
             {
@@ -277,10 +283,11 @@ namespace Veldrid.Vk
             // the render thread. VK_TIMEOUT / VK_NOT_READY are treated like VK_ERROR_OUT_OF_DATE_KHR
             // so the swapchain is force-recreated, converting the hang into a recoverable per-frame stall.
             const ulong acquire_timeout_ns = 100_000_000; // 100 ms
+            var semaphore = imageAvailableSemaphore;
             var result = gd.DeviceApi.vkAcquireNextImageKHR(deviceSwapchain,
                 acquire_timeout_ns,
                 semaphore,
-                fence,
+                default,
                 out currentImageIndex);
 
             if (result == VkResult.ErrorSurfaceLostKHR)
@@ -289,22 +296,29 @@ namespace Veldrid.Vk
                 // On Android this re-resolves the JNI Surface → fresh ANativeWindow →
                 // fresh VkSurfaceKHR, recovering from stop/start, surfaceDestroyed →
                 // surfaceCreated, lock screen, fold/unfold, PiP exit, etc.
-                rebuildFenceAfterFailedAcquire(ref fence);
+                rebuildSemaphoreAfterFailedAcquire(isSignaled: false);
                 if (!recreateSurfaceAndSwapchain(framebuffer.Width, framebuffer.Height))
                     needsRecreation = true;
                 return false;
             }
 
             if (result == VkResult.ErrorOutOfDateKHR
-                || result == VkResult.SuboptimalKHR
                 || result == VkResult.Timeout
                 || result == VkResult.NotReady)
             {
-                // SUBOPTIMAL_KHR signals the fence/semaphore per spec; the others do not.
-                // Either way, destroy + recreate the fence so the next acquire can reuse
-                // it without hitting "fence must be unsignaled" or worse, racing a still-
-                // pending driver signal.
-                rebuildFenceAfterFailedAcquire(ref fence);
+                // These results do NOT signal the semaphore per spec.
+                // Rebuild the semaphore so the next acquire gets a clean unsignaled one.
+                rebuildSemaphoreAfterFailedAcquire(isSignaled: false);
+                if (!attemptRecreate(framebuffer.Width, framebuffer.Height))
+                    needsRecreation = true;
+                return false;
+            }
+
+            if (result == VkResult.SuboptimalKHR)
+            {
+                // SuboptimalKHR DOES signal the semaphore per spec. Rebuild (which drains
+                // the GPU first so the signaled semaphore is not in use) then recreate.
+                rebuildSemaphoreAfterFailedAcquire(isSignaled: true);
                 if (!attemptRecreate(framebuffer.Width, framebuffer.Height))
                     needsRecreation = true;
                 return false;
@@ -316,54 +330,29 @@ namespace Veldrid.Vk
             return true;
         }
 
-        // Bounded fence wait + reset so a misbehaving driver cannot wedge startup or
-        // the recreate path. On timeout, destroy + recreate the fence — its "in-use"
-        // state is unknown and reusing it would be UB on the next acquire.
-        internal void WaitAndResetImageAvailableFence()
+        // Replaces imageAvailableSemaphore with a fresh unsignaled one.
+        // When isSignaled=true (e.g. SuboptimalKHR just signalled it), drains the
+        // GPU first so no in-flight command is waiting on the old handle before it
+        // is destroyed.
+        // NOTE: uses WaitForIdleLockFree to avoid deadlocking if called while the
+        // graphicsQueueLock is already held (e.g. from within SwapBuffersCore).
+        private void recreateImageAvailableSemaphore(bool drainGpu)
         {
-            const ulong fence_wait_timeout_ns = 250_000_000; // 250 ms
-            var fence = imageAvailableFence;
-            var result = gd.DeviceApi.vkWaitForFences(1, &fence, true, fence_wait_timeout_ns);
-            if (result == VkResult.Success)
-            {
-                gd.DeviceApi.vkResetFences(1, &fence);
-                return;
-            }
-
-            // Driver never signaled within the budget — replace the fence wholesale.
-            recreateImageAvailableFence();
-            needsRecreation = true;
+            if (drainGpu)
+                gd.WaitForIdleLockFree();
+            // Clear the device-side pending reference so it doesn't hold the
+            // old (soon-to-be-destroyed) semaphore handle.
+            gd.ClearPendingImageAvailableSemaphore();
+            gd.DeviceApi.vkDestroySemaphore(imageAvailableSemaphore, null);
+            var semCi = new VkSemaphoreCreateInfo();
+            gd.DeviceApi.vkCreateSemaphore(&semCi, null, out imageAvailableSemaphore);
         }
 
-        // Replaces imageAvailableFence with a fresh, unsignaled fence. Safe to call
-        // even when the original may still have an in-flight signal pending: the old
-        // fence handle is destroyed, and the spec only forbids destruction while in
-        // use by a *queue submission*; vkAcquireNextImageKHR does not enqueue a queue
-        // op for the fence in the strict sense — it's signaled by the WSI layer.
-        // Even so, we drain pending GPU work first to be conservative.
-        // NOTE: uses WaitForIdleLockFree (vkDeviceWaitIdle, no graphicsQueueLock)
-        // because this method is called from within lock(graphicsQueueLock) in the
-        // SwapBuffersCore → acquireAndWaitNextImage → AcquireNextImage →
-        // rebuildFenceAfterFailedAcquire → recreateImageAvailableFence path.
-        // WaitForIdle would attempt to re-enter the non-reentrant Lock and deadlock.
-        private void recreateImageAvailableFence()
+        // After a non-Success acquire the semaphore may or may not be signaled.
+        // Always rebuild it so the next acquire starts from a known-clean state.
+        private void rebuildSemaphoreAfterFailedAcquire(bool isSignaled)
         {
-            gd.WaitForIdleLockFree();
-            gd.DeviceApi.vkDestroyFence(imageAvailableFence, null);
-            var fenceCi = new VkFenceCreateInfo();
-            fenceCi.flags = VkFenceCreateFlags.None;
-            gd.DeviceApi.vkCreateFence(&fenceCi, null, out imageAvailableFence);
-        }
-
-        // After a non-Success acquire the fence may or may not be signaled
-        // (SUBOPTIMAL_KHR signals; the others don't). Always rebuild it so the next
-        // acquire starts from a known-clean state. The `fence` parameter is kept
-        // up-to-date for callers who hold the same handle.
-        private void rebuildFenceAfterFailedAcquire(ref Vortice.Vulkan.VkFence fence)
-        {
-            if (fence != imageAvailableFence) return;
-            recreateImageAvailableFence();
-            fence = imageAvailableFence;
+            recreateImageAvailableSemaphore(drainGpu: isSignaled);
         }
 
         private void recreateAndReacquire(uint width, uint height)
@@ -374,8 +363,8 @@ namespace Veldrid.Vk
                 return;
             }
 
-            if (AcquireNextImage(gd.Device, VkSemaphore.Null, imageAvailableFence))
-                WaitAndResetImageAvailableFence();
+            if (AcquireNextImage())
+                gd.NotifyImageAcquired(imageAvailableSemaphore);
         }
 
         // Wraps createSwapchain with surface-lost recovery. If the surface has died,
@@ -1050,7 +1039,7 @@ namespace Veldrid.Vk
 
         private void disposeCore()
         {
-            gd.DeviceApi.vkDestroyFence(imageAvailableFence, null);
+            gd.DeviceApi.vkDestroySemaphore(imageAvailableSemaphore, null);
             framebuffer.Dispose();
             gd.DeviceApi.vkDestroySwapchainKHR(deviceSwapchain, null);
             gd.InstanceApi.vkDestroySurfaceKHR(Surface, null);
