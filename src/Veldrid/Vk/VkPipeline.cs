@@ -310,11 +310,15 @@ namespace Veldrid.Vk
             }
             else
             {
-                // Traditional path: create a fake VkRenderPass for pipeline compatibility.
+                // Traditional path: create a compatibility VkRenderPass for pipeline creation.
+                // This render pass is never actually used for rendering — its sole purpose is to
+                // satisfy vkCreateGraphicsPipelines, which requires a VkRenderPass handle on
+                // devices that do not support VK_KHR_dynamic_rendering.  loadOp=DontCare and
+                // initialLayout=Undefined are chosen so the driver can freely optimise the
+                // (non-rendered) compatibility object; the actual render passes used at draw time
+                // live in VkFramebuffer and carry the correct Load/Store/Clear semantics.
                 var renderPassCi = new VkRenderPassCreateInfo();
                 var attachments = new StackList<VkAttachmentDescription, Size512Bytes>();
-
-                // TODO: A huge portion of this next part is duplicated in VkFramebuffer.cs.
 
                 // colorAttachmentRefs: VkAttachmentReference is 8 bytes; 256-byte StackList holds up to 32 — enough
                 // for the Vulkan maximum of 8 color attachments.  We build the attachment descriptions inline

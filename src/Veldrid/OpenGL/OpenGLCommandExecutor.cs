@@ -1143,8 +1143,31 @@ namespace Veldrid.OpenGL
 
         private static void postDispatchCommand()
         {
-            // TODO: Smart barriers?
-            glMemoryBarrier(MemoryBarrierFlags.AllBarrierBits);
+            // Emit only the barrier bits that are relevant after a GPU-side compute dispatch.
+            // Bits that synchronise CPU-side state (PBO, glBufferData, glTexImage2D, mapped
+            // client memory, transform-feedback, query-buffer) have no effect here and only
+            // add unnecessary work on some drivers.  The bits below cover every GPU-visible
+            // resource type that a compute shader can write to and that subsequent commands may read:
+            //   VertexAttribArray / ElementArray — compute → vertex/index fetch
+            //   Uniform                          — compute → UBO reads
+            //   TextureFetch                     — imageStore → texture() sampler
+            //   ShaderImageAccess                — imageStore → imageLoad
+            //   Command                          — compute → indirect draw/dispatch
+            //   Framebuffer                      — imageStore → glReadPixels / FBO reads
+            //   AtomicCounter                    — atomic counter increments
+            //   ShaderStorage                    — SSBO writes
+            const MemoryBarrierFlags postComputeBarriers =
+                MemoryBarrierFlags.VertexAttribArrayBarrierBit
+                | MemoryBarrierFlags.ElementArrayBarrierBit
+                | MemoryBarrierFlags.UniformBarrierBit
+                | MemoryBarrierFlags.TextureFetchBarrierBit
+                | MemoryBarrierFlags.ShaderImageAccessBarrierBit
+                | MemoryBarrierFlags.CommandBarrierBit
+                | MemoryBarrierFlags.FramebufferBarrierBit
+                | MemoryBarrierFlags.AtomicCounterBarrierBit
+                | MemoryBarrierFlags.ShaderStorageBarrierBit;
+
+            glMemoryBarrier(postComputeBarriers);
             CheckLastError();
         }
 
