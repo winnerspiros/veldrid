@@ -1146,16 +1146,17 @@ namespace Veldrid.OpenGL
             // Emit only the barrier bits that are relevant after a GPU-side compute dispatch.
             // Bits that synchronise CPU-side state (PBO, glBufferData, glTexImage2D, mapped
             // client memory, transform-feedback, query-buffer) have no effect here and only
-            // add unnecessary work on some drivers.  The bits below cover every GPU-visible
+            // add unnecessary work on some drivers.  The 9 bits below cover every GPU-visible
             // resource type that a compute shader can write to and that subsequent commands may read:
-            //   VertexAttribArray / ElementArray — compute → vertex/index fetch
-            //   Uniform                          — compute → UBO reads
-            //   TextureFetch                     — imageStore → texture() sampler
-            //   ShaderImageAccess                — imageStore → imageLoad
-            //   Command                          — compute → indirect draw/dispatch
-            //   Framebuffer                      — imageStore → glReadPixels / FBO reads
-            //   AtomicCounter                    — atomic counter increments
-            //   ShaderStorage                    — SSBO writes
+            //   VertexAttribArray  — compute write → vertex buffer fetch
+            //   ElementArray       — compute write → index buffer fetch
+            //   Uniform            — compute → UBO reads
+            //   TextureFetch       — imageStore → texture() sampler
+            //   ShaderImageAccess  — imageStore → imageLoad
+            //   Command            — compute → indirect draw/dispatch args
+            //   Framebuffer        — imageStore → glReadPixels / FBO reads
+            //   AtomicCounter      — atomic counter increments
+            //   ShaderStorage      — SSBO writes
             const MemoryBarrierFlags postComputeBarriers =
                 MemoryBarrierFlags.VertexAttribArrayBarrierBit
                 | MemoryBarrierFlags.ElementArrayBarrierBit

@@ -535,8 +535,9 @@ jobs:
                     return f'{ns/1_000_000_000:.3f} s'
 
                 # Host environment summary.
-                # BenchmarkDotNet < 0.14 emits OsVersion as {"Value": "..."};
-                # BenchmarkDotNet 0.14+ emits it as a plain string.  Handle both.
+                # BenchmarkDotNet 0.14+ emits OsVersion as a plain string.
+                # Older releases emitted it as a nested object {"Value": "..."}.
+                # Handle both shapes defensively.
                 if host_info:
                     os_raw   = host_info.get('OsVersion', '')
                     os_str   = os_raw.get('Value', '') if isinstance(os_raw, dict) else (os_raw or '')
