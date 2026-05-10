@@ -506,9 +506,11 @@ jobs:
                 host_info = None
                 for fpath, data in report_files:
                     if host_info is None:
-                        host_info = data.get('HostEnvironmentInfo', {})
+                        # HostEnvironmentInfo may be absent or explicitly null.
+                        host_info = data.get('HostEnvironmentInfo') or {}
                     for b in data.get('Benchmarks', []):
-                        stats = b.get('Statistics', {})
+                        # Statistics may be absent or explicitly null in incomplete runs.
+                        stats = b.get('Statistics') or {}
                         mean_ns = stats.get('Mean', None)
                         sd_ns   = stats.get('StandardDeviation', None)
                         # Extract parameter values from FullName, e.g. "(SizeInBytes: 1024)"
