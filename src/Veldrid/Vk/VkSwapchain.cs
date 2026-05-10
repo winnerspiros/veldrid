@@ -604,18 +604,20 @@ namespace Veldrid.Vk
 
             uint maxImageCount = surfaceCapabilities.maxImageCount == 0 ? uint.MaxValue : surfaceCapabilities.maxImageCount;
 
-            // Image count: always use minImageCount + 1 (triple-buffering equivalent).
+            // Image count: always use minImageCount + 1 (triple-buffering equivalent) for
+            // ALL present modes, including IMMEDIATE.
             //
-            // IMMEDIATE mode on Android does NOT free swapchain images instantly: SurfaceFlinger
-            // holds the previously displayed image until the compositor's own vsync tick confirms
-            // the new one is on screen (typically 1–2 vblank periods at 120 Hz = 8–16 ms).
-            // With only minImageCount (= 2) images, vkAcquireNextImageKHR blocks the CPU render
-            // thread for that entire hold period, collapsing the theoretical "uncapped" IMMEDIATE
-            // throughput to ~60 fps on a 120 Hz display.
+            // A prior implementation used minImageCount (= 2 on Android) for IMMEDIATE on
+            // the assumption that the driver returns just-replaced images instantly.  That
+            // assumption is wrong: Android's SurfaceFlinger holds the previously displayed
+            // image for 1–2 vsync periods (~8–16 ms at 120 Hz) even in IMMEDIATE mode
+            // before handing it back to the application.  With only 2 images,
+            // vkAcquireNextImageKHR blocks the CPU render thread for that hold period every
+            // frame, collapsing "uncapped" IMMEDIATE throughput to ~60 fps on a 120 Hz display.
             //
-            // With minImageCount + 1 (= 3), there is always a third image that was rendered and
-            // returned to the application before the compositor swaps — the acquire never stalls.
-            // The one extra frame of memory (~6 MB at 1440p R8G8B8A8) is a worthwhile trade.
+            // With minImageCount + 1 (= 3), there is always a third image that has already
+            // been rendered and returned to the application — the acquire never stalls.
+            // The one extra image costs ~6 MB at 1440p R8G8B8A8, which is worthwhile.
             uint imageCount = Math.Min(maxImageCount, surfaceCapabilities.minImageCount + 1);
 
             var swapchainCi = new VkSwapchainCreateInfoKHR();

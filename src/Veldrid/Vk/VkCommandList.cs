@@ -64,10 +64,11 @@ namespace Veldrid.Vk
         // Graphics State
         private VkFramebufferBase currentFramebuffer;
         private bool currentFramebufferEverActive;
-        // Set (and sticky for the recording lifetime) when SetFramebufferCore is called
-        // with a VkSwapchainFramebuffer.  VkGraphicsDevice.SubmitCommandsCore reads this
-        // to decide whether to attach the pending image-available semaphore as a wait: only
-        // the submit that writes to the swapchain image needs to wait for the compositor.
+        // Set (sticky within a single Begin/End recording cycle) when SetFramebufferCore is
+        // called with a VkSwapchainFramebuffer.  Cleared in Begin() so each recording starts
+        // clean.  VkGraphicsDevice.SubmitCommandsCore reads this to decide whether to attach
+        // the pending image-available semaphore as a wait: only the submit that writes to the
+        // swapchain image needs to wait for the compositor to release it.
         private bool usesSwapchainFramebuffer;
         private VkRenderPass activeRenderPass;
         private VkPipeline currentGraphicsPipeline;
