@@ -49,6 +49,17 @@ namespace Veldrid.D3D12
         private bool hasStencilReference;
         private D3D12Framebuffer cachedFramebuffer;
 
+        // Vertex/index buffer cache — avoids redundant IASet* calls when bindings are unchanged.
+        private const int max_vertex_buffers = 32;
+        private readonly ulong[] cachedVbAddresses = new ulong[max_vertex_buffers];
+        private readonly uint[] cachedVbSizes = new uint[max_vertex_buffers];
+        private readonly uint[] cachedVbStrides = new uint[max_vertex_buffers];
+        private readonly bool[] hasVertexBuffer = new bool[max_vertex_buffers];
+        private ulong cachedIbAddress;
+        private uint cachedIbSize;
+        private Format cachedIbFormat;
+        private bool hasIndexBuffer;
+
         public D3D12CommandList(D3D12GraphicsDevice gd, ref CommandListDescription description)
             : base(ref description, gd.Features, 256u, 16u)
         {
@@ -84,6 +95,8 @@ namespace Veldrid.D3D12
             currentGraphicsPipeline = null;
             currentComputePipeline = null;
             currentFramebuffer = null;
+            System.Array.Clear(hasVertexBuffer, 0, max_vertex_buffers);
+            hasIndexBuffer = false;
         }
 
         public override void End()
@@ -199,12 +212,23 @@ namespace Veldrid.D3D12
                 stride = currentGraphicsPipeline.VertexStrides[index];
             }
 
-            var vbv = new VertexBufferView(
-                d3d12Buffer.Resource.GPUVirtualAddress + offset,
-                d3d12Buffer.SizeInBytes - offset,
-                stride);
+            ulong addr = d3d12Buffer.Resource.GPUVirtualAddress + offset;
+            uint size = d3d12Buffer.SizeInBytes - offset;
 
-            commandList.IASetVertexBuffers(index, vbv);
+            if (hasVertexBuffer[index]
+                && cachedVbAddresses[index] == addr
+                && cachedVbSizes[index] == size
+                && cachedVbStrides[index] == stride)
+            {
+                return;
+            }
+
+            cachedVbAddresses[index] = addr;
+            cachedVbSizes[index] = size;
+            cachedVbStrides[index] = stride;
+            hasVertexBuffer[index] = true;
+
+            commandList.IASetVertexBuffers(index, new VertexBufferView(addr, size, stride));
         }
 
         private protected override void SetIndexBufferCore(DeviceBuffer buffer, IndexFormat format, uint offset)
@@ -215,10 +239,18 @@ namespace Veldrid.D3D12
                 ? Format.R16_UInt
                 : Format.R32_UInt;
 
-            commandList.IASetIndexBuffer(
-                d3d12Buffer.Resource.GPUVirtualAddress + offset,
-                d3d12Buffer.SizeInBytes - offset,
-                dxgiFormat);
+            ulong addr = d3d12Buffer.Resource.GPUVirtualAddress + offset;
+            uint size = d3d12Buffer.SizeInBytes - offset;
+
+            if (hasIndexBuffer && cachedIbAddress == addr && cachedIbSize == size && cachedIbFormat == dxgiFormat)
+                return;
+
+            cachedIbAddress = addr;
+            cachedIbSize = size;
+            cachedIbFormat = dxgiFormat;
+            hasIndexBuffer = true;
+
+            commandList.IASetIndexBuffer(addr, size, dxgiFormat);
         }
 
         protected override void SetFramebufferCore(Framebuffer fb)

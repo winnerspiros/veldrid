@@ -345,51 +345,47 @@ namespace Veldrid.Vk
 
             public void Free(VkMemoryBlock block)
             {
-                for (int i = 0; i < freeBlocks.Count; i++)
+                // Find the insertion point to keep freeBlocks sorted by Offset.
+                int i = 0;
+                while (i < freeBlocks.Count && freeBlocks[i].Offset < block.Offset)
+                    i++;
+
+                bool mergedWithPrev = false;
+
+                // Try to coalesce with the immediately preceding block.
+                // When successful, no Insert is needed — we update the preceding entry in-place.
+                if (i > 0 && freeBlocks[i - 1].End == block.Offset)
                 {
-                    if (freeBlocks[i].Offset > block.Offset)
+                    var prev = freeBlocks[i - 1];
+                    freeBlocks[i - 1] = new VkMemoryBlock(prev.DeviceMemory, prev.Offset, prev.Size + block.Size, memoryTypeIndex, prev.BaseMappedPointer, false);
+                    mergedWithPrev = true;
+
+                    // The enlarged prev block may now also be adjacent to freeBlocks[i].
+                    if (i < freeBlocks.Count && freeBlocks[i - 1].End == freeBlocks[i].Offset)
                     {
-                        freeBlocks.Insert(i, block);
-                        mergeContiguousBlocks();
-#if DEBUG
-                        removeAllocatedBlock(block);
-#endif
-                        return;
+                        var merged = freeBlocks[i - 1];
+                        freeBlocks[i - 1] = new VkMemoryBlock(merged.DeviceMemory, merged.Offset, merged.Size + freeBlocks[i].Size, memoryTypeIndex, merged.BaseMappedPointer, false);
+                        freeBlocks.RemoveAt(i);
                     }
                 }
 
-                freeBlocks.Add(block);
+                if (!mergedWithPrev)
+                {
+                    // Insert in sorted position, then check whether the new block touches
+                    // the following block and coalesce if so.
+                    freeBlocks.Insert(i, block);
+
+                    if (i + 1 < freeBlocks.Count && freeBlocks[i].End == freeBlocks[i + 1].Offset)
+                    {
+                        var cur = freeBlocks[i];
+                        freeBlocks[i] = new VkMemoryBlock(cur.DeviceMemory, cur.Offset, cur.Size + freeBlocks[i + 1].Size, memoryTypeIndex, cur.BaseMappedPointer, false);
+                        freeBlocks.RemoveAt(i + 1);
+                    }
+                }
+
 #if DEBUG
                 removeAllocatedBlock(block);
 #endif
-            }
-
-            private void mergeContiguousBlocks()
-            {
-                // contiguousLength is declared inside the loop so it is fresh (=1) on every
-                // iteration — no implicit carry-over from a previous merge or non-merge pass.
-                for (int i = 0; i < freeBlocks.Count - 1; i++)
-                {
-                    int contiguousLength = 1;
-                    ulong blockStart = freeBlocks[i].Offset;
-
-                    while (i + contiguousLength < freeBlocks.Count
-                           && freeBlocks[i + contiguousLength - 1].End == freeBlocks[i + contiguousLength].Offset)
-                        contiguousLength += 1;
-
-                    if (contiguousLength > 1)
-                    {
-                        ulong blockEnd = freeBlocks[i + contiguousLength - 1].End;
-                        freeBlocks.RemoveRange(i, contiguousLength);
-                        freeBlocks.Insert(i, new VkMemoryBlock(
-                            Memory,
-                            blockStart,
-                            blockEnd - blockStart,
-                            memoryTypeIndex,
-                            mappedPtr,
-                            false));
-                    }
-                }
             }
 
 #if DEBUG
