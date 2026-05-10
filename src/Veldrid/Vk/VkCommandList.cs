@@ -2360,6 +2360,13 @@ namespace Veldrid.Vk
                 Util.EnsureArrayMinimumSize(ref graphicsResourceSetsChanged, vkPipeline.ResourceSetCount);
                 gd.DeviceApi.vkCmdBindPipeline(CommandBuffer, VkPipelineBindPoint.Graphics, vkPipeline.DevicePipeline);
                 currentGraphicsPipeline = vkPipeline;
+                // Track the pipeline RefCount only on an ACTUAL switch.  Repeated SetPipeline calls
+                // with the same object are a common application pattern; adding the RefCount
+                // unconditionally would accumulate O(drawCount) redundant List entries and
+                // matching Interlocked.Increment/Decrement pairs (~80–100 ns each on ARM).
+                // Begin() resets currentGraphicsPipeline to null, so the very first SetPipeline
+                // call per recording cycle always enters this branch and adds the RefCount.
+                currentStagingInfo.Resources.Add(vkPipeline.RefCount);
             }
             else if (pipeline.IsComputePipeline && currentComputePipeline != pipeline)
             {
@@ -2370,9 +2377,13 @@ namespace Veldrid.Vk
                 Util.EnsureArrayMinimumSize(ref computeResourceSetsChanged, vkPipeline.ResourceSetCount);
                 gd.DeviceApi.vkCmdBindPipeline(CommandBuffer, VkPipelineBindPoint.Compute, vkPipeline.DevicePipeline);
                 currentComputePipeline = vkPipeline;
+                // Same as the graphics path above: only add on an actual pipeline switch.
+                currentStagingInfo.Resources.Add(vkPipeline.RefCount);
             }
-
-            currentStagingInfo.Resources.Add(vkPipeline.RefCount);
+            // When the same pipeline object is set again (currentGraphicsPipeline == pipeline or
+            // currentComputePipeline == pipeline), the RefCount was already added on the initial
+            // switch; adding it again would be a no-op for resource-lifetime correctness but
+            // wastes a List slot and two Interlocked operations per redundant call.
         }
 
         private protected override void GenerateMipmapsCore(Texture texture)
