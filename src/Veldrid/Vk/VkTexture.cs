@@ -488,11 +488,43 @@ namespace Veldrid.Vk
                 gd.ClearColorTexture(this, new VkClearColorValue(0, 0, 0, 0));
             else if ((Usage & TextureUsage.DepthStencil) != 0)
                 gd.ClearDepthTexture(this, new VkClearDepthStencilValue(0, 0));
+            else if ((Usage & TextureUsage.Sampled) != 0)
+            {
+                // Sampled-only texture (no RenderTarget or DepthStencil): clear to transparent
+                // black so the shader sees zeros before the first upload rather than undefined
+                // GPU memory.  This prevents "first-load flickering" — a frame where the shader
+                // samples from an uninitialized image because the upload CB has not yet been
+                // submitted or executed on the GPU queue.
+                //
+                // ClearColorTexture transitions to ColorAttachmentOptimal after the clear, which
+                // requires VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT. Sampled-only images do not have
+                // that bit, making ColorAttachmentOptimal a spec violation (§12.8).
+                // ClearSampledColorTexture ends in ShaderReadOnlyOptimal instead, so the
+                // following transitionIfSampled() call becomes a no-op for this case.
+                gd.ClearSampledColorTexture(this, new VkClearColorValue(0, 0, 0, 0));
+            }
         }
 
         private void transitionIfSampled()
         {
-            if ((Usage & TextureUsage.Sampled) != 0) gd.TransitionImageLayout(this, VkImageLayout.ShaderReadOnlyOptimal);
+            if ((Usage & TextureUsage.Sampled) == 0) return;
+
+            // Skip the CB submission if all subresources are already in ShaderReadOnlyOptimal.
+            // clearIfRenderTarget() calls ClearSampledColorTexture() for Sampled-only images,
+            // which ends in ShaderReadOnlyOptimal — re-submitting a no-op CB just to call
+            // TransitionImageLayout when oldLayout == newLayout is wasteful.
+            bool alreadyCorrect = true;
+            for (int i = 0; i < imageLayouts.Length; i++)
+            {
+                if (imageLayouts[i] != VkImageLayout.ShaderReadOnlyOptimal)
+                {
+                    alreadyCorrect = false;
+                    break;
+                }
+            }
+
+            if (!alreadyCorrect)
+                gd.TransitionImageLayout(this, VkImageLayout.ShaderReadOnlyOptimal);
         }
 
         private void refCountedDispose()

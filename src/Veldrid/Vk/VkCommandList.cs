@@ -1697,7 +1697,13 @@ namespace Veldrid.Vk
                 colorAttachments[i].imageView = colorViews[i];
                 colorAttachments[i].imageLayout = VkImageLayout.ColorAttachmentOptimal;
                 colorAttachments[i].resolveMode = VkResolveModeFlags.None;
-                colorAttachments[i].storeOp = VkAttachmentStoreOp.Store;
+
+                // Transient color (LAZILY_ALLOCATED) must use DontCare storeOp so the driver
+                // knows it does not need to flush tile-RAM color contents to main memory.
+                // Using Store defeats lazy allocation and wastes bandwidth on tiler GPUs.
+                var vkColorTexForStore = Util.AssertSubtype<Texture, VkTexture>(currentFramebuffer.ColorTargets[i].Target);
+                bool isTransientColor = (vkColorTexForStore.Usage & TextureUsage.Transient) != 0;
+                colorAttachments[i].storeOp = isTransientColor ? VkAttachmentStoreOp.DontCare : VkAttachmentStoreOp.Store;
 
                 if (validColorClearValues[i])
                 {
@@ -1718,14 +1724,20 @@ namespace Veldrid.Vk
                     }
                     else if (newFramebuffer)
                     {
-                        // On TBR GPUs (Adreno/Mali), DontCare exposes stale tile-RAM content from a previous
-                        // render pass sharing the same tile region → flickering black boxes / gray rectangles.
-                        // For sampled (offscreen) FBOs, use Clear(0,0,0,0) as a safe fallback when the app
-                        // hasn't queued an explicit clear. The swapchain surface (not sampled) keeps DontCare
-                        // as the expected usage pattern is for apps to clear it explicitly each frame.
-                        var vkColorTex = Util.AssertSubtype<Texture, VkTexture>(currentFramebuffer.ColorTargets[i].Target);
-                        bool isSampledOffscreen = (vkColorTex.Usage & TextureUsage.Sampled) != 0;
-                        if (isSampledOffscreen)
+                        // On TBDR GPUs (Adreno/Mali), DontCare exposes stale tile-RAM content from any previous
+                        // render pass that happened to share the same tile region — producing flickering black
+                        // or gray rectangles on the left or right side of the screen.
+                        //
+                        // Use Clear(0,0,0,0) for ALL non-transient color attachments (sampled offscreen, swapchain,
+                        // MSAA resolve targets, etc.) when no explicit app clear was queued.  On a TBDR GPU this
+                        // is essentially free: loadOp=Clear initialises tile RAM to the clear colour without any
+                        // DRAM read, which is the same cost as DontCare.  On an immediate-mode GPU (PC) loadOp=Clear
+                        // writes the framebuffer before rendering, but that is a corner-case fallback path.
+                        //
+                        // Transient attachments (LAZILY_ALLOCATED) keep DontCare: their storeOp is also DontCare
+                        // so the content is always discarded at render pass end; the "stale tile RAM" invariant
+                        // is upheld because nothing ever stores to them.
+                        if (!isTransientColor)
                         {
                             colorAttachments[i].loadOp = VkAttachmentLoadOp.Clear;
                             colorAttachments[i].clearValue = new VkClearValue { color = new VkClearColorValue(0f, 0f, 0f, 0f) };
@@ -2162,7 +2174,14 @@ namespace Veldrid.Vk
             if (!pipeline.IsComputePipeline && currentGraphicsPipeline != pipeline)
             {
                 Util.EnsureArrayMinimumSize(ref currentGraphicsResourceSets, vkPipeline.ResourceSetCount);
-                clearSets(currentGraphicsResourceSets);
+                // Per Vulkan spec §14.2.2, descriptor sets survive a pipeline switch when both
+                // pipelines share the same VkPipelineLayout object (guaranteed by the layout
+                // cache in VkGraphicsDevice).  Only clear the bound sets when the layout actually
+                // changes; skipping clearSets avoids unnecessary vkCmdBindDescriptorSets calls
+                // for the common case of pipeline variants that share a resource layout.
+                if (currentGraphicsPipeline == null
+                    || currentGraphicsPipeline.PipelineLayout != vkPipeline.PipelineLayout)
+                    clearSets(currentGraphicsResourceSets);
                 Util.EnsureArrayMinimumSize(ref graphicsResourceSetsChanged, vkPipeline.ResourceSetCount);
                 gd.DeviceApi.vkCmdBindPipeline(CommandBuffer, VkPipelineBindPoint.Graphics, vkPipeline.DevicePipeline);
                 currentGraphicsPipeline = vkPipeline;
@@ -2170,7 +2189,9 @@ namespace Veldrid.Vk
             else if (pipeline.IsComputePipeline && currentComputePipeline != pipeline)
             {
                 Util.EnsureArrayMinimumSize(ref currentComputeResourceSets, vkPipeline.ResourceSetCount);
-                clearSets(currentComputeResourceSets);
+                if (currentComputePipeline == null
+                    || currentComputePipeline.PipelineLayout != vkPipeline.PipelineLayout)
+                    clearSets(currentComputeResourceSets);
                 Util.EnsureArrayMinimumSize(ref computeResourceSetsChanged, vkPipeline.ResourceSetCount);
                 gd.DeviceApi.vkCmdBindPipeline(CommandBuffer, VkPipelineBindPoint.Compute, vkPipeline.DevicePipeline);
                 currentComputePipeline = vkPipeline;
