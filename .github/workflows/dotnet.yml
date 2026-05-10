@@ -535,11 +535,14 @@ jobs:
                     return f'{ns/1_000_000_000:.3f} s'
 
                 # Host environment summary.
+                # BenchmarkDotNet < 0.14 emits OsVersion as {"Value": "..."};
+                # BenchmarkDotNet 0.14+ emits it as a plain string.  Handle both.
                 if host_info:
-                    os_info  = host_info.get('OsVersion', {})
+                    os_raw   = host_info.get('OsVersion', '')
+                    os_str   = os_raw.get('Value', '') if isinstance(os_raw, dict) else (os_raw or '')
                     runtime  = host_info.get('RuntimeVersion', '')
                     cpu      = host_info.get('ProcessorName', '')
-                    write(f'**Host:** {os_info.get("Value", "")} · {runtime} · {cpu}')
+                    write(f'**Host:** {os_str} · {runtime} · {cpu}')
                     write()
 
                 write('| Benchmark | Mean | ±StdDev |')

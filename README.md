@@ -133,6 +133,7 @@ The Vulkan backend was fully migrated from the ppy fork of vulkan-net to `Vortic
 <summary>Expand details</summary>
 
 - **Redundant state tracking** — `SetViewport`, `SetScissorRect`, `SetBlendFactor`, `SetStencilRef`, `SetFramebuffer` all check against cached state and skip the GPU call when unchanged.
+- **Deferred struct construction** — `SetPipelineCore` compares blend factors directly against the pipeline's raw float array before constructing a `Color4`; the struct is only created when the GPU call is actually needed.
 - **Staging buffer pool** — swap-remove O(1) instead of `RemoveAt` O(n).
 
 </details>
@@ -174,6 +175,7 @@ The Vulkan backend was fully migrated from the ppy fork of vulkan-net to `Vortic
 - **`glClearBufferfv` / `glClearBufferfi` fast paths** — `ClearColorTarget` and `ClearDepthStencil` use single-attachment clear calls (GL 3.0+ / GLES 3.0+) instead of the `glDrawBuffers + glClear + glDrawBuffers` save/restore dance.
 - **Dithering disabled** — `glDisable(GL_DITHER)` at context init. On by default in the spec; costs fragment cycles on tilers; imperceptible on ≥8 bpc targets.
 - **`BufferStorage` detection** (`GL_ARB_buffer_storage` / `GL_EXT_buffer_storage` / GL 4.4+) — capability flag available for persistent-mapped buffer paths.
+- **Narrowed post-compute barrier** — `glMemoryBarrier` after dispatch uses only the 9 GPU-relevant bits (SSBO, image, UBO, vertex/index fetch, indirect, framebuffer, atomic counter) instead of `GL_ALL_BARRIER_BITS`. Drops 6 CPU-side sync bits that have no meaning after a GPU-side dispatch.
 
 </details>
 
@@ -226,6 +228,7 @@ Safety is enforced statically: shadow-map depth targets (`Sampled | DepthStencil
 | `DisposeWhenIdle` now flushes on `SubmitCommands` — previously leaked resources in apps that never call `WaitForIdle` | [veldrid#476](https://github.com/veldrid/veldrid/issues/476) |
 | D3D11: FlipDiscard swapchain on DXGI 1.4+ | [veldrid#484](https://github.com/veldrid/veldrid/pull/484) |
 | Metal: `DepthComparison` forced to `Always` when depth test is disabled | [ppy#75](https://github.com/ppy/veldrid/pull/75) |
+| Metal: `ResolveTexture` now uses `MTLStoreActionStoreAndMultisampleResolve` — the previous `MultisampleResolve`-only action left the source MSAA texture contents undefined, corrupting any subsequent read of the MSAA surface | — |
 | OpenGL: `ClearDepthStencil` was leaving stencil mask and depth-write in incorrect state | [veldrid#481](https://github.com/veldrid/veldrid/pull/481) |
 | GLES: Stencil buffer init + `IntPtr` for `eglGetDisplay` on 64-bit | [ppy#71](https://github.com/ppy/veldrid/pull/71) |
 
@@ -233,8 +236,8 @@ Safety is enforced statically: shadow-map depth targets (`Sampled | DepthStencil
 
 ## CI / Build / Publishing
 
-- **.NET 10 SDK** with `LangVersion 14.0`; multi-platform CI (Windows · Linux · macOS)
-- **Zero warnings** across all three projects in the solution
+- **.NET 10 SDK** with `LangVersion 14.0`; multi-platform CI (Windows · Linux · macOS · Android · iOS)
+- **Zero warnings** across all projects in the solution (`-p:TreatWarningsAsErrors=true`)
 - `actions/cache@v5` for `~/.nuget/packages`; `concurrency:` group cancels superseded non-tag runs
 - **Automatic publishing** — push to default branch → prerelease to GitHub Packages; tagged ref → release to nuget.org + GitHub Release
 - **One-click manual publish** via `workflow_dispatch` (Actions → *Publish NuGet Packages* → *Run workflow*):
@@ -242,6 +245,8 @@ Safety is enforced statically: shadow-map depth targets (`Sampled | DepthStencil
   - `create_release`: attach `.nupkg` files to a GitHub Release
   - `dry_run`: build + pack only, skip all push steps
   - `.nupkg` artifacts uploaded regardless of publish outcome (30-day retention)
+- **Smoke tests** on every push: Vulkan (lavapipe + Khronos validation layer), D3D11/D3D12 (WARP), Metal (macOS runner)
+- **Inline benchmarks** (per PR + default-branch pushes): BenchmarkDotNet on lavapipe; results published to the Actions step summary
 
 ---
 

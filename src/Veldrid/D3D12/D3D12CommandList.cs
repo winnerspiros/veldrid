@@ -166,18 +166,17 @@ namespace Veldrid.D3D12
                     commandList.OMSetStencilRef(d3d12Pipeline.StencilReference);
                 }
 
-                var blendFactor = new Color4(
-                    d3d12Pipeline.BlendFactor[0],
-                    d3d12Pipeline.BlendFactor[1],
-                    d3d12Pipeline.BlendFactor[2],
-                    d3d12Pipeline.BlendFactor[3]);
-
                 if (!hasBlendFactor
-                    || cachedBlendFactor.R != blendFactor.R
-                    || cachedBlendFactor.G != blendFactor.G
-                    || cachedBlendFactor.B != blendFactor.B
-                    || cachedBlendFactor.A != blendFactor.A)
+                    || cachedBlendFactor.R != d3d12Pipeline.BlendFactor[0]
+                    || cachedBlendFactor.G != d3d12Pipeline.BlendFactor[1]
+                    || cachedBlendFactor.B != d3d12Pipeline.BlendFactor[2]
+                    || cachedBlendFactor.A != d3d12Pipeline.BlendFactor[3])
                 {
+                    var blendFactor = new Color4(
+                        d3d12Pipeline.BlendFactor[0],
+                        d3d12Pipeline.BlendFactor[1],
+                        d3d12Pipeline.BlendFactor[2],
+                        d3d12Pipeline.BlendFactor[3]);
                     cachedBlendFactor = blendFactor;
                     hasBlendFactor = true;
                     commandList.OMSetBlendFactor(blendFactor);
