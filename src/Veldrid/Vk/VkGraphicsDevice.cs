@@ -1712,21 +1712,22 @@ namespace Veldrid.Vk
                     // when this extension is exposed by the driver. createInstance already
                     // enables VK_KHR_get_surface_capabilities2 unconditionally when present,
                     // so no additional gate is required here.
-                    // Android Adreno: skip — pNext chaining for present-mode info is unreliable
-                    // on this vendor (same broken-stub class as sync2, fragment shading rate, etc.).
+                    //
+                    // This was previously disabled for Android Adreno with the same broken-stub
+                    // reasoning used for dynamic rendering and sync2. That reasoning was wrong —
+                    // the root cause of all Adreno crashes was the feature pNext chain being
+                    // omitted at vkCreateDevice. Unlike push descriptors, fragment shading rate,
+                    // and display timing (which have broken function-pointer stubs), our usage of
+                    // swapchain_maintenance1 is struct chaining only (VkPhysicalDeviceSwapchain-
+                    // Maintenance1FeaturesKHR at device create, VkSwapchainPresentModesCreateInfoEXT
+                    // at swapchain create, VkSwapchainPresentModeInfoKHR at present). No new
+                    // vkCmd* function pointers are called. Enable unconditionally.
                     else if (extensionName == "VK_EXT_swapchain_maintenance1"
                              || extensionName == "VK_KHR_swapchain_maintenance1")
                     {
-                        if (isAndroidAdreno)
-                        {
-                            Debug.WriteLine("[Veldrid] Android Adreno: skipping VK_EXT_swapchain_maintenance1 at vkCreateDevice (unreliable pNext handling on this vendor).");
-                        }
-                        else
-                        {
-                            activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
-                        }
+                        activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
                         requiredInstanceExtensions.Remove(extensionName);
-                        hasSwapchainMaintenance1 = !isAndroidAdreno;
+                        hasSwapchainMaintenance1 = true;
                     }
                     // VK_KHR_synchronization2: enables vkQueueSubmit2 with per-semaphore
                     // stage masks. Core in Vulkan 1.3; also available as KHR extension.
