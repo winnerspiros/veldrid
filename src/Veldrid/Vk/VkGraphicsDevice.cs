@@ -257,7 +257,7 @@ namespace Veldrid.Vk
                 if (textureUpdateBatchPool.Count > 0) batch = textureUpdateBatchPool.Pop();
             }
 
-            if (batch == null) return new VkTextureUpdateBatch(this);
+            if (batch is null) return new VkTextureUpdateBatch(this);
 
             batch.Reopen();
             return batch;
@@ -271,7 +271,7 @@ namespace Veldrid.Vk
                 if (bufferUpdateBatchPool.Count > 0) batch = bufferUpdateBatchPool.Pop();
             }
 
-            if (batch == null) return new VkBufferUpdateBatch(this);
+            if (batch is null) return new VkBufferUpdateBatch(this);
 
             batch.Reopen();
             return batch;
@@ -1140,8 +1140,9 @@ namespace Veldrid.Vk
                 //
                 // The in-place compaction below is O(N) in the number of outstanding fences
                 // (typically 1-3 per frame) and avoids any additional allocation.
+                int count = submittedFences.Count;
                 int writeIdx = 0;
-                for (int i = 0; i < submittedFences.Count; i++)
+                for (int i = 0; i < count; i++)
                 {
                     var fsi = submittedFences[i];
 
@@ -2380,7 +2381,8 @@ namespace Veldrid.Vk
 
             lock (stagingResourcesLock)
             {
-                for (int i = 0; i < availableStagingTextures.Count; i++)
+                int n = availableStagingTextures.Count;
+                for (int i = 0; i < n; i++)
                 {
                     var tex = availableStagingTextures[i];
 
@@ -2406,7 +2408,8 @@ namespace Veldrid.Vk
         {
             lock (stagingResourcesLock)
             {
-                for (int i = 0; i < availableStagingBuffers.Count; i++)
+                int n = availableStagingBuffers.Count;
+                for (int i = 0; i < n; i++)
                 {
                     var buffer = availableStagingBuffers[i];
 
