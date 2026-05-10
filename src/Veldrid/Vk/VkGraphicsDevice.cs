@@ -170,6 +170,15 @@ namespace Veldrid.Vk
         private readonly Dictionary<VkCommandBuffer, SharedCommandPool> submittedSharedCommandPools
             = new Dictionary<VkCommandBuffer, SharedCommandPool>();
 
+        // Pipeline layout cache: VkPipelineLayout objects are shared across all VkPipeline
+        // instances that use an identical sequence of VkDescriptorSetLayout handles.  This
+        // lets Vulkan reuse descriptor sets across compatible pipeline switches without
+        // rebinding, because two pipelines that share the same VkPipelineLayout object are
+        // automatically "compatible" per spec §14.2.2.
+        private readonly Lock pipelineLayoutCacheLock = new Lock();
+        private readonly Dictionary<PipelineLayoutKey, VkPipelineLayout> pipelineLayoutCache
+            = new Dictionary<PipelineLayoutKey, VkPipelineLayout>();
+
         // Free-list of VkTextureUpdateBatch instances. A new batch is pushed back here on Dispose so per-frame
         // BeginTextureUpdateBatch / using-block usage allocates no managed garbage after warmup.
         private readonly Stack<VkTextureUpdateBatch> textureUpdateBatchPool = new Stack<VkTextureUpdateBatch>();
@@ -783,6 +792,14 @@ namespace Veldrid.Vk
             DescriptorPoolManager.DestroyAll();
             DeviceApi.vkDestroyCommandPool(graphicsCommandPool, null);
 
+            // Destroy all cached pipeline layouts before the device.
+            lock (pipelineLayoutCacheLock)
+            {
+                foreach (var layout in pipelineLayoutCache.Values)
+                    DeviceApi.vkDestroyPipelineLayout(layout, null);
+                pipelineLayoutCache.Clear();
+            }
+
             if (pipelineCache != VkPipelineCache.Null)
                 DeviceApi.vkDestroyPipelineCache(pipelineCache, null);
 
@@ -807,6 +824,59 @@ namespace Veldrid.Vk
             CheckResult(result);
             DeviceApi.vkDestroyDevice(null);
             InstanceApi.vkDestroyInstance(null);
+        }
+
+        // Returns a VkPipelineLayout for the given ordered sequence of VkDescriptorSetLayout
+        // handles, creating it on first use and returning the cached object thereafter.
+        // Cached layouts are owned by the device and destroyed in PlatformDispose —
+        // VkPipeline must NOT call vkDestroyPipelineLayout on them.
+        internal unsafe VkPipelineLayout GetOrCreatePipelineLayout(VkDescriptorSetLayout* dsls, int count)
+        {
+            // Build a heap-allocated key from the raw handles so the dictionary can own it.
+            var handles = new ulong[count];
+            for (int i = 0; i < count; i++) handles[i] = dsls[i].Handle;
+            var key = new PipelineLayoutKey(handles);
+
+            lock (pipelineLayoutCacheLock)
+            {
+                if (pipelineLayoutCache.TryGetValue(key, out var existing))
+                    return existing;
+
+                var layoutCi = new VkPipelineLayoutCreateInfo();
+                layoutCi.setLayoutCount = (uint)count;
+                layoutCi.pSetLayouts = dsls;
+
+                DeviceApi.vkCreatePipelineLayout(&layoutCi, null, out var layout);
+                pipelineLayoutCache[key] = layout;
+                return layout;
+            }
+        }
+
+        // Key type for the pipeline layout cache.  Stores the ordered sequence of
+        // VkDescriptorSetLayout handles so that two pipelines with identical resource
+        // layouts map to the same key (and therefore the same cached VkPipelineLayout).
+        private readonly struct PipelineLayoutKey : IEquatable<PipelineLayoutKey>
+        {
+            private readonly ulong[] _handles;
+            public PipelineLayoutKey(ulong[] handles) => _handles = handles;
+
+            public bool Equals(PipelineLayoutKey other)
+            {
+                var a = _handles;
+                var b = other._handles;
+                if (a is null && b is null) return true;
+                if (a is null || b is null || a.Length != b.Length) return false;
+                return MemoryExtensions.SequenceEqual(a.AsSpan(), b.AsSpan());
+            }
+            public override bool Equals(object obj) => obj is PipelineLayoutKey k && Equals(k);
+            public override int GetHashCode()
+            {
+                var hc = new HashCode();
+                if (_handles != null)
+                    foreach (var h in _handles)
+                        hc.Add(h);
+                return hc.ToHashCode();
+            }
         }
 
         private static bool checkIsSupported()
@@ -1560,17 +1630,28 @@ namespace Veldrid.Vk
                     }
                     else if (extensionName == "VK_KHR_dynamic_rendering")
                     {
-                        // On 1.3+ this is core; enabling the extension is harmless on non-Adreno devices.
-                        if (isAndroidAdreno)
+                        requiredInstanceExtensions.Remove(extensionName);
+                        if (DeviceApiVersion.IsAtLeast(1, 3))
                         {
-                            Debug.WriteLine("[Veldrid] Android Adreno: skipping VK_KHR_dynamic_rendering at vkCreateDevice (broken non-null function stubs).");
+                            // Core in Vulkan 1.3 — enabled via VkPhysicalDeviceDynamicRenderingFeatures
+                            // pNext at device creation, not via the extension string.
+                            // hasDynamicRendering is already true from the initial IsAtLeast(1,3) check.
+                            // DO NOT add to activeExtensions (redundant for core features; some drivers
+                            // also reject a core extension being listed in ppEnabledExtensionNames).
+                        }
+                        else if (isAndroidAdreno)
+                        {
+                            // Pre-1.3 Adreno: extension function stubs are unreliable on this vendor.
+                            // Disable to prevent PC=0 crashes; fall back to VkRenderPass path.
+                            hasDynamicRendering = false;
+                            Debug.WriteLine("[Veldrid] Android Adreno (pre-1.3 driver): skipping VK_KHR_dynamic_rendering (extension stubs unreliable on this vendor).");
                         }
                         else
                         {
+                            // Pre-1.3 non-Adreno: opt-in via extension string + pNext feature struct.
                             activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                            hasDynamicRendering = true;
                         }
-                        requiredInstanceExtensions.Remove(extensionName);
-                        hasDynamicRendering = !isAndroidAdreno;
                     }
                     else if (extensionName == "VK_EXT_memory_budget")
                     {
@@ -1651,16 +1732,25 @@ namespace Veldrid.Vk
                     // stage masks. Core in Vulkan 1.3; also available as KHR extension.
                     else if (extensionName == "VK_KHR_synchronization2")
                     {
-                        if (isAndroidAdreno)
+                        requiredInstanceExtensions.Remove(extensionName);
+                        if (DeviceApiVersion.IsAtLeast(1, 3))
                         {
-                            Debug.WriteLine("[Veldrid] Android Adreno: skipping VK_KHR_synchronization2 at vkCreateDevice (broken non-null function stubs).");
+                            // Core in Vulkan 1.3 — enabled via VkPhysicalDeviceSynchronization2Features
+                            // pNext; no extension string needed.
+                            // hasSynchronization2 is already true from the initial IsAtLeast(1,3) check.
+                        }
+                        else if (isAndroidAdreno)
+                        {
+                            // Pre-1.3 Adreno: extension function stubs unreliable; disable.
+                            hasSynchronization2 = false;
+                            Debug.WriteLine("[Veldrid] Android Adreno (pre-1.3 driver): skipping VK_KHR_synchronization2 (extension stubs unreliable on this vendor).");
                         }
                         else
                         {
+                            // Pre-1.3 non-Adreno: opt-in via extension string + pNext feature struct.
                             activeExtensions[activeExtensionCount++] = (IntPtr)properties[property].extensionName;
+                            hasSynchronization2 = true;
                         }
-                        requiredInstanceExtensions.Remove(extensionName);
-                        hasSynchronization2 = !isAndroidAdreno;
                     }
                     // VK_KHR_timeline_semaphore: foundation for replacing the per-CL fence
                     // pool with a single monotonically-incrementing counter queried via
@@ -1736,10 +1826,10 @@ namespace Veldrid.Vk
                 deviceCreateInfo.pNext = &portabilitySubsetFeatures;
             }
 
-            // Android Adreno: skip — dynamic rendering is unconditionally disabled on this
-            // vendor (broken non-null stubs for vkCmdBeginRendering/vkCmdEndRendering); there
-            // is no point asking the driver to activate the feature.
-            if (hasDynamicRendering && !isAndroidAdreno)
+            // VK_KHR_dynamic_rendering: enable for all devices where hasDynamicRendering is true.
+            // On Vulkan 1.3 conformant devices (including Adreno 740) this is a mandatory core
+            // feature.  Pre-1.3 Adreno has hasDynamicRendering=false so it never reaches here.
+            if (hasDynamicRendering)
             {
                 dynamicRenderingFeatures = new VkPhysicalDeviceDynamicRenderingFeatures();
                 dynamicRenderingFeatures.dynamicRendering = true;
@@ -1766,9 +1856,9 @@ namespace Veldrid.Vk
                 deviceCreateInfo.pNext = &swapchainMaintenance1Features;
             }
 
-            // Android Adreno: skip — synchronization2 submit path is unconditionally disabled
-            // on this vendor (broken vkQueueSubmit2 stub); no point activating the feature.
-            if (hasSynchronization2 && !isAndroidAdreno)
+            // VK_KHR_synchronization2: enable for all devices where hasSynchronization2 is true.
+            // On Vulkan 1.3 conformant devices this is a mandatory core feature.
+            if (hasSynchronization2)
             {
                 synchronization2Features = new VkPhysicalDeviceSynchronization2Features();
                 synchronization2Features.synchronization2 = true;
@@ -1908,9 +1998,13 @@ namespace Veldrid.Vk
             }
 
             // VK_KHR_dynamic_rendering: validate that the actual function pointers were
-            // loaded by vkGetDeviceProcAddr. On some drivers (observed on Adreno with
-            // pre-release Android system images) the extension may be listed in device
-            // properties but the function pointers silently return null.
+            // loaded by vkGetDeviceProcAddr after enabling the feature at device creation.
+            //
+            // Root cause of the prior Adreno crashes: the feature pNext chain was skipped
+            // for isAndroidAdreno, so the driver never activated the feature and
+            // vkGetDeviceProcAddr returned null (or a null-stub) for the entry points.
+            // Now that we chain VkPhysicalDeviceDynamicRenderingFeatures on all conformant
+            // 1.3 devices (including Adreno), the function pointers are properly initialized.
             //
             // Dispatch flags set here:
             //   UseKhrDynamicRendering = true  → vkCmdBeginRenderingKHR is used for begin
@@ -1928,39 +2022,6 @@ namespace Veldrid.Vk
                 bool khrBeginAvailable = DeviceApi.vkCmdBeginRenderingKHR_ptr.Value != null;
                 bool endOk   = DeviceApi.vkCmdEndRendering_ptr.Value != null;
                 bool khrEndAvailable = DeviceApi.vkCmdEndRenderingKHR_ptr.Value != null;
-
-                // Android Adreno: always disable dynamic rendering and fall back to VkRenderPass.
-                //
-                // Both the core (vkCmdBeginRendering / vkCmdEndRendering) and KHR-alias
-                // (vkCmdBeginRenderingKHR / vkCmdEndRenderingKHR) entry points are unreliable
-                // across Android Adreno driver generations:
-                //
-                //   • Early Adreno 7xx drivers exposed only the core pointers, but those were
-                //     broken stubs (non-null addresses that jump internally to PC=0).
-                //   • Later Android 16 Adreno 7xx drivers expose the KHR aliases as well, but
-                //     those aliases are also broken stubs — they return non-null from
-                //     vkGetDeviceProcAddr yet crash at PC=0 (SIGSEGV, SEGV_MAPERR) on the first
-                //     real call (confirmed on Samsung Galaxy S23 Ultra / Snapdragon 8 Gen 2,
-                //     BP2A.250605.031.A3).
-                //
-                // Because the stubs are non-null, null-pointer checks alone cannot distinguish
-                // them from working implementations.  The only safe policy is to unconditionally
-                // disable dynamic rendering on Android Adreno and let every render pass go
-                // through the always-reliable vkCmdBeginRenderPass / vkCmdEndRenderPass path.
-                if (isAndroidAdreno)
-                {
-                    beginOk = false;
-                    endOk = false;
-                    // khrBeginAvailable and khrEndAvailable must also be cleared so the
-                    // general-purpose fallback blocks below (which check !beginOk &&
-                    // khrBeginAvailable, and !endOk && khrEndAvailable) cannot re-enable
-                    // dynamic rendering through the broken KHR aliases.
-                    khrBeginAvailable = false;
-                    khrEndAvailable = false;
-                    UseKhrDynamicRendering = false;
-                    UseKhrEndRendering = false;
-                    Debug.WriteLine("[Veldrid] Android Adreno: dynamic rendering unconditionally disabled; using VkRenderPass fallback.");
-                }
 
                 if (!beginOk && khrBeginAvailable)
                 {
@@ -2098,14 +2159,7 @@ namespace Veldrid.Vk
             // conformant 1.3 device, but guard defensively).
             if (hasSynchronization2)
             {
-                if (isAndroidAdreno)
-                {
-                    // Some Android Adreno drivers can expose vkQueueSubmit2/vkQueueSubmit2KHR
-                    // but still crash during submit; force legacy vkQueueSubmit on this vendor.
-                    HasSynchronization2 = false;
-                    Debug.WriteLine("[Veldrid] Android Adreno: synchronization2 submit path disabled; using vkQueueSubmit fallback.");
-                }
-                else if (DeviceApi.vkQueueSubmit2_ptr.Value != null)
+                if (DeviceApi.vkQueueSubmit2_ptr.Value != null)
                 {
                     HasSynchronization2 = true;
                 }
@@ -2396,7 +2450,6 @@ namespace Veldrid.Vk
                         vkSc.DrainPastPresentationTimings();
                     }
                     handlePresentResult(vkSc, presentResult);
-                    acquireAndWaitNextImage(vkSc);
                 }
             }
             else
@@ -2411,9 +2464,14 @@ namespace Veldrid.Vk
                         vkSc.DrainPastPresentationTimings();
                     }
                     handlePresentResult(vkSc, presentResult);
-                    acquireAndWaitNextImage(vkSc);
                 }
             }
+            // acquireAndWaitNextImage is NOT a queue operation (vkAcquireNextImageKHR +
+            // vkWaitForFences only).  Holding the queue lock while blocking on the fence
+            // serialises ALL other queue traffic (texture-upload threads, etc.) for up to
+            // 250 ms per frame.  Move it outside both locks so other threads can submit
+            // while the render thread waits for the next swapchain image.
+            acquireAndWaitNextImage(vkSc);
         }
 
         // VK_ERROR_OUT_OF_DATE_KHR / VK_SUBOPTIMAL_KHR / VK_ERROR_SURFACE_LOST_KHR are

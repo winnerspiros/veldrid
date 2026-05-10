@@ -1697,7 +1697,13 @@ namespace Veldrid.Vk
                 colorAttachments[i].imageView = colorViews[i];
                 colorAttachments[i].imageLayout = VkImageLayout.ColorAttachmentOptimal;
                 colorAttachments[i].resolveMode = VkResolveModeFlags.None;
-                colorAttachments[i].storeOp = VkAttachmentStoreOp.Store;
+
+                // Transient color (LAZILY_ALLOCATED) must use DontCare storeOp so the driver
+                // knows it does not need to flush tile-RAM color contents to main memory.
+                // Using Store defeats lazy allocation and wastes bandwidth on tiler GPUs.
+                var vkColorTexForStore = Util.AssertSubtype<Texture, VkTexture>(currentFramebuffer.ColorTargets[i].Target);
+                bool isTransientColor = (vkColorTexForStore.Usage & TextureUsage.Transient) != 0;
+                colorAttachments[i].storeOp = isTransientColor ? VkAttachmentStoreOp.DontCare : VkAttachmentStoreOp.Store;
 
                 if (validColorClearValues[i])
                 {
@@ -2162,7 +2168,14 @@ namespace Veldrid.Vk
             if (!pipeline.IsComputePipeline && currentGraphicsPipeline != pipeline)
             {
                 Util.EnsureArrayMinimumSize(ref currentGraphicsResourceSets, vkPipeline.ResourceSetCount);
-                clearSets(currentGraphicsResourceSets);
+                // Per Vulkan spec §14.2.2, descriptor sets survive a pipeline switch when both
+                // pipelines share the same VkPipelineLayout object (guaranteed by the layout
+                // cache in VkGraphicsDevice).  Only clear the bound sets when the layout actually
+                // changes; skipping clearSets avoids unnecessary vkCmdBindDescriptorSets calls
+                // for the common case of pipeline variants that share a resource layout.
+                if (currentGraphicsPipeline == null
+                    || currentGraphicsPipeline.PipelineLayout != vkPipeline.PipelineLayout)
+                    clearSets(currentGraphicsResourceSets);
                 Util.EnsureArrayMinimumSize(ref graphicsResourceSetsChanged, vkPipeline.ResourceSetCount);
                 gd.DeviceApi.vkCmdBindPipeline(CommandBuffer, VkPipelineBindPoint.Graphics, vkPipeline.DevicePipeline);
                 currentGraphicsPipeline = vkPipeline;
@@ -2170,7 +2183,9 @@ namespace Veldrid.Vk
             else if (pipeline.IsComputePipeline && currentComputePipeline != pipeline)
             {
                 Util.EnsureArrayMinimumSize(ref currentComputeResourceSets, vkPipeline.ResourceSetCount);
-                clearSets(currentComputeResourceSets);
+                if (currentComputePipeline == null
+                    || currentComputePipeline.PipelineLayout != vkPipeline.PipelineLayout)
+                    clearSets(currentComputeResourceSets);
                 Util.EnsureArrayMinimumSize(ref computeResourceSetsChanged, vkPipeline.ResourceSetCount);
                 gd.DeviceApi.vkCmdBindPipeline(CommandBuffer, VkPipelineBindPoint.Compute, vkPipeline.DevicePipeline);
                 currentComputePipeline = vkPipeline;

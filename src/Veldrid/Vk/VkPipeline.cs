@@ -266,15 +266,16 @@ namespace Veldrid.Vk
 
             pipelineCi.pViewportState = &viewportStateCi;
 
-            // Pipeline Layout
+            // Pipeline Layout — look up (or create) a shared cached layout for this
+            // resource layout combination.  Identical resource layout sequences reuse the
+            // same VkPipelineLayout, which lets Vulkan treat consecutive pipeline switches
+            // with the same layout as compatible (§14.2.2) so descriptor sets survive
+            // without a full rebind.  The cache is owned by the device; this object must
+            // NOT call vkDestroyPipelineLayout in disposeCore.
             var resourceLayouts = description.ResourceLayouts;
-            var pipelineLayoutCi = new VkPipelineLayoutCreateInfo();
-            pipelineLayoutCi.setLayoutCount = (uint)resourceLayouts.Length;
             var dsls = stackalloc VkDescriptorSetLayout[resourceLayouts.Length];
             for (int i = 0; i < resourceLayouts.Length; i++) dsls[i] = Util.AssertSubtype<ResourceLayout, VkResourceLayout>(resourceLayouts[i]).DescriptorSetLayout;
-            pipelineLayoutCi.pSetLayouts = dsls;
-
-            gd.DeviceApi.vkCreatePipelineLayout(&pipelineLayoutCi, null, out pipelineLayout);
+            pipelineLayout = gd.GetOrCreatePipelineLayout(dsls, resourceLayouts.Length);
             pipelineCi.layout = pipelineLayout;
 
             var outputDesc = description.Outputs;
@@ -427,15 +428,11 @@ namespace Veldrid.Vk
 
             var pipelineCi = new VkComputePipelineCreateInfo();
 
-            // Pipeline Layout
+            // Pipeline Layout — use shared cached layout (same as graphics pipeline path).
             var resourceLayouts = description.ResourceLayouts;
-            var pipelineLayoutCi = new VkPipelineLayoutCreateInfo();
-            pipelineLayoutCi.setLayoutCount = (uint)resourceLayouts.Length;
             var dsls = stackalloc VkDescriptorSetLayout[resourceLayouts.Length];
             for (int i = 0; i < resourceLayouts.Length; i++) dsls[i] = Util.AssertSubtype<ResourceLayout, VkResourceLayout>(resourceLayouts[i]).DescriptorSetLayout;
-            pipelineLayoutCi.pSetLayouts = dsls;
-
-            gd.DeviceApi.vkCreatePipelineLayout(&pipelineLayoutCi, null, out pipelineLayout);
+            pipelineLayout = gd.GetOrCreatePipelineLayout(dsls, resourceLayouts.Length);
             pipelineCi.layout = pipelineLayout;
 
             // Shader Stage
@@ -512,7 +509,8 @@ namespace Veldrid.Vk
             if (!destroyed)
             {
                 destroyed = true;
-                gd.DeviceApi.vkDestroyPipelineLayout(pipelineLayout, null);
+                // NOTE: pipelineLayout is owned by VkGraphicsDevice.pipelineLayoutCache and
+                // must NOT be destroyed here — it may be shared with other VkPipeline instances.
                 gd.DeviceApi.vkDestroyPipeline(devicePipeline, null);
                 if (!IsComputePipeline) gd.DeviceApi.vkDestroyRenderPass(renderPass, null);
             }

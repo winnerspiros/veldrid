@@ -64,12 +64,17 @@ namespace Veldrid.Vk
             for (int i = 0; i < colorAttachmentCount; i++)
             {
                 var vkColorTex = Util.AssertSubtype<Texture, VkTexture>(ColorTargets[i].Target);
+                // Transient color textures (LAZILY_ALLOCATED) are never read after the render pass
+                // ends — use DontCare so the driver knows it does not need to flush tile-RAM color
+                // contents to main memory.  Using Store defeats lazy allocation and wastes bandwidth
+                // on tiler GPUs (Adreno / Mali).
+                bool isTransientColor = (vkColorTex.Usage & TextureUsage.Transient) != 0;
                 var colorAttachmentDesc = new VkAttachmentDescription
                 {
                     format = vkColorTex.VkFormat,
                     samples = vkColorTex.VkSampleCount,
                     loadOp = VkAttachmentLoadOp.Load,
-                    storeOp = VkAttachmentStoreOp.Store,
+                    storeOp = isTransientColor ? VkAttachmentStoreOp.DontCare : VkAttachmentStoreOp.Store,
                     stencilLoadOp = VkAttachmentLoadOp.DontCare,
                     stencilStoreOp = VkAttachmentStoreOp.DontCare,
                     initialLayout = isPresented
