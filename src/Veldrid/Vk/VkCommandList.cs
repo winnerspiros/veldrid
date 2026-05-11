@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using Vortice.Vulkan;
@@ -373,6 +374,33 @@ namespace Veldrid.Vk
 
         private protected override void UpdateBufferCore(DeviceBuffer buffer, uint bufferOffsetInBytes, IntPtr source, uint sizeInBytes)
         {
+            var vkBuffer = Util.AssertSubtype<DeviceBuffer, VkBuffer>(buffer);
+
+            // Fast path: if the destination buffer is persistently mapped (Dynamic), write
+            // directly to the mapped pointer without allocating a staging buffer or recording
+            // a vkCmdCopyBuffer + pipeline barrier on the command list.
+            //
+            // Safety:
+            //   1. The CPU write happens during command-list recording, before End() is called.
+            //   2. vkQueueSubmit is called after End() — the GPU cannot read this buffer until
+            //      after submission, so there is no CPU/GPU hazard.
+            //   3. The allocation uses HostVisible | HostCoherent memory; no explicit
+            //      vkFlushMappedMemoryRanges is required for the write to be visible to the GPU.
+            //
+            // This mirrors the same fast path in VkGraphicsDevice.UpdateBufferCore.
+            // For typical per-frame uniform buffer updates (e.g. one UpdateBuffer call per draw
+            // for a 256-byte UBO), the staging-free path eliminates: one staging-buffer List
+            // lookup + O(1) swap-remove, one memcpy into staging, and one vkCmdCopyBuffer +
+            // vkCmdPipelineBarrier recorded on the command buffer — meaningful savings at scale.
+            if (vkBuffer.Memory.IsPersistentMapped)
+            {
+                Unsafe.CopyBlock(
+                    (byte*)vkBuffer.Memory.BlockMappedPointer + bufferOffsetInBytes,
+                    source.ToPointer(),
+                    sizeInBytes);
+                return;
+            }
+
             VkBuffer stagingBuffer = getStagingBuffer(sizeInBytes);
             gd.UpdateBuffer(stagingBuffer, 0, source, sizeInBytes);
             CopyBuffer(stagingBuffer, 0, buffer, bufferOffsetInBytes, sizeInBytes);
@@ -2055,6 +2083,12 @@ namespace Veldrid.Vk
             //     (srcAccess=ColorAttachmentWrite, dstAccess=TransferRead/Write)
             //   • TransitionToFinalLayout: ColorAttachmentOptimal → PresentSrcKHR
             //     (srcAccess=ColorAttachmentWrite, dstAccess=MemoryRead)
+            //
+            // NOTE: InputAttachmentRead is intentionally excluded.  Veldrid exposes no
+            //   multi-subpass render passes, so input-attachment reads never occur.
+            //   Render-target outputs read back within the same frame are transitioned
+            //   to ShaderReadOnlyOptimal via appendTransitions (above), not via the
+            //   legacy VkRenderPass input-attachment mechanism.
             //
             // Expanding dstStage to include FragmentShader | VertexShader | ComputeShader |
             // Transfer stalls those shader stages unnecessarily, causing the GPU to wait for
