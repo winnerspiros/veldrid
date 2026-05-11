@@ -1807,18 +1807,16 @@ namespace Veldrid.Vk
             var colorViews = currentFramebuffer.ColorAttachmentViews;
             var colorAttachments = stackalloc VkRenderingAttachmentInfo[colorCount > 0 ? colorCount : 1];
 
-            // Capture layout BEFORE transitions. If an image is already in ColorAttachmentOptimal,
-            // it was rendered to earlier in this frame (before a mid-frame FBO switch). We must use
-            // loadOp=Load on return to preserve that content. PresentSrcKHR = fresh acquisition;
-            // DontCare is safe there (game always calls Clear on first use via validColorClearValues).
-            var priorColorLayouts = stackalloc VkImageLayout[colorCount > 0 ? colorCount : 1];
-            for (int i = 0; i < colorCount; i++)
-            {
-                var ca = currentFramebuffer.ColorTargets[i];
-                var vkTex = Util.AssertSubtype<Texture, VkTexture>(ca.Target);
-                priorColorLayouts[i] = vkTex.GetImageLayout(ca.MipLevel, ca.ArrayLayer);
-            }
-
+            // Merged loop: capture prior layout, emit barrier, and record isTransient in one pass.
+            //
+            // priorColorLayouts[i]: the layout BEFORE the transition.  Required by the attachment-
+            // setup loop below to distinguish "mid-frame return" (LoadOp=Load) from "first-use"
+            // (LoadOp=Clear / DontCare).  Must be captured BEFORE TryGetLayoutTransitionBarrier
+            // because that call updates the tracked imageLayouts array.
+            //
+            // isTransientColor[i]: precomputed here so the attachment-setup loop below does not need
+            // to call AssertSubtype<Texture,VkTexture> a second time per attachment.
+            //
             // Dynamic rendering has no implicit layout transitions (unlike VkRenderPass, which
             // handles them via VkAttachmentDescription.initialLayout/finalLayout). Emit explicit
             // barriers here so every attachment is in the correct layout when vkCmdBeginRendering
@@ -1828,10 +1826,14 @@ namespace Veldrid.Vk
             // flushTransitionBarriers() was called just before ensureRenderPassActive in preDrawCommand)
             // and flush them all in a single vkCmdPipelineBarrier rather than one call per attachment.
             // This matters most on mobile where reducing pipeline stalls is critical.
+            var priorColorLayouts = stackalloc VkImageLayout[colorCount > 0 ? colorCount : 1];
+            var isTransientColor = stackalloc bool[colorCount > 0 ? colorCount : 1];
             for (int i = 0; i < colorCount; i++)
             {
                 var ca = currentFramebuffer.ColorTargets[i];
                 var vkTex = Util.AssertSubtype<Texture, VkTexture>(ca.Target);
+                priorColorLayouts[i] = vkTex.GetImageLayout(ca.MipLevel, ca.ArrayLayer);
+                isTransientColor[i] = (vkTex.Usage & TextureUsage.Transient) != 0;
 
                 if (vkTex.TryGetLayoutTransitionBarrier(ca.MipLevel, 1, ca.ArrayLayer, 1,
                         VkImageLayout.ColorAttachmentOptimal,
@@ -1872,9 +1874,7 @@ namespace Veldrid.Vk
                 // Transient color (LAZILY_ALLOCATED) must use DontCare storeOp so the driver
                 // knows it does not need to flush tile-RAM color contents to main memory.
                 // Using Store defeats lazy allocation and wastes bandwidth on tiler GPUs.
-                var vkColorTexForStore = Util.AssertSubtype<Texture, VkTexture>(currentFramebuffer.ColorTargets[i].Target);
-                bool isTransientColor = (vkColorTexForStore.Usage & TextureUsage.Transient) != 0;
-                colorAttachments[i].storeOp = isTransientColor ? VkAttachmentStoreOp.DontCare : VkAttachmentStoreOp.Store;
+                colorAttachments[i].storeOp = isTransientColor[i] ? VkAttachmentStoreOp.DontCare : VkAttachmentStoreOp.Store;
 
                 if (validColorClearValues[i])
                 {
@@ -1908,7 +1908,7 @@ namespace Veldrid.Vk
                         // Transient attachments (LAZILY_ALLOCATED) keep DontCare: their storeOp is also DontCare
                         // so the content is always discarded at render pass end; the "stale tile RAM" invariant
                         // is upheld because nothing ever stores to them.
-                        if (!isTransientColor)
+                        if (!isTransientColor[i])
                         {
                             colorAttachments[i].loadOp = VkAttachmentLoadOp.Clear;
                             colorAttachments[i].clearValue = new VkClearValue { color = new VkClearColorValue(0f, 0f, 0f, 0f) };
