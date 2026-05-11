@@ -588,26 +588,39 @@ namespace Veldrid.Vk
                     extent = new VkExtent3D { width = width, height = height, depth = depth }
                 };
 
-                // Batch pre-copy transitions (src→TransferSrcOptimal, dst→TransferDstOptimal) into
-                // a single vkCmdPipelineBarrier call.  Use per-layer calls (layerCount=1 each) rather
-                // than a single range call covering all layers:  TryGetLayoutTransitionBarrier uses
-                // the first mismatched layer's oldLayout for the entire range, which is a Vulkan spec
-                // violation (§12.8) when array layers have mixed layouts after partial prior copies.
-                // This mirrors the fix applied to appendTransitions.
+                // Batch pre-copy transitions (src→TransferSrcOptimal, dst→TransferDstOptimal).
+                // Fast path: if all layers of the mip are in the same layout (the common case),
+                // TryGetMipLayerUniformTransitionBarrier emits a single all-layers barrier.
+                // Falls back to per-layer when layouts are mixed (e.g. partial prior copies).
                 {
                     var preCopyBarriers = stackalloc VkImageMemoryBarrier[(int)(2 * layerCount)];
                     int n = 0;
                     VkPipelineStageFlags preSrc = VkPipelineStageFlags.None, preDst = VkPipelineStageFlags.None;
 
-                    for (uint layer = 0; layer < layerCount; layer++)
+                    if (srcVkTexture.TryGetMipLayerUniformTransitionBarrier(srcMipLevel, srcBaseArrayLayer, layerCount,
+                            VkImageLayout.TransferSrcOptimal, out var srcFast, out var sfS, out var sfD))
+                    { preCopyBarriers[n++] = srcFast; preSrc |= sfS; preDst |= sfD; }
+                    else
                     {
-                        if (srcVkTexture.TryGetLayoutTransitionBarrier(srcMipLevel, 1, srcBaseArrayLayer + layer, 1,
-                                VkImageLayout.TransferSrcOptimal, out var srcPre, out var ss, out var sd))
-                        { preCopyBarriers[n++] = srcPre; preSrc |= ss; preDst |= sd; }
+                        for (uint layer = 0; layer < layerCount; layer++)
+                        {
+                            if (srcVkTexture.TryGetLayoutTransitionBarrier(srcMipLevel, 1, srcBaseArrayLayer + layer, 1,
+                                    VkImageLayout.TransferSrcOptimal, out var b, out var s, out var d))
+                            { preCopyBarriers[n++] = b; preSrc |= s; preDst |= d; }
+                        }
+                    }
 
-                        if (dstVkTexture.TryGetLayoutTransitionBarrier(dstMipLevel, 1, dstBaseArrayLayer + layer, 1,
-                                VkImageLayout.TransferDstOptimal, out var dstPre, out var ds, out var dd))
-                        { preCopyBarriers[n++] = dstPre; preSrc |= ds; preDst |= dd; }
+                    if (dstVkTexture.TryGetMipLayerUniformTransitionBarrier(dstMipLevel, dstBaseArrayLayer, layerCount,
+                            VkImageLayout.TransferDstOptimal, out var dstFast, out var dfS, out var dfD))
+                    { preCopyBarriers[n++] = dstFast; preSrc |= dfS; preDst |= dfD; }
+                    else
+                    {
+                        for (uint layer = 0; layer < layerCount; layer++)
+                        {
+                            if (dstVkTexture.TryGetLayoutTransitionBarrier(dstMipLevel, 1, dstBaseArrayLayer + layer, 1,
+                                    VkImageLayout.TransferDstOptimal, out var b, out var s, out var d))
+                            { preCopyBarriers[n++] = b; preSrc |= s; preDst |= d; }
+                        }
                     }
 
                     if (n > 0)
@@ -625,7 +638,7 @@ namespace Veldrid.Vk
                     &region);
 
                 // Batch post-copy back-transitions (sampled textures only) into a single call.
-                // Also uses per-layer calls for the same spec-correctness reason as the pre-copy barriers.
+                // Fast path: same per-mip uniform check as the pre-copy barriers.
                 {
                     var postCopyBarriers = stackalloc VkImageMemoryBarrier[(int)(2 * layerCount)];
                     int n = 0;
@@ -633,21 +646,33 @@ namespace Veldrid.Vk
 
                     if ((srcVkTexture.Usage & TextureUsage.Sampled) != 0)
                     {
-                        for (uint layer = 0; layer < layerCount; layer++)
+                        if (srcVkTexture.TryGetMipLayerUniformTransitionBarrier(srcMipLevel, srcBaseArrayLayer, layerCount,
+                                VkImageLayout.ShaderReadOnlyOptimal, out var fast, out var fS, out var fD))
+                        { postCopyBarriers[n++] = fast; postSrc |= fS; postDst |= fD; }
+                        else
                         {
-                            if (srcVkTexture.TryGetLayoutTransitionBarrier(srcMipLevel, 1, srcBaseArrayLayer + layer, 1,
-                                    VkImageLayout.ShaderReadOnlyOptimal, out var sb, out var ss, out var sd))
-                            { postCopyBarriers[n++] = sb; postSrc |= ss; postDst |= sd; }
+                            for (uint layer = 0; layer < layerCount; layer++)
+                            {
+                                if (srcVkTexture.TryGetLayoutTransitionBarrier(srcMipLevel, 1, srcBaseArrayLayer + layer, 1,
+                                        VkImageLayout.ShaderReadOnlyOptimal, out var b, out var s, out var d))
+                                { postCopyBarriers[n++] = b; postSrc |= s; postDst |= d; }
+                            }
                         }
                     }
 
                     if ((dstVkTexture.Usage & TextureUsage.Sampled) != 0)
                     {
-                        for (uint layer = 0; layer < layerCount; layer++)
+                        if (dstVkTexture.TryGetMipLayerUniformTransitionBarrier(dstMipLevel, dstBaseArrayLayer, layerCount,
+                                VkImageLayout.ShaderReadOnlyOptimal, out var fast, out var fS, out var fD))
+                        { postCopyBarriers[n++] = fast; postSrc |= fS; postDst |= fD; }
+                        else
                         {
-                            if (dstVkTexture.TryGetLayoutTransitionBarrier(dstMipLevel, 1, dstBaseArrayLayer + layer, 1,
-                                    VkImageLayout.ShaderReadOnlyOptimal, out var db, out var ds, out var dd))
-                            { postCopyBarriers[n++] = db; postSrc |= ds; postDst |= dd; }
+                            for (uint layer = 0; layer < layerCount; layer++)
+                            {
+                                if (dstVkTexture.TryGetLayoutTransitionBarrier(dstMipLevel, 1, dstBaseArrayLayer + layer, 1,
+                                        VkImageLayout.ShaderReadOnlyOptimal, out var b, out var s, out var d))
+                                { postCopyBarriers[n++] = b; postSrc |= s; postDst |= d; }
+                            }
                         }
                     }
 
@@ -662,22 +687,26 @@ namespace Veldrid.Vk
                 var dstImage = dstVkTexture.OptimalDeviceImage;
 
                 // Pre-copy: transition destination layers to TransferDstOptimal.
-                // Use per-layer TryGetLayoutTransitionBarrier (matching the optimal→optimal path)
-                // instead of a single range TransitionImageLayout call: the destination layers may
-                // be in mixed layouts after partial prior copies (e.g. one layer was a render target,
-                // another was never used). A range barrier with the first layer's oldLayout applied
-                // to all layers is a Vulkan spec violation (§12.8) and corrupts tile-cache state on
-                // TBDR GPUs. Batch all resulting barriers into a single vkCmdPipelineBarrier call.
+                // Pre-copy: transition destination layers to TransferDstOptimal.
+                // Fast path: if all layers of the mip are in the same layout, emit a single
+                // all-layers barrier.  Falls back to per-layer for mixed layouts (e.g. one
+                // layer was a render target while another was never used).
                 {
                     var preCopyBarriers = stackalloc VkImageMemoryBarrier[(int)layerCount];
                     int n = 0;
                     VkPipelineStageFlags preSrc = VkPipelineStageFlags.None, preDst = VkPipelineStageFlags.None;
 
-                    for (uint layer = 0; layer < layerCount; layer++)
+                    if (dstVkTexture.TryGetMipLayerUniformTransitionBarrier(dstMipLevel, dstBaseArrayLayer, layerCount,
+                            VkImageLayout.TransferDstOptimal, out var fast, out var fS, out var fD))
+                    { preCopyBarriers[n++] = fast; preSrc |= fS; preDst |= fD; }
+                    else
                     {
-                        if (dstVkTexture.TryGetLayoutTransitionBarrier(dstMipLevel, 1, dstBaseArrayLayer + layer, 1,
-                                VkImageLayout.TransferDstOptimal, out var b, out var s, out var d))
-                        { preCopyBarriers[n++] = b; preSrc |= s; preDst |= d; }
+                        for (uint layer = 0; layer < layerCount; layer++)
+                        {
+                            if (dstVkTexture.TryGetLayoutTransitionBarrier(dstMipLevel, 1, dstBaseArrayLayer + layer, 1,
+                                    VkImageLayout.TransferDstOptimal, out var b, out var s, out var d))
+                            { preCopyBarriers[n++] = b; preSrc |= s; preDst |= d; }
+                        }
                     }
 
                     if (n > 0)
@@ -746,18 +775,25 @@ namespace Veldrid.Vk
                 deviceApi.vkCmdCopyBufferToImage(cb, srcBuffer, dstImage, VkImageLayout.TransferDstOptimal, layerCount, regions);
 
                 // Post-copy: transition sampled destination layers back to ShaderReadOnlyOptimal.
-                // Also per-layer for the same spec-correctness reason as the pre-copy barriers.
+                // Fast path: if all layers are now in TransferDstOptimal (uniform), emit a
+                // single all-layers barrier instead of one per layer.
                 if ((dstVkTexture.Usage & TextureUsage.Sampled) != 0)
                 {
                     var postCopyBarriers = stackalloc VkImageMemoryBarrier[(int)layerCount];
                     int n = 0;
                     VkPipelineStageFlags postSrc = VkPipelineStageFlags.None, postDst = VkPipelineStageFlags.None;
 
-                    for (uint layer = 0; layer < layerCount; layer++)
+                    if (dstVkTexture.TryGetMipLayerUniformTransitionBarrier(dstMipLevel, dstBaseArrayLayer, layerCount,
+                            VkImageLayout.ShaderReadOnlyOptimal, out var fast, out var fS, out var fD))
+                    { postCopyBarriers[n++] = fast; postSrc |= fS; postDst |= fD; }
+                    else
                     {
-                        if (dstVkTexture.TryGetLayoutTransitionBarrier(dstMipLevel, 1, dstBaseArrayLayer + layer, 1,
-                                VkImageLayout.ShaderReadOnlyOptimal, out var b, out var s, out var d))
-                        { postCopyBarriers[n++] = b; postSrc |= s; postDst |= d; }
+                        for (uint layer = 0; layer < layerCount; layer++)
+                        {
+                            if (dstVkTexture.TryGetLayoutTransitionBarrier(dstMipLevel, 1, dstBaseArrayLayer + layer, 1,
+                                    VkImageLayout.ShaderReadOnlyOptimal, out var b, out var s, out var d))
+                            { postCopyBarriers[n++] = b; postSrc |= s; postDst |= d; }
+                        }
                     }
 
                     if (n > 0)
@@ -770,20 +806,24 @@ namespace Veldrid.Vk
                 var srcImage = srcVkTexture.OptimalDeviceImage;
 
                 // Pre-copy: transition source layers to TransferSrcOptimal.
-                // Use per-layer TryGetLayoutTransitionBarrier (same spec-correctness reason as the
-                // optimal→optimal path): source layers may be in mixed layouts (e.g. one rendered
-                // to, another still in ShaderReadOnlyOptimal). A range barrier with the wrong
-                // oldLayout for any layer is a Vulkan spec violation (§12.8).
+                // Fast path: if all layers of the mip are in the same layout, emit a single
+                // all-layers barrier.  Falls back to per-layer for mixed layouts.
                 {
                     var preCopyBarriers = stackalloc VkImageMemoryBarrier[(int)layerCount];
                     int n = 0;
                     VkPipelineStageFlags preSrc = VkPipelineStageFlags.None, preDst = VkPipelineStageFlags.None;
 
-                    for (uint layer = 0; layer < layerCount; layer++)
+                    if (srcVkTexture.TryGetMipLayerUniformTransitionBarrier(srcMipLevel, srcBaseArrayLayer, layerCount,
+                            VkImageLayout.TransferSrcOptimal, out var fast, out var fS, out var fD))
+                    { preCopyBarriers[n++] = fast; preSrc |= fS; preDst |= fD; }
+                    else
                     {
-                        if (srcVkTexture.TryGetLayoutTransitionBarrier(srcMipLevel, 1, srcBaseArrayLayer + layer, 1,
-                                VkImageLayout.TransferSrcOptimal, out var b, out var s, out var d))
-                        { preCopyBarriers[n++] = b; preSrc |= s; preDst |= d; }
+                        for (uint layer = 0; layer < layerCount; layer++)
+                        {
+                            if (srcVkTexture.TryGetLayoutTransitionBarrier(srcMipLevel, 1, srcBaseArrayLayer + layer, 1,
+                                    VkImageLayout.TransferSrcOptimal, out var b, out var s, out var d))
+                            { preCopyBarriers[n++] = b; preSrc |= s; preDst |= d; }
+                        }
                     }
 
                     if (n > 0)
@@ -845,18 +885,24 @@ namespace Veldrid.Vk
                 deviceApi.vkCmdCopyImageToBuffer(cb, srcImage, VkImageLayout.TransferSrcOptimal, dstBuffer, layerCount, layers);
 
                 // Post-copy: transition sampled source layers back to ShaderReadOnlyOptimal.
-                // Per-layer for the same spec-correctness reason as the pre-copy barriers.
+                // Fast path: if all layers are now in the same layout, emit a single barrier.
                 if ((srcVkTexture.Usage & TextureUsage.Sampled) != 0)
                 {
                     var postCopyBarriers = stackalloc VkImageMemoryBarrier[(int)layerCount];
                     int n = 0;
                     VkPipelineStageFlags postSrc = VkPipelineStageFlags.None, postDst = VkPipelineStageFlags.None;
 
-                    for (uint layer = 0; layer < layerCount; layer++)
+                    if (srcVkTexture.TryGetMipLayerUniformTransitionBarrier(srcMipLevel, srcBaseArrayLayer, layerCount,
+                            VkImageLayout.ShaderReadOnlyOptimal, out var fast, out var fS, out var fD))
+                    { postCopyBarriers[n++] = fast; postSrc |= fS; postDst |= fD; }
+                    else
                     {
-                        if (srcVkTexture.TryGetLayoutTransitionBarrier(srcMipLevel, 1, srcBaseArrayLayer + layer, 1,
-                                VkImageLayout.ShaderReadOnlyOptimal, out var b, out var s, out var d))
-                        { postCopyBarriers[n++] = b; postSrc |= s; postDst |= d; }
+                        for (uint layer = 0; layer < layerCount; layer++)
+                        {
+                            if (srcVkTexture.TryGetLayoutTransitionBarrier(srcMipLevel, 1, srcBaseArrayLayer + layer, 1,
+                                    VkImageLayout.ShaderReadOnlyOptimal, out var b, out var s, out var d))
+                            { postCopyBarriers[n++] = b; postSrc |= s; postDst |= d; }
+                        }
                     }
 
                     if (n > 0)
@@ -2482,37 +2528,44 @@ namespace Veldrid.Vk
 
             for (uint level = 1; level < vkTex.MipLevels; level++)
             {
-                // Collect per-layer barriers for the src mip (level-1 → TransferSrcOptimal) and
-                // dst mip (level → TransferDstOptimal) into imageBarrierBatch, then flush once.
-                //
-                // Iterating per-layer (instead of using a single all-layer range barrier) is
-                // required for correctness when array layers are in mixed layouts — e.g. after
-                // rendering to only some layers of a cubemap.  A range barrier with the wrong
-                // oldLayout for any subresource in the range is a Vulkan spec violation (§12.8)
-                // that can silently corrupt tile-cache state on TBDR GPUs (Adreno/Mali).
-                //
-                // The common case (all layers in the same layout) produces per-layer entries that
-                // are structurally identical except for baseArrayLayer, all batched into a single
-                // vkCmdPipelineBarrier call — identical GPU cost to the previous range approach.
-                for (uint layer = 0; layer < layerCount; layer++)
+                // Try fast path: if all layers of the src mip (level-1) are in the same layout,
+                // emit a single all-layers barrier.  Falls back to per-layer when layouts are
+                // mixed (e.g. after rendering to only some cubemap faces).
+                if (!vkTex.TryGetMipLayerUniformTransitionBarrier(level - 1, 0, layerCount,
+                        VkImageLayout.TransferSrcOptimal,
+                        out var srcBarrier, out var srcStageA, out var dstStageA))
                 {
-                    if (vkTex.TryGetLayoutTransitionBarrier(level - 1, 1, layer, 1,
-                            VkImageLayout.TransferSrcOptimal,
-                            out var srcBarrier, out var srcStageA, out var dstStageA))
+                    for (uint layer = 0; layer < layerCount; layer++)
                     {
-                        imageBarrierBatch.Add(srcBarrier);
-                        barrierBatchSrcStage |= srcStageA;
-                        barrierBatchDstStage |= dstStageA;
+                        if (vkTex.TryGetLayoutTransitionBarrier(level - 1, 1, layer, 1,
+                                VkImageLayout.TransferSrcOptimal, out var b, out var s, out var d))
+                        { imageBarrierBatch.Add(b); barrierBatchSrcStage |= s; barrierBatchDstStage |= d; }
                     }
+                }
+                else
+                {
+                    imageBarrierBatch.Add(srcBarrier);
+                    barrierBatchSrcStage |= srcStageA;
+                    barrierBatchDstStage |= dstStageA;
+                }
 
-                    if (vkTex.TryGetLayoutTransitionBarrier(level, 1, layer, 1,
-                            VkImageLayout.TransferDstOptimal,
-                            out var dstBarrier, out var srcStageB, out var dstStageB))
+                // Same fast-path for the dst mip (level → TransferDstOptimal).
+                if (!vkTex.TryGetMipLayerUniformTransitionBarrier(level, 0, layerCount,
+                        VkImageLayout.TransferDstOptimal,
+                        out var dstBarrier, out var srcStageB, out var dstStageB))
+                {
+                    for (uint layer = 0; layer < layerCount; layer++)
                     {
-                        imageBarrierBatch.Add(dstBarrier);
-                        barrierBatchSrcStage |= srcStageB;
-                        barrierBatchDstStage |= dstStageB;
+                        if (vkTex.TryGetLayoutTransitionBarrier(level, 1, layer, 1,
+                                VkImageLayout.TransferDstOptimal, out var b, out var s, out var d))
+                        { imageBarrierBatch.Add(b); barrierBatchSrcStage |= s; barrierBatchDstStage |= d; }
                     }
+                }
+                else
+                {
+                    imageBarrierBatch.Add(dstBarrier);
+                    barrierBatchSrcStage |= srcStageB;
+                    barrierBatchDstStage |= dstStageB;
                 }
 
                 flushTransitionBarriers();
@@ -2580,15 +2633,23 @@ namespace Veldrid.Vk
 
             for (uint mip = 0; mip < vkTex.MipLevels; mip++)
             {
-                for (uint layer = 0; layer < layerCount; layer++)
+                // Fast path: all layers of this mip are in the same layout (the common case
+                // after a complete mip-gen pass).  Emit a single all-layers barrier.
+                if (!vkTex.TryGetMipLayerUniformTransitionBarrier(mip, 0, layerCount, finalLayout,
+                        out var fastBarrier, out var fastSrc, out var fastDst))
                 {
-                    if (vkTex.TryGetLayoutTransitionBarrier(mip, 1, layer, 1, finalLayout,
-                            out var barrier, out var src, out var dst))
+                    for (uint layer = 0; layer < layerCount; layer++)
                     {
-                        imageBarrierBatch.Add(barrier);
-                        barrierBatchSrcStage |= src;
-                        barrierBatchDstStage |= dst;
+                        if (vkTex.TryGetLayoutTransitionBarrier(mip, 1, layer, 1, finalLayout,
+                                out var barrier, out var src, out var dst))
+                        { imageBarrierBatch.Add(barrier); barrierBatchSrcStage |= src; barrierBatchDstStage |= dst; }
                     }
+                }
+                else
+                {
+                    imageBarrierBatch.Add(fastBarrier);
+                    barrierBatchSrcStage |= fastSrc;
+                    barrierBatchDstStage |= fastDst;
                 }
             }
 
