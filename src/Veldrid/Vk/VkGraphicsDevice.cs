@@ -292,7 +292,6 @@ namespace Veldrid.Vk
         private VkPhysicalDeviceFeatures physicalDeviceFeatures;
         private VkPhysicalDeviceMemoryProperties physicalDeviceMemProperties;
         private VkDevice device;
-        private VkCommandPool graphicsCommandPool;
         private VkQueue graphicsQueue;
         private VkDebugReportCallbackEXT debugCallbackHandle;
         private VkDebugUtilsMessengerEXT debugMessengerHandle;
@@ -393,7 +392,6 @@ namespace Veldrid.Vk
             }
 
             createDescriptorPool();
-            createGraphicsCommandPool();
             for (int i = 0; i < shared_command_pool_count; i++) sharedGraphicsCommandPools.Push(new SharedCommandPool(this, true));
 
             vulkanInfo = new BackendInfoVulkan(this);
@@ -843,7 +841,6 @@ namespace Veldrid.Vk
             }
 
             DescriptorPoolManager.DestroyAll();
-            DeviceApi.vkDestroyCommandPool(graphicsCommandPool, null);
 
             // Destroy all cached pipeline layouts before the device.
             lock (pipelineLayoutCacheLock)
@@ -1057,7 +1054,14 @@ namespace Veldrid.Vk
                 {
                     signalInfos[i] = new VkSemaphoreSubmitInfo();
                     signalInfos[i].semaphore = signalSemaphoresPtr[i];
-                    signalInfos[i].stageMask = VkPipelineStageFlags2.AllCommands;
+                    // The only signal semaphore attached here is renderFinishedSemaphore, which
+                    // the presentation engine waits on before scanning out the swapchain image.
+                    // The swapchain image is a color attachment; its last write occurs at
+                    // ColorAttachmentOutput.  Signaling at that stage rather than AllCommands
+                    // lets any trailing compute work in the same submission overlap with the
+                    // presentation engine's acquire, saving a synchronisation bubble on GPUs
+                    // that run async compute and graphics simultaneously.
+                    signalInfos[i].stageMask = VkPipelineStageFlags2.ColorAttachmentOutput;
                 }
 
                 var si2 = new VkSubmitInfo2();
@@ -2347,15 +2351,6 @@ namespace Veldrid.Vk
         private void createDescriptorPool()
         {
             DescriptorPoolManager = new VkDescriptorPoolManager(this);
-        }
-
-        private void createGraphicsCommandPool()
-        {
-            var commandPoolCi = new VkCommandPoolCreateInfo();
-            commandPoolCi.flags = VkCommandPoolCreateFlags.ResetCommandBuffer;
-            commandPoolCi.queueFamilyIndex = GraphicsQueueIndex;
-            var result = DeviceApi.vkCreateCommandPool(&commandPoolCi, null, out graphicsCommandPool);
-            CheckResult(result);
         }
 
         private SharedCommandPool getFreeCommandPool()

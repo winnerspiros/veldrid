@@ -1217,21 +1217,17 @@ namespace Veldrid.Vk
         // Appends layout transitions for each texture in the list to imageBarrierBatch without
         // emitting any Vulkan commands.
         //
-        // Iterates per-mip-level AND per-array-layer rather than using a single full-range barrier
-        // because a texture can have subresources in different layouts:
+        // Fast path: when all subresources share the same current layout (the common case),
+        // a single barrier with VK_REMAINING_MIP_LEVELS / VK_REMAINING_ARRAY_LAYERS is emitted
+        // via TryGetUniformLayoutTransitionBarrier. For a cubemap with 10 mip levels this
+        // reduces 60 individual barrier structs to 1.
         //
-        //   • After a partial CopyTexture/ResolveTexture, one mip may be in TransferSrcOptimal
-        //     while others remain in ShaderReadOnlyOptimal.
-        //   • After rendering to a specific array layer via a framebuffer attachment, that layer
-        //     is in ColorAttachmentOptimal while other layers remain in ShaderReadOnlyOptimal.
-        //
-        // Emitting a range barrier (all layers) with the first mismatched layer's oldLayout is a
-        // Vulkan spec violation: §12.8 requires every subresource in the barrier's range to be in
-        // the declared oldLayout.  On tile-based GPU this can silently corrupt tile-cache state.
-        //
-        // Per-subresource calls are cheap: TryGetLayoutTransitionBarrier returns false immediately
-        // (1 array read) when the subresource is already in the target layout, so the common case
-        // (all subresources already correct) costs only MipLevels × ArrayLayers reads per texture.
+        // Slow path (per-subresource): textures with mixed layouts — after a partial
+        // CopyTexture/ResolveTexture or a GenerateMipmaps that left different mip levels in
+        // different layouts — fall through here.  A per-subresource barrier is required because
+        // a range barrier uses a single oldLayout for ALL covered subresources; specifying the
+        // wrong oldLayout for any subresource is a Vulkan spec violation (§12.8) that can silently
+        // corrupt tile-cache state on TBDR GPUs.
         private void appendTransitions(List<VkTexture> textures, VkImageLayout layout)
         {
             int texCount = textures.Count;
@@ -1241,6 +1237,16 @@ namespace Veldrid.Vk
             {
                 var tex = textures[i];
 
+                // Fast path: all subresources in the same layout → one barrier for the full range.
+                if (tex.TryGetUniformLayoutTransitionBarrier(layout, out var uBarrier, out var uSrc, out var uDst))
+                {
+                    imageBarrierBatch.Add(uBarrier);
+                    barrierBatchSrcStage |= uSrc;
+                    barrierBatchDstStage |= uDst;
+                    continue;
+                }
+
+                // Slow path: per-subresource (handles mixed layouts after partial CopyTexture / GenerateMipmaps).
                 for (uint mip = 0; mip < tex.MipLevels; mip++)
                 {
                     for (uint layer = 0; layer < tex.ActualArrayLayers; layer++)
