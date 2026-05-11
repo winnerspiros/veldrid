@@ -2400,7 +2400,11 @@ namespace Veldrid.Vk
 
                     if (tex.Memory.Size >= totalSize)
                     {
-                        availableStagingTextures.RemoveAt(i);
+                        // Swap-remove: move last element into this slot, shrink in O(1).
+                        // Order doesn't matter for a free-list; matches VkCommandList.getStagingBuffer.
+                        int last = n - 1;
+                        availableStagingTextures[i] = availableStagingTextures[last];
+                        availableStagingTextures.RemoveAt(last);
                         tex.SetStagingDimensions(width, height, depth, format);
                         return tex;
                     }
@@ -2427,7 +2431,11 @@ namespace Veldrid.Vk
 
                     if (buffer.SizeInBytes >= size)
                     {
-                        availableStagingBuffers.RemoveAt(i);
+                        // Swap-remove: move last element into this slot, shrink in O(1).
+                        // Order doesn't matter for a free-list; matches VkCommandList.getStagingBuffer.
+                        int last = n - 1;
+                        availableStagingBuffers[i] = availableStagingBuffers[last];
+                        availableStagingBuffers.RemoveAt(last);
                         return buffer;
                     }
                 }

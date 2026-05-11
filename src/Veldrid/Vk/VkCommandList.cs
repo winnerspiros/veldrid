@@ -2039,32 +2039,45 @@ namespace Veldrid.Vk
             var srcStage = VkPipelineStageFlags.ColorAttachmentOutput
                            | VkPipelineStageFlags.EarlyFragmentTests
                            | VkPipelineStageFlags.LateFragmentTests;
-            // Cover all pipeline stages that can consume render-pass outputs:
-            //   ColorAttachmentOutput / EarlyFragmentTests  → next render pass reads attachments
-            //   FragmentShader / VertexShader               → sampling the output as a texture
-            //   ComputeShader                               → compute post-process reads the output
-            //   Transfer                                    → CopyTexture / GenerateMipmaps after render pass
-            // NOTE: VertexInput (vertex/index buffer fetch) was here previously but is wrong —
-            //   render-pass outputs are never consumed in the VertexInput stage.
-            var dstStage = VkPipelineStageFlags.ColorAttachmentOutput | VkPipelineStageFlags.EarlyFragmentTests
-                           | VkPipelineStageFlags.FragmentShader | VkPipelineStageFlags.VertexShader
-                           | VkPipelineStageFlags.ComputeShader | VkPipelineStageFlags.Transfer;
+            // This barrier covers only the "render-pass re-use" case (same attachment bound
+            // again in the next render pass with loadOp=Load, or cleared with loadOp=Clear
+            // in the next pass where the clear must happen after all prior writes).
+            //
+            // dstStage is deliberately limited to ColorAttachmentOutput | EarlyFragmentTests.
+            //
+            // All other consumers — shader sampling, Transfer / CopyTexture, compute — are
+            // covered by the per-texture layout-transition barriers emitted later:
+            //   • appendTransitions: ColorAttachmentOptimal → ShaderReadOnlyOptimal
+            //     (srcAccess=ColorAttachmentWrite, dstAccess=ShaderRead)
+            //   • appendTransitions: ColorAttachmentOptimal → General
+            //     (srcAccess=ColorAttachmentWrite, dstAccess=ShaderRead|ShaderWrite)
+            //   • CopyTextureCore_VkCommandBuffer: ColorAttachmentOptimal → TransferSrc/DstOptimal
+            //     (srcAccess=ColorAttachmentWrite, dstAccess=TransferRead/Write)
+            //   • TransitionToFinalLayout: ColorAttachmentOptimal → PresentSrcKHR
+            //     (srcAccess=ColorAttachmentWrite, dstAccess=MemoryRead)
+            //
+            // Expanding dstStage to include FragmentShader | VertexShader | ComputeShader |
+            // Transfer stalls those shader stages unnecessarily, causing the GPU to wait for
+            // ALL color/depth writes to be visible to every possible consumer — on TBDR GPUs
+            // (Adreno / Mali) this forces a full tile→GMEM flush every time a render pass
+            // ends, defeating tile-based rendering's on-chip bandwidth advantage.  Keeping
+            // dstStage narrow lets the driver overlap the next render pass's vertex work with
+            // the previous pass's tile flush.
+            var dstStage = VkPipelineStageFlags.ColorAttachmentOutput
+                           | VkPipelineStageFlags.EarlyFragmentTests;
 
             var memBarrier = new VkMemoryBarrier();
             memBarrier.sType = VkStructureType.MemoryBarrier;
             // Make all color and depth/stencil writes from this render pass available.
             memBarrier.srcAccessMask = VkAccessFlags.ColorAttachmentWrite
                                        | VkAccessFlags.DepthStencilAttachmentWrite;
-            // Invalidate all destination cache types that the next pass may read through.
+            // Invalidate only the attachment-read caches in the next render pass.
+            // Shader-read and transfer invalidations are handled by the per-texture
+            // layout-transition barriers described above.
             memBarrier.dstAccessMask = VkAccessFlags.ColorAttachmentRead
                                        | VkAccessFlags.ColorAttachmentWrite
                                        | VkAccessFlags.DepthStencilAttachmentRead
-                                       | VkAccessFlags.DepthStencilAttachmentWrite
-                                       | VkAccessFlags.ShaderRead
-                                       | VkAccessFlags.ShaderWrite
-                                       | VkAccessFlags.InputAttachmentRead
-                                       | VkAccessFlags.TransferRead
-                                       | VkAccessFlags.TransferWrite;
+                                       | VkAccessFlags.DepthStencilAttachmentWrite;
 
             gd.DeviceApi.vkCmdPipelineBarrier(
                 CommandBuffer,
