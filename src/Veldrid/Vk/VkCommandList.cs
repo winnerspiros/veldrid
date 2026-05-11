@@ -174,7 +174,10 @@ namespace Veldrid.Vk
         {
             this.gd = gd;
             var poolCi = new VkCommandPoolCreateInfo();
-            poolCi.flags = VkCommandPoolCreateFlags.ResetCommandBuffer;
+            // Transient: command buffers from this pool are always submitted with OneTimeSubmit
+            // and reset immediately after the GPU fence signals.  The driver can allocate memory
+            // for them from a fast bump/slab allocator rather than a general-purpose heap.
+            poolCi.flags = VkCommandPoolCreateFlags.ResetCommandBuffer | VkCommandPoolCreateFlags.Transient;
             poolCi.queueFamilyIndex = gd.GraphicsQueueIndex;
             var result = gd.DeviceApi.vkCreateCommandPool(&poolCi, null, out pool);
             CheckResult(result);
@@ -2113,11 +2116,27 @@ namespace Veldrid.Vk
                                        | VkAccessFlags.DepthStencilAttachmentRead
                                        | VkAccessFlags.DepthStencilAttachmentWrite;
 
+            // VK_DEPENDENCY_BY_REGION_BIT: both srcStage and dstStage contain only
+            // framebuffer-space pipeline stages (ColorAttachmentOutput, EarlyFragmentTests,
+            // LateFragmentTests).  The Vulkan spec (§7.6.2) allows this flag when ALL stages
+            // in both masks are framebuffer-space, meaning the dependency holds on a
+            // per-pixel / per-sample basis.
+            //
+            // On TBDR GPUs (Adreno / Mali / PowerVR):
+            //   Without ByRegion the driver issues a GLOBAL sync point — every tile's render
+            //   must complete and be written to GMEM before the next render pass can start on
+            //   ANY tile.  With ByRegion the driver only needs to synchronize the CURRENT TILE
+            //   (still in on-chip cache) before that tile begins the next pass.  This eliminates
+            //   the full tile→GMEM flush between consecutive render passes that share the same
+            //   color/depth attachments, which is the dominant source of DRAM bandwidth on mobile.
+            //
+            // On desktop GPUs (NVIDIA / AMD): ByRegion is a no-op (they don't have tiles), so
+            //   there is zero cost.
             gd.DeviceApi.vkCmdPipelineBarrier(
                 CommandBuffer,
                 srcStage,
                 dstStage,
-                VkDependencyFlags.None,
+                VkDependencyFlags.ByRegion,
                 1, &memBarrier,
                 0, null,
                 0, null);
