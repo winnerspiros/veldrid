@@ -1,3 +1,4 @@
+using System;
 using System.Diagnostics;
 using Vortice.Vulkan;
 using static Vortice.Vulkan.Vulkan;
@@ -357,6 +358,124 @@ namespace Veldrid.Vk
         // updates imageLayouts so the texture tracks the new state immediately. Does NOT emit any
         // gd.DeviceApi.vkCmdPipelineBarrier — callers are expected to accumulate several barriers and flush them
         // in a single batched gd.DeviceApi.vkCmdPipelineBarrier call (see VkCommandList.flushTransitionBarriers).
+        // Fast-path: emits a SINGLE full-range barrier when ALL subresources share the same
+        // current layout (the common case for freshly-allocated or uniformly-used textures).
+        // Returns false when any subresource has a different layout (mixed, e.g. after a partial
+        // CopyTexture or GenerateMipmaps), or when all subresources are already in newLayout.
+        // Callers should fall through to per-subresource TryGetLayoutTransitionBarrier on false.
+        internal bool TryGetUniformLayoutTransitionBarrier(
+            VkImageLayout newLayout,
+            out VkImageMemoryBarrier barrier,
+            out VkPipelineStageFlags srcStage,
+            out VkPipelineStageFlags dstStage)
+        {
+            barrier = default;
+            srcStage = default;
+            dstStage = default;
+
+            if (stagingBuffer != Vortice.Vulkan.VkBuffer.Null) return false;
+            if (imageLayouts.Length == 0) return false;
+
+            var uniformLayout = imageLayouts[0];
+            // One pass: detect mixed layouts and early-exit if already at target.
+            for (int i = 1; i < imageLayouts.Length; i++)
+            {
+                if (imageLayouts[i] != uniformLayout) return false; // Mixed — caller must use per-subresource path.
+            }
+
+            if (uniformLayout == newLayout) return false; // Already in target layout, nothing to do.
+
+            var aspectMask = (Usage & TextureUsage.DepthStencil) != 0
+                ? (FormatHelpers.IsStencilFormat(Format)
+                    ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+                    : VkImageAspectFlags.Depth)
+                : VkImageAspectFlags.Color;
+
+            VulkanUtil.GetTransitionParameters(uniformLayout, newLayout,
+                out var srcAccess, out var dstAccess, out srcStage, out dstStage);
+
+            barrier = new VkImageMemoryBarrier
+            {
+                oldLayout             = uniformLayout,
+                newLayout             = newLayout,
+                srcAccessMask         = srcAccess,
+                dstAccessMask         = dstAccess,
+                srcQueueFamilyIndex   = VK_QUEUE_FAMILY_IGNORED,
+                dstQueueFamilyIndex   = VK_QUEUE_FAMILY_IGNORED,
+                image                 = OptimalDeviceImage,
+                subresourceRange      = new VkImageSubresourceRange(
+                    aspectMask,
+                    0, VK_REMAINING_MIP_LEVELS,
+                    0, VK_REMAINING_ARRAY_LAYERS)
+            };
+
+            // Update all tracked layouts in one batch (no nested loop).
+            Array.Fill(imageLayouts, newLayout);
+            return true;
+        }
+
+        // Per-mip variant of TryGetUniformLayoutTransitionBarrier.
+        // Checks whether all `layerCount` array layers starting at `baseArrayLayer` for a single
+        // `mipLevel` are in the same current layout.  If they are (and that layout != newLayout),
+        // fills a SINGLE barrier covering the whole layer range and returns true.
+        // Returns false if any layer has a different layout (caller must fall back to per-layer
+        // TryGetLayoutTransitionBarrier calls), or if all layers are already in newLayout.
+        //
+        // Why this matters: per-layer loops emit one VkImageMemoryBarrier per array layer.  For a
+        // 6-layer cubemap that is 6 barriers per mip per operation (CopyTexture, GenerateMipmaps).
+        // When all layers are in the same layout — the common case for freshly uploaded or
+        // evenly-used cubemaps — this method collapses them to 1 barrier regardless of layerCount,
+        // saving both CPU time (fewer barrier structs to build and copy) and driver overhead.
+        internal bool TryGetMipLayerUniformTransitionBarrier(
+            uint mipLevel,
+            uint baseArrayLayer,
+            uint layerCount,
+            VkImageLayout newLayout,
+            out VkImageMemoryBarrier barrier,
+            out VkPipelineStageFlags srcStage,
+            out VkPipelineStageFlags dstStage)
+        {
+            barrier = default;
+            srcStage = default;
+            dstStage = default;
+
+            if (stagingBuffer != Vortice.Vulkan.VkBuffer.Null) return false;
+
+            var uniformLayout = imageLayouts[CalculateSubresource(mipLevel, baseArrayLayer)];
+            for (uint layer = 1; layer < layerCount; layer++)
+            {
+                if (imageLayouts[CalculateSubresource(mipLevel, baseArrayLayer + layer)] != uniformLayout)
+                    return false; // Mixed layers — caller must use per-layer path.
+            }
+
+            if (uniformLayout == newLayout) return false; // All layers already in target layout.
+
+            var aspectMask = (Usage & TextureUsage.DepthStencil) != 0
+                ? (FormatHelpers.IsStencilFormat(Format)
+                    ? VkImageAspectFlags.Depth | VkImageAspectFlags.Stencil
+                    : VkImageAspectFlags.Depth)
+                : VkImageAspectFlags.Color;
+
+            VulkanUtil.GetTransitionParameters(uniformLayout, newLayout,
+                out var srcAccess, out var dstAccess, out srcStage, out dstStage);
+
+            barrier = new VkImageMemoryBarrier
+            {
+                oldLayout           = uniformLayout,
+                newLayout           = newLayout,
+                srcAccessMask       = srcAccess,
+                dstAccessMask       = dstAccess,
+                srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                image               = OptimalDeviceImage,
+                subresourceRange    = new VkImageSubresourceRange(aspectMask, mipLevel, 1, baseArrayLayer, layerCount)
+            };
+
+            for (uint layer = 0; layer < layerCount; layer++)
+                imageLayouts[CalculateSubresource(mipLevel, baseArrayLayer + layer)] = newLayout;
+            return true;
+        }
+
         // Returns false (no-op) when the image is a staging buffer or is already in newLayout.
         internal bool TryGetLayoutTransitionBarrier(
             uint baseMipLevel,
