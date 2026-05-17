@@ -398,7 +398,7 @@ jobs:
 
     steps:
     - name: Download benchmark artifacts (if available)
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       # Continue even if the artifact doesn't exist (bench_vulkan was skipped).
       continue-on-error: true
       with:
