@@ -118,6 +118,8 @@ namespace Veldrid.OpenGL
         // bandwidth, which translates to lower power, lower thermals, and higher sustained FPS.
         private bool invalidateSwapchainDepthOnSwap;
 
+        private OpenGLProcTable procTable;
+
         public OpenGLGraphicsDevice(
             GraphicsDeviceOptions options,
             OpenGLPlatformInfo platformInfo,
@@ -217,6 +219,9 @@ namespace Veldrid.OpenGL
             info = openglInfo;
             return true;
         }
+
+        /// <inheritdoc />
+        public override OpenGLProcTable? GetGLProcTable() => procTable;
 
         internal void EnqueueDisposal(IOpenGLDeferredResource resource)
         {
@@ -539,6 +544,8 @@ namespace Veldrid.OpenGL
             platformInfo.ClearCurrentContext();
             executionThread = new ExecutionThread(this, workItems, makeCurrent, glContext);
             openglInfo = new BackendInfoOpenGL(this);
+
+            procTable = buildProcTable(platformInfo.GetProcAddress, backendType == GraphicsBackend.OpenGLES);
 
             PostDeviceCreated();
         }
@@ -902,6 +909,115 @@ namespace Veldrid.OpenGL
 
             init(options, platformInfo, swapchainDescription.Width, swapchainDescription.Height, true);
         }
+
+        private static unsafe OpenGLProcTable buildProcTable(Func<string, IntPtr> getProcAddress, bool gles)
+        {
+            // Cast an IntPtr returned by GetProcAddress to a typed unmanaged function pointer.
+            // IntPtr → void* → delegate* is the required two-step in C# 9+.
+            void* p(string name) => getProcAddress(name).ToPointer();
+
+            var t = new OpenGLProcTable();
+
+            t.ActiveTexture             = (delegate* unmanaged<uint, void>)                           p("glActiveTexture");
+            t.BindTexture               = (delegate* unmanaged<uint, uint, void>)                     p("glBindTexture");
+            t.GenTextures               = (delegate* unmanaged<int, uint*, void>)                     p("glGenTextures");
+            t.DeleteTextures            = (delegate* unmanaged<int, uint*, void>)                     p("glDeleteTextures");
+            t.TexImage2D                = (delegate* unmanaged<uint, int, int, int, int, int, uint, uint, void*, void>) p("glTexImage2D");
+            t.TexSubImage2D             = (delegate* unmanaged<uint, int, int, int, int, int, uint, uint, void*, void>) p("glTexSubImage2D");
+            t.TexParameteri             = (delegate* unmanaged<uint, uint, int, void>)                p("glTexParameteri");
+            t.GenerateMipmap            = (delegate* unmanaged<uint, void>)                           p("glGenerateMipmap");
+
+            t.BindFramebuffer           = (delegate* unmanaged<uint, uint, void>)                     p("glBindFramebuffer");
+            t.GenFramebuffers           = (delegate* unmanaged<int, uint*, void>)                     p("glGenFramebuffers");
+            t.DeleteFramebuffers        = (delegate* unmanaged<int, uint*, void>)                     p("glDeleteFramebuffers");
+            t.FramebufferTexture2D      = (delegate* unmanaged<uint, uint, uint, uint, int, void>)    p("glFramebufferTexture2D");
+            t.FramebufferRenderbuffer   = (delegate* unmanaged<uint, uint, uint, uint, void>)         p("glFramebufferRenderbuffer");
+            t.InvalidateFramebuffer     = (delegate* unmanaged<uint, int, uint*, void>)               p("glInvalidateFramebuffer");
+
+            t.BindRenderbuffer          = (delegate* unmanaged<uint, uint, void>)                     p("glBindRenderbuffer");
+            t.GenRenderbuffers          = (delegate* unmanaged<int, uint*, void>)                     p("glGenRenderbuffers");
+            t.DeleteRenderbuffers       = (delegate* unmanaged<int, uint*, void>)                     p("glDeleteRenderbuffers");
+            t.RenderbufferStorage       = (delegate* unmanaged<uint, uint, int, int, void>)           p("glRenderbufferStorage");
+
+            t.BindVertexArray           = (delegate* unmanaged<uint, void>)                           p("glBindVertexArray");
+            t.GenVertexArrays           = (delegate* unmanaged<int, uint*, void>)                     p("glGenVertexArrays");
+            t.DeleteVertexArrays        = (delegate* unmanaged<int, uint*, void>)                     p("glDeleteVertexArrays");
+            t.EnableVertexAttribArray   = (delegate* unmanaged<uint, void>)                           p("glEnableVertexAttribArray");
+            t.VertexAttribPointer       = (delegate* unmanaged<uint, int, uint, byte, uint, void*, void>) p("glVertexAttribPointer");
+            t.VertexAttribIPointer      = (delegate* unmanaged<uint, int, uint, uint, void*, void>)   p("glVertexAttribIPointer");
+
+            t.BindBuffer                = (delegate* unmanaged<uint, uint, void>)                     p("glBindBuffer");
+            t.BindBufferBase            = (delegate* unmanaged<uint, uint, uint, void>)               p("glBindBufferBase");
+            t.GenBuffers                = (delegate* unmanaged<int, uint*, void>)                     p("glGenBuffers");
+            t.DeleteBuffers             = (delegate* unmanaged<int, uint*, void>)                     p("glDeleteBuffers");
+            t.BufferData                = (delegate* unmanaged<uint, UIntPtr, void*, uint, void>)     p("glBufferData");
+            t.BufferSubData             = (delegate* unmanaged<uint, IntPtr, UIntPtr, void*, void>)   p("glBufferSubData");
+
+            t.CreateShader              = (delegate* unmanaged<uint, uint>)                           p("glCreateShader");
+            t.ShaderSource              = (delegate* unmanaged<uint, int, byte**, int*, void>)        p("glShaderSource");
+            t.CompileShader             = (delegate* unmanaged<uint, void>)                           p("glCompileShader");
+            t.GetShaderiv               = (delegate* unmanaged<uint, uint, int*, void>)               p("glGetShaderiv");
+            t.GetShaderInfoLog          = (delegate* unmanaged<uint, int, int*, byte*, void>)         p("glGetShaderInfoLog");
+            t.DeleteShader              = (delegate* unmanaged<uint, void>)                           p("glDeleteShader");
+
+            t.CreateProgram             = (delegate* unmanaged<uint>)                                 p("glCreateProgram");
+            t.AttachShader              = (delegate* unmanaged<uint, uint, void>)                     p("glAttachShader");
+            t.DetachShader              = (delegate* unmanaged<uint, uint, void>)                     p("glDetachShader");
+            t.LinkProgram               = (delegate* unmanaged<uint, void>)                           p("glLinkProgram");
+            t.GetProgramiv              = (delegate* unmanaged<uint, uint, int*, void>)               p("glGetProgramiv");
+            t.GetProgramInfoLog         = (delegate* unmanaged<uint, int, int*, byte*, void>)         p("glGetProgramInfoLog");
+            t.DeleteProgram             = (delegate* unmanaged<uint, void>)                           p("glDeleteProgram");
+            t.UseProgram                = (delegate* unmanaged<uint, void>)                           p("glUseProgram");
+
+            t.GetUniformLocation        = (delegate* unmanaged<uint, byte*, int>)                     p("glGetUniformLocation");
+            t.GetUniformBlockIndex      = (delegate* unmanaged<uint, byte*, uint>)                    p("glGetUniformBlockIndex");
+            t.UniformBlockBinding       = (delegate* unmanaged<uint, uint, uint, void>)               p("glUniformBlockBinding");
+            t.Uniform1i                 = (delegate* unmanaged<int, int, void>)                       p("glUniform1i");
+            t.Uniform1f                 = (delegate* unmanaged<int, float, void>)                     p("glUniform1f");
+            t.UniformMatrix3fv          = (delegate* unmanaged<int, int, byte, float*, void>)         p("glUniformMatrix3fv");
+            t.UniformMatrix4fv          = (delegate* unmanaged<int, int, byte, float*, void>)         p("glUniformMatrix4fv");
+
+            t.ShaderStorageBlockBinding = (delegate* unmanaged<uint, uint, uint, void>)               p("glShaderStorageBlockBinding");
+            t.GetProgramResourceIndex   = (delegate* unmanaged<uint, uint, byte*, uint>)              p("glGetProgramResourceIndex");
+
+            t.DrawElements              = (delegate* unmanaged<uint, int, uint, void*, void>)         p("glDrawElements");
+
+            t.Clear                     = (delegate* unmanaged<uint, void>)                           p("glClear");
+            t.ClearColor                = (delegate* unmanaged<float, float, float, float, void>)     p("glClearColor");
+            t.ClearDepth                = (delegate* unmanaged<double, void>)                         p("glClearDepth");
+            t.ClearDepthF               = (delegate* unmanaged<float, void>)                          p("glClearDepthf");
+
+            t.Enable                    = (delegate* unmanaged<uint, void>)                           p("glEnable");
+            t.Disable                   = (delegate* unmanaged<uint, void>)                           p("glDisable");
+            t.ColorMask                 = (delegate* unmanaged<byte, byte, byte, byte, void>)         p("glColorMask");
+            t.DepthFunc                 = (delegate* unmanaged<uint, void>)                           p("glDepthFunc");
+            t.DepthMask                 = (delegate* unmanaged<byte, void>)                           p("glDepthMask");
+            t.BlendFuncSeparate         = (delegate* unmanaged<uint, uint, uint, uint, void>)         p("glBlendFuncSeparate");
+            t.BlendEquationSeparate     = (delegate* unmanaged<uint, uint, void>)                     p("glBlendEquationSeparate");
+            t.StencilFunc               = (delegate* unmanaged<uint, int, uint, void>)                p("glStencilFunc");
+            t.StencilOp                 = (delegate* unmanaged<uint, uint, uint, void>)               p("glStencilOp");
+
+            // glViewport is always present. On desktop GL the indexed variant is preferred by Veldrid
+            // internally, but the plain glViewport is what most framework callers want.
+            void* vpPtr = p("glViewport");
+            if (vpPtr == null && !gles)
+                vpPtr = p("glViewportIndexedf");
+            t.Viewport = (delegate* unmanaged<int, int, int, int, void>)vpPtr;
+
+            t.Scissor                   = (delegate* unmanaged<int, int, int, int, void>)             p("glScissor");
+
+            t.PixelStorei               = (delegate* unmanaged<uint, int, void>)                      p("glPixelStorei");
+            t.ReadPixels                = (delegate* unmanaged<int, int, int, int, uint, uint, void*, void>) p("glReadPixels");
+
+            t.GetIntegerv               = (delegate* unmanaged<uint, int*, void>)                     p("glGetIntegerv");
+            t.GetString                 = (delegate* unmanaged<uint, byte*>)                          p("glGetString");
+
+            t.Hint                      = (delegate* unmanaged<uint, uint, void>)                     p("glHint");
+            t.Finish                    = (delegate* unmanaged<void>)                                 p("glFinish");
+
+            return t;
+        }
+
 
         private int incrementCount(OpenGLCommandList glCommandList)
         {
