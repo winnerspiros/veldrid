@@ -94,6 +94,15 @@ namespace Veldrid
         public Framebuffer SwapchainFramebuffer => MainSwapchain?.Framebuffer;
 
         /// <summary>
+        ///     Returns a populated <see cref="OpenGL.OpenGLProcTable" /> for OpenGL / OpenGL ES backends, or
+        ///     <c>null</c> for all other backends (Vulkan, Metal, Direct3D 11/12).
+        ///     The table exposes raw unmanaged function pointers for every GL entry point that higher-level
+        ///     rendering layers (e.g. osu-framework's GLRenderer) need to drive OpenGL directly without any
+        ///     dependency on osuTK or Silk.NET.
+        /// </summary>
+        public virtual OpenGL.OpenGLProcTable? GetGLProcTable() => null;
+
+        /// <summary>
         ///     Gets a simple 4x anisotropic-filtered <see cref="Sampler" /> object owned by this instance.
         ///     This object is created with <see cref="SamplerDescription.ANISO4_X" />.
         ///     This property can only be used when <see cref="GraphicsDeviceFeatures.SamplerAnisotropy" /> is supported.
