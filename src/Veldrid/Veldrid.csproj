@@ -17,7 +17,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Vortice.Vulkan" Version="3.2.1" Condition="'$(ExcludeVulkan)' != 'true'" />
+    <PackageReference Include="Vortice.Vulkan" Version="3.2.2" Condition="'$(ExcludeVulkan)' != 'true'" />
     <PackageReference Include="Vortice.D3DCompiler" Version="$(VorticeWindowsVersion)" />
     <PackageReference Include="Vortice.Direct3D11" Version="$(VorticeWindowsVersion)" />
     <PackageReference Include="Vortice.Direct3D12" Version="$(VorticeWindowsVersion)"/>
