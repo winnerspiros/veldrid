@@ -56,6 +56,18 @@ namespace Veldrid.OpenGL
             = Array.Empty<(uint, uint, uint, uint)>();
         private bool[] cachedScissorValid = Array.Empty<bool>();
 
+        // Dirty bit mirroring VkCommandList.graphicsAnySetsPendingBind / computeAnySetsPendingBind.
+        //
+        // Set when any graphics/compute resource-set slot actually changes (SetGraphicsResourceSet /
+        // SetComputeResourceSet) or when the pipeline is activated (activateGraphicsPipeline /
+        // activateComputePipeline, which marks all slots new).  Cleared inside flushResourceSets
+        // after processing.
+        //
+        // When false, flushResourceSets is skipped entirely, saving the O(sets × elements) loop +
+        // redundant textureSamplerManager calls on consecutive draws with unchanged resource sets.
+        private bool graphicsAnyNewResourceSets;
+        private bool computeAnyNewResourceSets;
+
         public OpenGLCommandExecutor(OpenGLGraphicsDevice gd, OpenGLPlatformInfo platformInfo)
         {
             this.gd = gd;
@@ -76,6 +88,12 @@ namespace Veldrid.OpenGL
             cachedFramebuffer = null;
             Array.Clear(cachedViewportValid, 0, cachedViewportValid.Length);
             Array.Clear(cachedScissorValid, 0, cachedScissorValid.Length);
+
+            // Reset resource-set dirty bits.  The caller may re-bind the same sets, so we do
+            // NOT pre-mark them all dirty here; the first SetGraphicsResourceSet / SetPipeline
+            // call that actually changes a slot will set the appropriate flag.
+            graphicsAnyNewResourceSets = false;
+            computeAnyNewResourceSets = false;
         }
 
         public void ClearColorTarget(uint index, RgbaFloat clearColor)
