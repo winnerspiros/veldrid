@@ -34,6 +34,13 @@ namespace Veldrid.OpenGL
 
         private SetBindingsInfo[] setInfos;
 
+        // Precomputed prefix sums for uniform-buffer and SSBO binding base indices.
+        // uniformBaseIndices[slot] = sum of GetUniformBufferCount(0..slot-1), so
+        // activateResourceSet can look up the base index in O(1) rather than scanning
+        // slots 0..slot-1 via GetUniformBufferCount on every draw call.
+        private uint[] uniformBaseIndices = Array.Empty<uint>();
+        private uint[] ssboBaseIndices = Array.Empty<uint>();
+
         public int[] VertexStrides { get; }
 
         public uint Program { get; private set; }
@@ -276,6 +283,19 @@ namespace Veldrid.OpenGL
 
                 setInfos[setSlot] = new SetBindingsInfo(uniformBindings, textureBindings, samplerBindings, storageBufferBindings);
             }
+
+            // Precompute prefix-sum arrays so activateResourceSet can look up the base binding
+            // index for any set slot in O(1) instead of scanning preceding slots every draw.
+            uniformBaseIndices = new uint[resourceLayoutCount];
+            ssboBaseIndices = new uint[resourceLayoutCount];
+            uint ubAcc = 0, ssboAcc = 0;
+            for (int i = 0; i < resourceLayoutCount; i++)
+            {
+                uniformBaseIndices[i] = ubAcc;
+                ssboBaseIndices[i] = ssboAcc;
+                ubAcc += setInfos[i].UniformBufferCount;
+                ssboAcc += setInfos[i].ShaderStorageBufferCount;
+            }
         }
 
         private uint getUniformBlockIndex(string resourceName)
@@ -461,6 +481,20 @@ namespace Veldrid.OpenGL
 
             processResourceSetLayouts(ResourceLayouts);
         }
+
+        /// <summary>
+        /// Returns the base UBO binding index for <paramref name="slot"/>: the sum of
+        /// <see cref="GetUniformBufferCount"/> for all preceding set slots.
+        /// O(1) lookup backed by a precomputed prefix-sum array.
+        /// </summary>
+        public uint GetUniformBaseIndex(uint slot) => slot < uniformBaseIndices.Length ? uniformBaseIndices[slot] : 0;
+
+        /// <summary>
+        /// Returns the base SSBO binding index for <paramref name="slot"/>: the sum of
+        /// <see cref="GetShaderStorageBufferCount"/> for all preceding set slots.
+        /// O(1) lookup backed by a precomputed prefix-sum array.
+        /// </summary>
+        public uint GetSsboBaseIndex(uint slot) => slot < ssboBaseIndices.Length ? ssboBaseIndices[slot] : 0;
 
         public bool GetUniformBindingForSlot(uint set, uint slot, out OpenGLUniformBinding binding)
         {

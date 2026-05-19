@@ -134,6 +134,76 @@ namespace Veldrid.Vk
         // Protects vkQueuePresentKHR submissions on the separate present queue
         // (when PresentQueueIndex != GraphicsQueueIndex) against concurrent access.
         private readonly Lock presentQueueLock = new Lock();
+
+        // Async present thread — moves vkQueuePresentKHR off the draw thread so it can
+        // return to managed code and acknowledge Android lifecycle pause/suspend events
+        // while a present is still in flight.  vkQueuePresentKHR has no timeout in the
+        // Vulkan spec and can block indefinitely when the compositor is not consuming
+        // frames (screen lock, task switch, Game Booster on Snapdragon), which causes ANR
+        // if the draw thread is stuck inside it when the OS sends a pause signal.
+        //
+        // Protocol:
+        //   SwapBuffersCore (draw thread):
+        //     1. presentDoneEvent.Wait()  — block until the previous present+acquire cycle
+        //                                   has finished (pendingImageAvailableSemaphore set).
+        //     2. presentDoneEvent.Reset() — mark the new cycle as in-progress.
+        //     3. Fill pendingPresentWork with all scalars needed for the present.
+        //     4. presentReadySlim.Release() — wake the background thread.
+        //     5. Return immediately; draw thread is now free to run managed code.
+        //
+        //   asyncPresentLoop (background thread):
+        //     1. presentReadySlim.Wait()  — sleep until SwapBuffersCore dispatches work.
+        //     2. Execute null submit + vkQueuePresentKHR + vkAcquireNextImageKHR.
+        //     3. presentDoneEvent.Set()   — unblock the next SwapBuffersCore / SubmitCommandsCore.
+        //
+        //   SubmitCommandsCore (draw thread, swapchain CL only):
+        //     presentDoneEvent.Wait() — ensures pendingImageAvailableSemaphore is set before use.
+        private Thread asyncPresentThread;
+        // 0 initial count: draw thread releases once per frame, background thread waits.
+        private readonly SemaphoreSlim presentReadySlim = new SemaphoreSlim(0, 1);
+        // Initially set so the first SwapBuffersCore / SubmitCommandsCore skips the wait.
+        private readonly ManualResetEventSlim presentDoneEvent = new ManualResetEventSlim(true);
+        // Written by the draw thread before presentReadySlim.Release(); read by the background
+        // thread after presentReadySlim.Wait().  The Release/Wait pair provides the memory barrier.
+        private PresentWorkItem pendingPresentWork;
+
+        // All data the async present thread needs for a single present cycle.
+        // Scalar fields only — no interior pointers; the background thread rebuilds every
+        // pNext chain on its own stack (stack-local structs remain valid for the duration
+        // of the vkQueuePresentKHR call that runs on the same thread).
+        private struct PresentWorkItem
+        {
+            // Sentinel: when true, the background thread exits its loop immediately.
+            public bool IsShutdown;
+
+            // When true, SwapBuffersCore observed NeedsRecreation.  The background thread
+            // calls RecreateAfterPresent() (which internally calls AcquireNextImage) and
+            // skips the normal present+acquire path entirely.
+            public bool SkipPresent;
+
+            // The swapchain to present / recreate / acquire on.
+            public VkSwapchain Swapchain;
+
+            // For the null submit that signals renderFinishedSemaphore before the present.
+            public bool SkipNullSubmit;
+            public VkSemaphore RenderFinishedSemaphore;
+            public VkSemaphore LeftoverAcquireSemaphore;
+
+            // Raw handles for vkQueuePresentKHR.
+            public VkSwapchainKHR DeviceSwapchain;
+            public uint ImageIndex;
+            public VkQueue PresentQueue;
+            public bool IsSameQueue; // PresentQueueIndex == GraphicsQueueIndex
+
+            // VK_EXT_swapchain_maintenance1: per-present mode override (hot-swap).
+            public bool HasPresentModeOverride;
+            public VkPresentModeKHR PresentModeOverride;
+
+            // VK_GOOGLE_display_timing: per-present timing hint.
+            public bool HasDisplayTiming;
+            public uint PresentID;
+            public ulong DesiredPresentTime;
+        }
         private readonly ConcurrentDictionary<VkFormat, VkFilter> filters = new ConcurrentDictionary<VkFormat, VkFilter>();
         private readonly BackendInfoVulkan vulkanInfo;
 
@@ -397,6 +467,15 @@ namespace Veldrid.Vk
             vulkanInfo = new BackendInfoVulkan(this);
 
             PostDeviceCreated();
+
+            // Start the async present thread after full device initialisation so all
+            // fields (DeviceApi, queue handles, etc.) are stable before first use.
+            asyncPresentThread = new Thread(asyncPresentLoop)
+            {
+                Name = "Veldrid-AsyncPresent",
+                IsBackground = true,
+            };
+            asyncPresentThread.Start();
         }
 
         public override bool GetVulkanInfo(out BackendInfoVulkan info)
@@ -824,6 +903,15 @@ namespace Veldrid.Vk
 
         protected override void PlatformDispose()
         {
+            // Stop the async present thread before tearing down any Vulkan objects.
+            // presentDoneEvent.Wait() ensures no present+acquire cycle is in flight, so
+            // no background call will touch a semaphore or swapchain handle after we
+            // destroy it.  The IsShutdown sentinel causes the loop to exit cleanly.
+            presentDoneEvent.Wait();
+            pendingPresentWork = new PresentWorkItem { IsShutdown = true };
+            presentReadySlim.Release();
+            asyncPresentThread.Join();
+
             Debug.Assert(submittedFences.Count == 0);
             foreach (var fence in availableSubmissionFences) DeviceApi.vkDestroyFence(fence, null);
 
@@ -2446,6 +2534,14 @@ namespace Veldrid.Vk
         {
             var vkCl = Util.AssertSubtype<CommandList, VkCommandList>(cl);
 
+            // When this command list renders into the swapchain framebuffer it needs
+            // pendingImageAvailableSemaphore to be populated (set by the background thread
+            // via NotifyImageAcquired after vkAcquireNextImageKHR completes).  Wait for the
+            // previous present+acquire cycle to finish before reading the semaphore field.
+            // Non-swapchain submits skip this wait; they do not touch pendingImageAvailableSemaphore.
+            if (vkCl.UsesSwapchainFramebuffer)
+                presentDoneEvent.Wait();
+
             // Only attach the image-available semaphore as a wait if this command list
             // actually used a VkSwapchainFramebuffer.  Non-swapchain submits (e.g.
             // VkBufferUpdateBatch / VkTextureUpdateBatch — the first submissions in
@@ -2507,62 +2603,42 @@ namespace Veldrid.Vk
         {
             var vkSc = Util.AssertSubtype<Swapchain, VkSwapchain>(swapchain);
 
+            // Wait for the previous async present+acquire cycle to complete before
+            // overwriting pendingPresentWork and touching pendingImageAvailableSemaphore.
+            // On the very first frame this returns immediately (event initialised to set).
+            presentDoneEvent.Wait();
+            presentDoneEvent.Reset();
+
             // The previous frame couldn't (re)build the swapchain (transient zero-extent
-            // surface, lost-surface waiting on host re-create, etc.). Retry the create
-            // here instead of presenting against a stale image; the next acquire will
-            // do the real work. Skipping the DeviceApi.vkQueuePresentKHR avoids feeding the
-            // driver a stale image index against a possibly-swapped-out swapchain.
+            // surface, lost-surface waiting on host re-create, etc.). Dispatch a recreation
+            // work item and return; the background thread will call RecreateAfterPresent()
+            // (which includes the acquire) and then set presentDoneEvent.
             if (vkSc.NeedsRecreation)
             {
-                vkSc.RecreateAfterPresent();
+                pendingPresentWork = new PresentWorkItem { Swapchain = vkSc, SkipPresent = true };
+                presentReadySlim.Release();
                 return;
             }
 
-            var deviceSwapchain = vkSc.DeviceSwapchain;
-            var presentInfo = new VkPresentInfoKHR();
-            presentInfo.swapchainCount = 1;
-            presentInfo.pSwapchains = &deviceSwapchain;
-            uint imageIndex = vkSc.ImageIndex;
-            presentInfo.pImageIndices = &imageIndex;
+            // Consume the leftover image-available semaphore (safety-net: frame with no
+            // swapchain draw) and the pre-signal flag on the draw thread before handing
+            // off to the background thread so there is no concurrent access to these fields.
+            var leftoverAcquireSem = pendingImageAvailableSemaphore;
+            pendingImageAvailableSemaphore = VkSemaphore.Null;
 
-            // VK_EXT_swapchain_maintenance1: chain the per-present mode override so the
-            // driver applies any pending hot-swap (vsync ↔ low-latency) without a
-            // swapchain rebuild. The pointed-to mode must remain valid until DeviceApi.vkQueuePresentKHR
-            // returns, which is satisfied by the stack-local `currentMode` below.
-            VkSwapchainPresentModeInfoKHR presentModeInfo;
-            VkPresentModeKHR currentMode;
-            if (HasSwapchainMaintenance1 && vkSc.HasPresentModeHotSwap)
-            {
-                currentMode = vkSc.CurrentPresentMode;
-                presentModeInfo = new VkSwapchainPresentModeInfoKHR();
-                presentModeInfo.swapchainCount = 1;
-                presentModeInfo.pPresentModes = &currentMode;
-                presentInfo.pNext = &presentModeInfo;
-            }
+            bool skipNullSubmit = vkSc.RenderFinishedPreSignaled
+                && leftoverAcquireSem == VkSemaphore.Null;
+            vkSc.ClearRenderFinishedSignaled();
 
-            // VK_GOOGLE_display_timing: target the next vblank slot to minimise the time
-            // the rendered image sits in the scanout buffer before the display shows it.
-            // desiredPresentTime = 0 is safe and lets the driver decide — used until
-            // at least one past present has been recorded by drainPastPresentationTimings.
-            // Stack-local structs remain valid for the duration of DeviceApi.vkQueuePresentKHR.
-            VkPresentTimesInfoGOOGLE presentTimesInfo;
-            VkPresentTimeGOOGLE presentTime;
-            if (vkSc.HasDisplayTiming)
-            {
-                presentTime = new VkPresentTimeGOOGLE
-                {
-                    presentID = vkSc.NextPresentID,
-                    desiredPresentTime = vkSc.GetDesiredPresentTime()
-                };
-                presentTimesInfo = new VkPresentTimesInfoGOOGLE();
-                presentTimesInfo.swapchainCount = 1;
-                presentTimesInfo.pTimes = &presentTime;
-                // Append after any existing pNext chain (e.g. maintenance1 mode info).
-                presentTimesInfo.pNext = presentInfo.pNext;
-                presentInfo.pNext = &presentTimesInfo;
-            }
+            // Capture display-timing state now so the background thread does not race
+            // against AdvancePresentID / GetDesiredPresentTime.
+            bool hasDisplayTiming = vkSc.HasDisplayTiming;
+            uint presentID = hasDisplayTiming ? vkSc.NextPresentID : 0;
+            ulong desiredPresentTime = hasDisplayTiming ? vkSc.GetDesiredPresentTime() : 0;
 
-            // VK_KHR_incremental_present is intentionally NOT chained here.
+            bool hasPresentModeOverride = HasSwapchainMaintenance1 && vkSc.HasPresentModeHotSwap;
+
+            // VK_KHR_incremental_present is intentionally NOT chained.
             // On Qualcomm/Adreno (vendorID 0x5143) it has been observed to deliver
             // stale tile contents after a surface rotation — the dirty-rect path
             // skips a full-frame composite that the rotated swapchain depends on.
@@ -2570,83 +2646,169 @@ namespace Veldrid.Vk
             // gate the chain on `vkSc.gd.PhysicalDeviceProperties.vendorID != 0x5143`
             // (or skip entirely on Android) before adding it back.
 
-            // Signal renderFinishedSemaphore so vkQueuePresentKHR can wait on it
-            // rather than relying on implicit driver serialisation.
-            //
-            // Fast path (same-queue only): if SubmitCommandsCore already folded the
-            // renderFinishedSemaphore signal into the swapchain CL's vkQueueSubmit, skip
-            // this null submit entirely, saving one expensive vkQueueSubmit per frame.
-            //
-            // Slow path (fallback): emit a null submit that signals the semaphore after
-            // all prior render work (FIFO ordering).  This covers:
-            //   • Frames where no swapchain CL was submitted (headless / offscreen).
-            //   • The separate-queue case (cross-queue safety requires the explicit submit).
-            //   • Any leftover pendingImageAvailableSemaphore (safety-net consume).
-            var renderFinishedSem = vkSc.RenderFinishedSemaphore;
-            var leftoverAcquireSem = pendingImageAvailableSemaphore;
-            pendingImageAvailableSemaphore = VkSemaphore.Null;
-
-            // Consume the pre-signal flag before entering the lock so the flag is
-            // always reset even if an exception escapes (swapchain recreation, etc.).
-            bool skipNullSubmit = vkSc.RenderFinishedPreSignaled
-                && leftoverAcquireSem == VkSemaphore.Null;
-            vkSc.ClearRenderFinishedSignaled();
-
-            VkResult presentResult;
-            if (vkSc.PresentQueueIndex == GraphicsQueueIndex)
+            pendingPresentWork = new PresentWorkItem
             {
-                lock (graphicsQueueLock)
-                {
-                    // Null submit on the same queue: signals the semaphore after all
-                    // previously submitted render work completes (queue FIFO ordering).
-                    // Also waits on any unconsumed image-available semaphore (safety-net).
-                    // Skipped when renderFinishedSemaphore was already pre-signalled by
-                    // SubmitCommandsCore (and no leftover acquire semaphore needs consuming),
-                    // saving one vkQueueSubmit per frame on same-queue devices (Android).
-                    if (!skipNullSubmit)
-                        signalSemaphoreOnGraphicsQueue(renderFinishedSem, leftoverAcquireSem);
+                Swapchain = vkSc,
+                SkipPresent = false,
+                SkipNullSubmit = skipNullSubmit,
+                RenderFinishedSemaphore = vkSc.RenderFinishedSemaphore,
+                LeftoverAcquireSemaphore = leftoverAcquireSem,
+                DeviceSwapchain = vkSc.DeviceSwapchain,
+                ImageIndex = vkSc.ImageIndex,
+                PresentQueue = vkSc.PresentQueue,
+                IsSameQueue = vkSc.PresentQueueIndex == GraphicsQueueIndex,
+                HasPresentModeOverride = hasPresentModeOverride,
+                PresentModeOverride = hasPresentModeOverride ? vkSc.CurrentPresentMode : default,
+                HasDisplayTiming = hasDisplayTiming,
+                PresentID = presentID,
+                DesiredPresentTime = desiredPresentTime,
+            };
 
-                    presentInfo.waitSemaphoreCount = 1;
-                    presentInfo.pWaitSemaphores = &renderFinishedSem;
-                    presentResult = DeviceApi.vkQueuePresentKHR(vkSc.PresentQueue, &presentInfo);
-                    // Advance timing state on successful presents so the next frame's
-                    // desiredPresentTime targets the correct vblank slot.
-                    if (vkSc.HasDisplayTiming
-                        && (presentResult == VkResult.Success || presentResult == VkResult.SuboptimalKHR))
+            // Wake the background thread.  The draw thread is now free to return to managed
+            // code and acknowledge any pending Android lifecycle pause/suspend signal even
+            // while vkQueuePresentKHR is executing on the background thread.
+            presentReadySlim.Release();
+        }
+
+        // Long-lived background thread that executes vkQueuePresentKHR + vkAcquireNextImageKHR
+        // on behalf of SwapBuffersCore.  Running these calls off the draw thread keeps it free
+        // to reach managed safepoints and acknowledge Android lifecycle pause signals, preventing
+        // ANR when vkQueuePresentKHR stalls (observed on Snapdragon/Samsung Android 16,
+        // sh.ppy.osulazer PID 20588, 2026-05-19, "Input dispatching timed out" with 72% kernel
+        // CPU — the driver spinning in an unresponsive vkQueuePresentKHR).
+        private unsafe void asyncPresentLoop()
+        {
+            while (true)
+            {
+                presentReadySlim.Wait();
+                var work = pendingPresentWork;
+
+                if (work.IsShutdown)
+                {
+                    presentDoneEvent.Set();
+                    return;
+                }
+
+                try
+                {
+                    if (work.SkipPresent)
                     {
-                        vkSc.AdvancePresentID();
-                        vkSc.DrainPastPresentationTimings();
+                        // NeedsRecreation path: RecreateAfterPresent() calls recreateAndReacquire
+                        // which internally calls AcquireNextImage() + NotifyImageAcquired().
+                        // Do NOT call acquireAndWaitNextImage afterwards — that would double-acquire
+                        // and leak a swapchain image (stalls vkAcquireNextImageKHR on minImageCount=2).
+                        work.Swapchain.RecreateAfterPresent();
                     }
-                    handlePresentResult(vkSc, presentResult);
+                    else
+                    {
+                        // Reconstruct the VkPresentInfoKHR pNext chain on this thread's stack.
+                        // All pointed-to structs must remain valid for the duration of
+                        // vkQueuePresentKHR, which is satisfied because they are stack-local
+                        // and vkQueuePresentKHR returns before this frame exits.
+                        var deviceSwapchain = work.DeviceSwapchain;
+                        var presentInfo = new VkPresentInfoKHR();
+                        presentInfo.swapchainCount = 1;
+                        presentInfo.pSwapchains = &deviceSwapchain;
+                        uint imageIndex = work.ImageIndex;
+                        presentInfo.pImageIndices = &imageIndex;
+
+                        // VK_EXT_swapchain_maintenance1: hot-swap present mode override.
+                        VkSwapchainPresentModeInfoKHR presentModeInfo;
+                        VkPresentModeKHR presentMode;
+                        if (work.HasPresentModeOverride)
+                        {
+                            presentMode = work.PresentModeOverride;
+                            presentModeInfo = new VkSwapchainPresentModeInfoKHR();
+                            presentModeInfo.swapchainCount = 1;
+                            presentModeInfo.pPresentModes = &presentMode;
+                            presentInfo.pNext = &presentModeInfo;
+                        }
+
+                        // VK_GOOGLE_display_timing: target the next vblank slot.
+                        // Append after any existing pNext chain (e.g. maintenance1 mode info).
+                        VkPresentTimesInfoGOOGLE presentTimesInfo;
+                        VkPresentTimeGOOGLE presentTime;
+                        if (work.HasDisplayTiming)
+                        {
+                            presentTime = new VkPresentTimeGOOGLE
+                            {
+                                presentID = work.PresentID,
+                                desiredPresentTime = work.DesiredPresentTime
+                            };
+                            presentTimesInfo = new VkPresentTimesInfoGOOGLE();
+                            presentTimesInfo.swapchainCount = 1;
+                            presentTimesInfo.pTimes = &presentTime;
+                            presentTimesInfo.pNext = presentInfo.pNext;
+                            presentInfo.pNext = &presentTimesInfo;
+                        }
+
+                        var renderFinishedSem = work.RenderFinishedSemaphore;
+                        VkResult presentResult;
+
+                        if (work.IsSameQueue)
+                        {
+                            lock (graphicsQueueLock)
+                            {
+                                // Null submit on the same queue: signals renderFinishedSemaphore
+                                // after all previously submitted render work completes (FIFO ordering).
+                                // Skipped when SubmitCommandsCore already pre-signalled it.
+                                if (!work.SkipNullSubmit)
+                                    signalSemaphoreOnGraphicsQueue(renderFinishedSem, work.LeftoverAcquireSemaphore);
+
+                                presentInfo.waitSemaphoreCount = 1;
+                                presentInfo.pWaitSemaphores = &renderFinishedSem;
+                                presentResult = DeviceApi.vkQueuePresentKHR(work.PresentQueue, &presentInfo);
+                                // Advance timing state on successful presents so the next frame's
+                                // desiredPresentTime targets the correct vblank slot.
+                                if (work.HasDisplayTiming
+                                    && (presentResult == VkResult.Success || presentResult == VkResult.SuboptimalKHR))
+                                {
+                                    work.Swapchain.AdvancePresentID();
+                                    work.Swapchain.DrainPastPresentationTimings();
+                                }
+                                handlePresentResult(work.Swapchain, presentResult);
+                            }
+                        }
+                        else
+                        {
+                            // Separate present queue: signal on the graphics queue first, then
+                            // wait on the present queue.  Cross-queue semaphore ordering is per-spec.
+                            lock (graphicsQueueLock)
+                                signalSemaphoreOnGraphicsQueue(renderFinishedSem, work.LeftoverAcquireSemaphore);
+
+                            lock (presentQueueLock)
+                            {
+                                presentInfo.waitSemaphoreCount = 1;
+                                presentInfo.pWaitSemaphores = &renderFinishedSem;
+                                presentResult = DeviceApi.vkQueuePresentKHR(work.PresentQueue, &presentInfo);
+                                if (work.HasDisplayTiming
+                                    && (presentResult == VkResult.Success || presentResult == VkResult.SuboptimalKHR))
+                                {
+                                    work.Swapchain.AdvancePresentID();
+                                    work.Swapchain.DrainPastPresentationTimings();
+                                }
+                                handlePresentResult(work.Swapchain, presentResult);
+                            }
+                        }
+
+                        // Acquire the next swapchain image.  Must happen after vkQueuePresentKHR
+                        // returns: the Vulkan spec requires external synchronisation on the
+                        // swapchain for both calls, so they must not run concurrently.
+                        // acquireAndWaitNextImage is NOT a queue operation; holding the queue
+                        // lock during it would serialise ALL queue traffic for up to 100 ms.
+                        acquireAndWaitNextImage(work.Swapchain);
+                    }
+                }
+                finally
+                {
+                    // Unblock the next SwapBuffersCore (which calls presentDoneEvent.Wait() at
+                    // its top) and any SubmitCommandsCore that needs pendingImageAvailableSemaphore.
+                    // The Set() here acts as the release fence: all writes above (including
+                    // NotifyImageAcquired's write to pendingImageAvailableSemaphore) are visible
+                    // to the draw thread once it returns from presentDoneEvent.Wait().
+                    presentDoneEvent.Set();
                 }
             }
-            else
-            {
-                // Separate present queue: signal on the graphics queue first, then wait
-                // on the present queue.  Cross-queue semaphore ordering is per-spec.
-                // The pre-signal optimisation is not used for cross-queue (see comments in
-                // SubmitCommandsCore), so this path always emits the null submit.
-                lock (graphicsQueueLock)
-                    signalSemaphoreOnGraphicsQueue(renderFinishedSem, leftoverAcquireSem);
-
-                lock (presentQueueLock)
-                {
-                    presentInfo.waitSemaphoreCount = 1;
-                    presentInfo.pWaitSemaphores = &renderFinishedSem;
-                    presentResult = DeviceApi.vkQueuePresentKHR(vkSc.PresentQueue, &presentInfo);
-                    if (vkSc.HasDisplayTiming
-                        && (presentResult == VkResult.Success || presentResult == VkResult.SuboptimalKHR))
-                    {
-                        vkSc.AdvancePresentID();
-                        vkSc.DrainPastPresentationTimings();
-                    }
-                    handlePresentResult(vkSc, presentResult);
-                }
-            }
-            // acquireAndWaitNextImage is NOT a queue operation.  Holding the queue lock
-            // while it runs would serialise ALL other queue traffic (texture-upload
-            // threads, etc.) for up to 100 ms per frame.  Keep it outside both locks.
-            acquireAndWaitNextImage(vkSc);
         }
 
         // Submits a zero-command-buffer batch that signals `signalSemaphore` on the graphics
