@@ -1230,9 +1230,12 @@ namespace Veldrid.Vk
 
                 // The graphics scan may have transitioned sampled textures to ShaderReadOnlyOptimal.
                 // If any of those textures are also used as compute storage images, the next dispatch
-                // must re-scan and transition them back to General.  Force the scan unconditionally
-                // (symmetric to graphicsForceTransitionScan being set by preDispatchCommand).
-                computeForceTransitionScan = true;
+                // must re-scan and transition them back to General.  Only force the scan when we
+                // actually emitted at least one barrier — if no transitions occurred (all textures
+                // already in the correct layout), skipping the force flag saves the next dispatch
+                // from performing an unnecessary O(sets × textures) scan.
+                if (imageBarrierBatch.Count > 0)
+                    computeForceTransitionScan = true;
             }
 
             // Emit all accumulated transitions as a single vkCmdPipelineBarrier.
@@ -1576,15 +1579,18 @@ namespace Veldrid.Vk
 
                 computeAnySetDirty = false;
                 computeForceTransitionScan = false;
+
+                // Any storage textures transitioned to General for this dispatch may be sampled by
+                // subsequent graphics draws that have the same resource sets already bound (i.e. no
+                // new SetGraphicsResourceSet call to set graphicsAnySetDirty).  Only force the
+                // next draw's transition scan when we actually emitted at least one barrier — if
+                // no transitions occurred (all textures already in the correct layout), skipping
+                // the force flag saves the next draw from performing an unnecessary O(sets × textures) scan.
+                if (imageBarrierBatch.Count > 0)
+                    graphicsForceTransitionScan = true;
             }
 
             flushTransitionBarriers();
-
-            // Any storage textures transitioned to General for this dispatch may be sampled by
-            // subsequent graphics draws that have the same resource sets already bound (i.e. no
-            // new SetGraphicsResourceSet call to set graphicsAnySetDirty).  Force the next draw's
-            // transition scan so those textures are brought back to ShaderReadOnlyOptimal.
-            graphicsForceTransitionScan = true;
 
             // Only call flushNewResourceSets when at least one compute resource set slot has changed
             // since the last dispatch.  Mirrors the graphicsAnySetsPendingBind gate in preDrawCommand.
