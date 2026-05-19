@@ -175,11 +175,12 @@ namespace Veldrid.OpenGL
             for (int i = 0; i < fences.Length; i++) events[i] = Util.AssertSubtype<Fence, OpenGLFence>(fences[i]).ResetEvent;
             bool result;
 
+            // ManualResetEvent[] is already a WaitHandle[] - no cast or allocation needed
             if (waitAll)
-                result = WaitHandle.WaitAll(events.Cast<WaitHandle>().ToArray(), msTimeout);
+                result = WaitHandle.WaitAll(events, msTimeout);
             else
             {
-                int index = WaitHandle.WaitAny(events.Cast<WaitHandle>().ToArray(), msTimeout);
+                int index = WaitHandle.WaitAny(events, msTimeout);
                 result = index != WaitHandle.WaitTimeout;
             }
 
@@ -1343,8 +1344,17 @@ namespace Veldrid.OpenGL
 
                 while (!terminated)
                 {
+                    // Batch-drain work items: blocking Take() for first item, then drain all
+                    // currently-queued items via non-blocking TryTake(). This reduces scheduler
+                    // overhead when SubmitCommandsCore() submits multiple command lists in rapid
+                    // succession (common pattern), processing them all in one scheduler quantum
+                    // rather than yielding between each. Safe for WaitForIdle / FlushAndFinish
+                    // because executeWorkItem() handles their AutoResetEvent.Set() inline.
                     var workItem = workItems.Take();
-                    executeWorkItem(workItem);
+                    do
+                    {
+                        executeWorkItem(workItem);
+                    } while (workItems.TryTake(out workItem));
                 }
             }
 
