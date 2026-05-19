@@ -624,6 +624,8 @@ namespace Veldrid.OpenGL
                 graphicsResourceSets[slot].Offsets.Dispose();
                 graphicsResourceSets[slot] = new BoundResourceSetInfo(rs, dynamicOffsetCount, ref dynamicOffsets);
                 newGraphicsResourceSets[slot] = true;
+                // Signal that at least one slot changed — preDrawCommand will call flushResourceSets.
+                graphicsAnyNewResourceSets = true;
             }
         }
 
@@ -634,6 +636,8 @@ namespace Veldrid.OpenGL
                 computeResourceSets[slot].Offsets.Dispose();
                 computeResourceSets[slot] = new BoundResourceSetInfo(rs, dynamicOffsetCount, ref dynamicOffsets);
                 newComputeResourceSets[slot] = true;
+                // Signal that at least one slot changed — preDispatchCommand will call flushResourceSets.
+                computeAnyNewResourceSets = true;
             }
         }
 
@@ -1265,7 +1269,12 @@ namespace Veldrid.OpenGL
         {
             if (!graphicsPipelineActive) activateGraphicsPipeline();
 
-            flushResourceSets(true);
+            // Only flush resource sets if any slot actually changed since the last flush.
+            // This dirty-bit gate (mirroring Vulkan's graphicsAnySetsPendingBind) skips the
+            // O(sets × elements) flushResourceSets loop entirely when the same sets are
+            // bound across consecutive draws — the common case in osu's per-frame draw loop.
+            if (graphicsAnyNewResourceSets)
+                flushResourceSets(true);
 
             if (!vertexLayoutFlushed)
             {
@@ -1294,10 +1303,14 @@ namespace Veldrid.OpenGL
             if (graphics)
             {
                 for (uint i = 0; i < sets; i++) newGraphicsResourceSets[i] = false;
+                // Clear the top-level dirty bit now that all slots have been processed.
+                graphicsAnyNewResourceSets = false;
             }
             else
             {
                 for (uint i = 0; i < sets; i++) newComputeResourceSets[i] = false;
+                // Clear the top-level dirty bit now that all slots have been processed.
+                computeAnyNewResourceSets = false;
             }
         }
 
@@ -1372,7 +1385,9 @@ namespace Veldrid.OpenGL
         {
             if (graphicsPipelineActive) activateComputePipeline();
 
-            flushResourceSets(false);
+            // Only flush resource sets if any slot actually changed since the last flush.
+            if (computeAnyNewResourceSets)
+                flushResourceSets(false);
         }
 
         private void activateGraphicsPipeline()
@@ -1383,8 +1398,10 @@ namespace Veldrid.OpenGL
             Util.EnsureArrayMinimumSize(ref graphicsResourceSets, (uint)graphicsPipeline.ResourceLayouts.Length);
             Util.EnsureArrayMinimumSize(ref newGraphicsResourceSets, (uint)graphicsPipeline.ResourceLayouts.Length);
 
-            // Force ResourceSets to be re-bound.
+            // Force ResourceSets to be re-bound (glUseProgram invalidates uniform/texture bindings).
             for (int i = 0; i < graphicsPipeline.ResourceLayouts.Length; i++) newGraphicsResourceSets[i] = true;
+            // Signal that at least one slot needs processing in preDrawCommand.
+            graphicsAnyNewResourceSets = true;
 
             // If the same pipeline is being re-activated, skip all GL state calls —
             // blend, depth, stencil, rasterizer, and shader program are unchanged.
@@ -1640,8 +1657,10 @@ namespace Veldrid.OpenGL
             Util.EnsureArrayMinimumSize(ref computeResourceSets, (uint)computePipeline.ResourceLayouts.Length);
             Util.EnsureArrayMinimumSize(ref newComputeResourceSets, (uint)computePipeline.ResourceLayouts.Length);
 
-            // Force ResourceSets to be re-bound.
+            // Force ResourceSets to be re-bound (glUseProgram invalidates uniform/texture bindings).
             for (int i = 0; i < computePipeline.ResourceLayouts.Length; i++) newComputeResourceSets[i] = true;
+            // Signal that at least one slot needs processing in preDispatchCommand.
+            computeAnyNewResourceSets = true;
 
             // Shader Set
             glUseProgram(computePipeline.Program);
@@ -1657,8 +1676,11 @@ namespace Veldrid.OpenGL
         {
             var glResourceSet = Util.AssertSubtype<ResourceSet, OpenGLResourceSet>(brsi.Set);
             var pipeline = graphics ? graphicsPipeline : computePipeline;
-            uint ubBaseIndex = getUniformBaseIndex(slot, graphics);
-            uint ssboBaseIndex = getShaderStorageBaseIndex(slot, graphics);
+
+            // O(1) prefix-sum lookups for base binding indices — the pipeline precomputes
+            // these in processResourceSetLayouts so we avoid scanning slots 0..slot-1 on every draw.
+            uint ubBaseIndex = pipeline.GetUniformBaseIndex(slot);
+            uint ssboBaseIndex = pipeline.GetSsboBaseIndex(slot);
 
             uint ubOffset = 0;
             uint ssboOffset = 0;
@@ -1681,6 +1703,10 @@ namespace Veldrid.OpenGL
                 {
                     case ResourceKind.UniformBuffer:
                     {
+                        // Skip binding if this slot's ResourceSet hasn't changed since the last flush.
+                        // After glUseProgram (which happens in activateGraphicsPipeline), all slots
+                        // are marked new so bindings are re-established on the first draw with a
+                        // new/changed pipeline.
                         if (!isNew) continue;
 
                         var range = Util.GetBufferRange(resource, bufferOffset);
@@ -1760,6 +1786,14 @@ namespace Veldrid.OpenGL
                     }
 
                     case ResourceKind.TextureReadOnly:
+                    {
+                        // Skip texture binding if this slot's ResourceSet hasn't changed.
+                        // Safe because: (1) isNew is set when the ResourceSet OBJECT changes, and
+                        // (2) activateGraphicsPipeline marks ALL slots new after glUseProgram so
+                        // texture unit assignments are re-established on the first draw with any
+                        // new or changed pipeline.
+                        if (!isNew) continue;
+
                         var texView = Util.GetTextureView(gd, resource);
                         var glTexView = Util.AssertSubtype<TextureView, OpenGLTextureView>(texView);
                         glTexView.EnsureResourcesCreated();
@@ -1772,8 +1806,12 @@ namespace Veldrid.OpenGL
                         }
 
                         break;
+                    }
 
                     case ResourceKind.TextureReadWrite:
+                    {
+                        if (!isNew) continue;
+
                         var texViewRw = Util.GetTextureView(gd, resource);
                         var glTexViewRw = Util.AssertSubtype<TextureView, OpenGLTextureView>(texViewRw);
                         glTexViewRw.EnsureResourcesCreated();
@@ -1818,8 +1856,13 @@ namespace Veldrid.OpenGL
                         }
 
                         break;
+                    }
 
                     case ResourceKind.Sampler:
+                    {
+                        // Skip sampler binding if this slot's ResourceSet hasn't changed.
+                        if (!isNew) continue;
+
                         var glSampler = Util.AssertSubtype<IBindableResource, OpenGLSampler>(resource);
                         glSampler.EnsureResourcesCreated();
 
@@ -1829,28 +1872,11 @@ namespace Veldrid.OpenGL
                         }
 
                         break;
+                    }
 
                     default: throw Illegal.Value<ResourceKind>();
                 }
             }
-        }
-
-        private uint getUniformBaseIndex(uint slot, bool graphics)
-        {
-            var pipeline = graphics ? graphicsPipeline : computePipeline;
-            uint ret = 0;
-            for (uint i = 0; i < slot; i++) ret += pipeline.GetUniformBufferCount(i);
-
-            return ret;
-        }
-
-        private uint getShaderStorageBaseIndex(uint slot, bool graphics)
-        {
-            var pipeline = graphics ? graphicsPipeline : computePipeline;
-            uint ret = 0;
-            for (uint i = 0; i < slot; i++) ret += pipeline.GetShaderStorageBufferCount(i);
-
-            return ret;
         }
 
         private TextureTarget getCubeTarget(uint arrayLayer)
